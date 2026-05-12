@@ -30,6 +30,10 @@ class SubtitleRules:
     min_gap: float = 0.08
     max_chars_per_line: int = 42
     max_lines: int = 2
+    pause_split_threshold: float = 0.55
+    strong_pause_split_threshold: float = 1.2
+    sentence_split_min_chars: int = 8
+    max_internal_silence: float = 1.2
 
 
 @dataclass(slots=True)

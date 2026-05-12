@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import traceback
 from dataclasses import asdict
@@ -21,6 +22,7 @@ CONFIG_PATH = BASE_DIR / "ui_config.json"
 ERROR_LOG_PATH = BASE_DIR / "ui_server_error_trace.log"
 SERVER_VERSION = "20260513-ui-upload-v2"
 SERVER_PORT = 8777
+DEFAULT_HTTP_PROXY = "http://127.0.0.1:7890"
 
 DEFAULT_CONFIG = {
     "src_lang": "en",
@@ -63,6 +65,12 @@ def append_error_log(message: str) -> None:
     with ERROR_LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(message)
         handle.write("\n\n")
+
+
+def ensure_proxy_environment() -> None:
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        if not os.environ.get(key):
+            os.environ[key] = DEFAULT_HTTP_PROXY
 
 
 def list_input_videos() -> list[dict]:
@@ -364,6 +372,7 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
     WEB_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_proxy_environment()
     server = ThreadingHTTPServer(("127.0.0.1", SERVER_PORT), UIServerHandler)
     print(f"UI server running at http://127.0.0.1:{SERVER_PORT}")
     server.serve_forever()

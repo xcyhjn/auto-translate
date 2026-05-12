@@ -4,6 +4,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
+import tempfile
 
 from .asr import transcribe_audio
 from .media import extract_audio, merge_video_with_audio, probe_media, run_command
@@ -53,6 +54,14 @@ def burn_subtitle(
         args.extend(["-t", str(preview_seconds)])
     args.extend(["-vf", subtitle_filter, "-c:a", "copy", str(output_path)])
     run_command(args)
+
+
+def create_safe_ass_copy(subtitle_path: Path) -> Path:
+    temp_dir = Path(tempfile.gettempdir()) / "autosub_zh_burn"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    safe_path = temp_dir / "08_bilingual_safe.ass"
+    safe_path.write_text(subtitle_path.read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
+    return safe_path
 
 
 def resolve_output_dir(input_path: Path, output_root: Path) -> Path:
@@ -173,7 +182,9 @@ def run_pipeline(
     if report.has_blocking_errors:
         raise RuntimeError("QA failed. See 07_qa_report.json")
 
-    write_bilingual_ass(translated_segments, output_dir / "08_bilingual_zh_en.ass", style=bilingual_style)
+    ass_path = output_dir / "08_bilingual_zh_en.ass"
+    write_bilingual_ass(translated_segments, ass_path, style=bilingual_style)
+    safe_ass_path = create_safe_ass_copy(ass_path)
     output_video_name = (
         f"09_burned_bilingual_preview_{preview_seconds}s.mp4"
         if preview_seconds is not None
@@ -182,7 +193,7 @@ def run_pipeline(
     output_video_path = output_dir / output_video_name
     burn_subtitle(
         input_path,
-        output_dir / "08_bilingual_zh_en.ass",
+        safe_ass_path,
         output_video_path,
         preview_seconds=preview_seconds,
     )
@@ -203,6 +214,7 @@ def run_pipeline(
             "06_translated_zh.srt",
             "07_qa_report.json",
             "08_bilingual_zh_en.ass",
+            "08_bilingual_safe.ass",
             output_video_name,
         ],
     }

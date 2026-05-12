@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict
+from pathlib import Path
 
 from .models import BilingualSubtitleStyle
 from .pipeline_core import resolve_output_dir, run_pipeline
@@ -40,6 +41,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    input_path = args.input
+    output_root = args.output_root
     style = BilingualSubtitleStyle(
         zh_font_size=args.zh_font_size,
         zh_margin_l=args.zh_margin_l,
@@ -51,8 +54,8 @@ def main() -> None:
         en_margin_v=args.en_margin_v,
     )
     manifest = run_pipeline(
-        input_path=args.input,
-        output_root=args.output_root,
+        input_path=input_path,
+        output_root=output_root,
         src_lang=args.src_lang,
         dst_lang=args.dst_lang,
         model=args.model,
@@ -69,7 +72,7 @@ def main() -> None:
         bilingual_style=style,
     )
     manifest["bilingual_style"] = asdict(style)
-    manifest["resolved_output_dir"] = str(resolve_output_dir(args.input, args.output_root))
+    manifest["resolved_output_dir"] = str(resolve_output_dir(Path(input_path), Path(output_root)))
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
 
 

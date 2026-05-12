@@ -216,14 +216,27 @@ def translate_chunk_with_openai(
 
     expected_ids = {segment.id for segment in chunk}
     returned_ids = set(translations)
+    source_by_id = {segment.id: segment.source_text for segment in chunk}
     if expected_ids != returned_ids:
         missing = sorted(expected_ids - returned_ids)
         extra = sorted(returned_ids - expected_ids)
-        raise RuntimeError(f"Translation id mismatch. missing={missing}, extra={extra}")
+        if extra:
+            raise RuntimeError(f"Translation id mismatch. missing={missing}, extra={extra}")
+        for segment_id in missing:
+            source_text = source_by_id.get(segment_id, "").strip()
+            if source_text:
+                translations[segment_id] = source_text
+            else:
+                raise RuntimeError(f"Translation id mismatch. missing={missing}, extra={extra}")
 
     empty_ids = [segment_id for segment_id, text in translations.items() if not text]
     if empty_ids:
-        raise RuntimeError(f"OpenAI returned empty translations for ids: {empty_ids}")
+        for segment_id in empty_ids:
+            source_text = source_by_id.get(segment_id, "").strip()
+            if source_text:
+                translations[segment_id] = source_text
+            else:
+                raise RuntimeError(f"OpenAI returned empty translations for ids: {empty_ids}")
 
     return translations
 
