@@ -16,44 +16,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("output_root", help="输出根目录。")
     parser.add_argument("--src-lang", default="en", help="源语言代码。")
     parser.add_argument("--dst-lang", default="zh-Hans", help="目标语言代码。")
-    parser.add_argument("--model", default="tiny", help="faster-whisper 模型名。")
+    parser.add_argument("--model", default="distil-large-v3", help="faster-whisper 模型名。")
     parser.add_argument("--device", default="cpu", help="ASR 设备。")
     parser.add_argument("--compute-type", default="int8", help="ASR 计算类型。")
     parser.add_argument("--beam-size", type=int, default=5, help="ASR beam size。")
-    parser.add_argument(
-        "--translation-model",
-        default="gpt-5.4-mini",
-        help="翻译使用的 OpenAI 兼容模型名。",
-    )
-    parser.add_argument(
-        "--translation-chunk-size",
-        type=int,
-        default=40,
-        help="每次翻译的字幕行数。",
-    )
-    parser.add_argument(
-        "--translation-retries",
-        type=int,
-        default=2,
-        help="翻译分块失败时的重试次数。",
-    )
-    parser.add_argument(
-        "--openai-base-url",
-        default=None,
-        help="OpenAI 兼容中转地址；不填则读取环境变量。",
-    )
+    parser.add_argument("--translation-model", default="gpt-5.4-mini", help="翻译使用的 OpenAI 兼容模型名。")
+    parser.add_argument("--translation-chunk-size", type=int, default=40, help="每次翻译的字幕行数。")
+    parser.add_argument("--translation-retries", type=int, default=2, help="翻译分块失败时的重试次数。")
+    parser.add_argument("--openai-base-url", default=None, help="OpenAI 兼容中转地址；不填则读取环境变量。")
     parser.add_argument("--audio-override", default=None, help="为无声视频追加的外部音频文件路径。")
-    parser.add_argument(
-        "--load-existing-segments",
-        action="store_true",
-        help="直接读取视频同名输出子目录中的已有阶段文件，跳过 probe、抽音频、ASR 和翻译。",
-    )
-    parser.add_argument(
-        "--preview-seconds",
-        type=int,
-        default=None,
-        help="只输出前 N 秒的烧录预览视频。",
-    )
+    parser.add_argument("--load-existing-segments", action="store_true", help="读取已有阶段文件，跳过 probe、抽音频、ASR 和翻译。")
+    parser.add_argument("--preview-seconds", type=int, default=None, help="只输出前 N 秒的烧录预览视频。")
     parser.add_argument("--zh-font-size", type=int, default=64, help="中文字幕字号。")
     parser.add_argument("--zh-margin-l", type=int, default=90, help="中文字幕左边距。")
     parser.add_argument("--zh-margin-r", type=int, default=90, help="中文字幕右边距。")

@@ -72,7 +72,7 @@ def run_pipeline(
     output_root: Path,
     src_lang: str = "en",
     dst_lang: str = "zh-Hans",
-    model: str = "tiny",
+    model: str = "distil-large-v3",
     device: str = "cpu",
     compute_type: str = "int8",
     beam_size: int = 5,

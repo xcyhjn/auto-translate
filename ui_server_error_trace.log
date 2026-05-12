@@ -12,3 +12,97 @@ Traceback (most recent call last):
 KeyError: 'video_name'
 
 
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 456, in do_POST
+    self._json_response({"ok": True, "opened": opened})
+  File "D:\桌面\autosub_zh\ui_server.py", line 328, in _json_response
+    self.send_response(status)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 501, in send_response
+    self.log_request(code)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 553, in log_request
+    self.log_message('"%s" %s %s',
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 596, in log_message
+    sys.stderr.write("%s - - [%s] %s\n" %
+OSError: [Errno 22] Invalid argument
+
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 348, in do_GET
+    self._json_response(
+  File "D:\桌面\autosub_zh\ui_server.py", line 328, in _json_response
+    self.send_response(status)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 501, in send_response
+    self.log_request(code)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 553, in log_request
+    self.log_message('"%s" %s %s',
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 596, in log_message
+    sys.stderr.write("%s - - [%s] %s\n" %
+OSError: [Errno 22] Invalid argument
+
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 348, in do_GET
+    self._json_response(
+  File "D:\桌面\autosub_zh\ui_server.py", line 328, in _json_response
+    self.send_response(status)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 501, in send_response
+    self.log_request(code)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 553, in log_request
+    self.log_message('"%s" %s %s',
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 596, in log_message
+    sys.stderr.write("%s - - [%s] %s\n" %
+OSError: [Errno 22] Invalid argument
+
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 456, in do_POST
+    self._json_response({"ok": True, "audio": audio, "audios": collect_audios()})
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\ui_server.py", line 328, in _json_response
+    # 这里静音默认访问日志，避免请求成功后在日志阶段把连接打断。
+    ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 501, in send_response
+    self.log_request(code)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 553, in log_request
+    self.log_message('"%s" %s %s',
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\http\server.py", line 596, in log_message
+    sys.stderr.write("%s - - [%s] %s\n" %
+OSError: [Errno 22] Invalid argument
+
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 204, in run_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\pipeline_core.py", line 135, in run_pipeline
+    raw_segments = transcribe_audio(
+                   ^^^^^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\asr.py", line 33, in transcribe_audio
+    model = WhisperModel(model_name, device=device, compute_type=compute_type)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\faster_whisper\transcribe.py", line 689, in __init__
+    self.model = ctranslate2.models.Whisper(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Invalid compute type: floar16
+
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 204, in run_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\pipeline_core.py", line 135, in run_pipeline
+    raw_segments = transcribe_audio(
+                   ^^^^^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\asr.py", line 47, in transcribe_audio
+    for idx, item in enumerate(result_segments, start=1):
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\faster_whisper\transcribe.py", line 1851, in restore_speech_timestamps
+    for segment in segments:
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\faster_whisper\transcribe.py", line 1190, in generate_segments
+    encoder_output = self.encode(segment)
+                     ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\faster_whisper\transcribe.py", line 1400, in encode
+    return self.model.encode(features, to_cpu=to_cpu)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Library cublas64_12.dll is not found or cannot be loaded
+
+

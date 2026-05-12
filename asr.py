@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from .models import Segment, Word
 from .utils import normalize_text
+
+
+CUDA_BIN_DIR = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin"
+
+
+def ensure_cuda_runtime_on_path() -> None:
+    if os.path.isdir(CUDA_BIN_DIR):
+        current_path = os.environ.get("PATH", "")
+        if CUDA_BIN_DIR not in current_path.split(";"):
+            os.environ["PATH"] = CUDA_BIN_DIR + ";" + current_path
 
 
 def transcribe_audio(
@@ -18,6 +29,9 @@ def transcribe_audio(
     beam_size: int = 5,
     vad_filter: bool = True,
 ) -> list[Segment]:
+    if device == "cuda":
+        ensure_cuda_runtime_on_path()
+
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:

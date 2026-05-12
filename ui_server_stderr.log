@@ -366,3 +366,12 @@
 127.0.0.1 - - [13/May/2026 04:26:07] "GET /api/state HTTP/1.1" 200 -
 127.0.0.1 - - [13/May/2026 04:26:09] "GET /api/state HTTP/1.1" 200 -
 127.0.0.1 - - [13/May/2026 04:26:43] "GET /api/state HTTP/1.1" 200 -
+127.0.0.1 - - [13/May/2026 04:27:43] "GET /api/state HTTP/1.1" 200 -
+127.0.0.1 - - [13/May/2026 04:28:43] "GET /api/state HTTP/1.1" 200 -
+127.0.0.1 - - [13/May/2026 04:30:16] "POST /api/open-output HTTP/1.1" 404 -
+127.0.0.1 - - [13/May/2026 04:30:18] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [13/May/2026 04:33:15] "POST /api/open-output HTTP/1.1" 404 -
+127.0.0.1 - - [13/May/2026 04:33:27] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [13/May/2026 04:34:43] "POST /api/open-output HTTP/1.1" 404 -
+127.0.0.1 - - [13/May/2026 04:35:41] "GET /api/bootstrap HTTP/1.1" 200 -
+127.0.0.1 - - [13/May/2026 04:38:57] "POST /api/open-output HTTP/1.1" 404 -

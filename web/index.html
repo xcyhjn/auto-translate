@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Autosub Studio</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260513b" />
   </head>
   <body>
     <div class="app-shell">
@@ -42,10 +42,13 @@
           <div class="topbar-actions">
             <button id="pickInputBtn" class="ghost-btn">添加 Input</button>
             <button id="pickAudioBtn" class="ghost-btn">追加 MP3</button>
+            <button id="previewBtn" class="ghost-btn">生成 60s 预览</button>
             <button id="openOutputBtn" class="ghost-btn">打开 Output</button>
             <button id="saveConfigBtn" class="ghost-btn">保存配置</button>
             <button id="runBtn" class="primary-btn">启动流程</button>
           </div>
+          <input id="videoFileInput" type="file" accept=".mp4,.mkv,.mov,.avi,.webm" class="hidden-file-input" />
+          <input id="audioFileInput" type="file" accept=".mp3,.wav,.m4a,.aac,.flac" class="hidden-file-input" />
         </header>
 
         <section class="panel-grid">
@@ -106,7 +109,7 @@
                   <label><span>运行设备</span><input id="device" type="text" /></label>
                   <label><span>计算类型</span><input id="compute_type" type="text" /></label>
                   <label><span>Beam Size</span><input id="beam_size" type="number" /></label>
-                  <label><span>预览秒数</span><input id="preview_seconds" type="number" /></label>
+                  <label><span>调试预览秒数</span><input id="preview_seconds" type="number" /></label>
                 </div>
               </section>
 
@@ -184,6 +187,6 @@
       </main>
     </div>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=20260513b"></script>
   </body>
   </html>

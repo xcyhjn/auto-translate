@@ -240,36 +240,51 @@ function bindTabs() {
 }
 
 function bindActions() {
-  const pickInput = () => {
-    fetch("/api/pick-input", {
+  const uploadFile = async (endpoint, file) => {
+    const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    })
-      .then((res) => res.json())
-      .then((payload) => {
-        if (!payload.ok || payload.cancelled) return;
-        renderVideos(payload.videos);
-        state.selectedVideo = payload.video;
-        el("selectedVideoName").textContent = payload.video.name;
-        el("selectedVideoMeta").textContent = `输入路径：${payload.video.path}`;
-        renderVideos(payload.videos);
-      });
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-Filename": encodeURIComponent(file.name),
+      },
+      body: await file.arrayBuffer(),
+    });
+    return response.json();
+  };
+
+  const videoInput = el("videoFileInput");
+  const audioInput = el("audioFileInput");
+
+  const pickInput = () => {
+    videoInput.value = "";
+    videoInput.click();
   };
 
   const pickAudio = () => {
-    fetch("/api/pick-audio", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    })
-      .then((res) => res.json())
-      .then((payload) => {
-        if (!payload.ok || payload.cancelled) return;
-        el("audio_override_path").value = payload.audio.path;
-        setLinkedAudioLabel(payload.audio.path);
-      });
+    audioInput.value = "";
+    audioInput.click();
   };
+
+  videoInput.addEventListener("change", async () => {
+    const file = videoInput.files?.[0];
+    if (!file) return;
+    const payload = await uploadFile("/api/upload-video", file);
+    if (!payload.ok) return;
+    renderVideos(payload.videos);
+    state.selectedVideo = payload.video;
+    el("selectedVideoName").textContent = payload.video.name;
+    el("selectedVideoMeta").textContent = `输入路径：${payload.video.path}`;
+    renderVideos(payload.videos);
+  });
+
+  audioInput.addEventListener("change", async () => {
+    const file = audioInput.files?.[0];
+    if (!file) return;
+    const payload = await uploadFile("/api/upload-audio", file);
+    if (!payload.ok) return;
+    el("audio_override_path").value = payload.audio.path;
+    setLinkedAudioLabel(payload.audio.path);
+  });
 
   const openOutput = () => {
     const projectPath = state.selectedProject?.path || state.projects[0]?.path || null;
@@ -280,10 +295,25 @@ function bindActions() {
     });
   };
 
+  const runPipeline = (previewSeconds = null) => {
+    if (!state.selectedVideo) return;
+    const config = readFormConfig();
+    config.preview_seconds = previewSeconds;
+    fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        video_path: state.selectedVideo.path,
+        config,
+      }),
+    });
+  };
+
   el("pickInputBtn").addEventListener("click", pickInput);
   el("pickInputInlineBtn").addEventListener("click", pickInput);
   el("pickAudioBtn").addEventListener("click", pickAudio);
   el("pickAudioInlineBtn").addEventListener("click", pickAudio);
+  el("previewBtn").addEventListener("click", () => runPipeline(60));
   el("openOutputBtn").addEventListener("click", openOutput);
   el("openOutputInlineBtn").addEventListener("click", openOutput);
 
@@ -296,18 +326,7 @@ function bindActions() {
     });
   });
 
-  el("runBtn").addEventListener("click", () => {
-    if (!state.selectedVideo) return;
-    const config = readFormConfig();
-    fetch("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        video_path: state.selectedVideo.path,
-        config,
-      }),
-    });
-  });
+  el("runBtn").addEventListener("click", () => runPipeline(null));
 }
 
 bindTabs();

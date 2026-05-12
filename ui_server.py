@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import threading
 import traceback
 from dataclasses import asdict
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .models import BilingualSubtitleStyle
 from .pipeline_core import run_pipeline
@@ -16,14 +15,17 @@ from .pipeline_core import run_pipeline
 BASE_DIR = Path(__file__).resolve().parent
 INPUT_DIR = BASE_DIR / "input"
 OUTPUT_DIR = BASE_DIR / "output"
+ATTACHMENTS_DIR = BASE_DIR / "attachments"
 WEB_DIR = BASE_DIR / "web"
 CONFIG_PATH = BASE_DIR / "ui_config.json"
 ERROR_LOG_PATH = BASE_DIR / "ui_server_error_trace.log"
+SERVER_VERSION = "20260513-ui-upload-v2"
+SERVER_PORT = 8777
 
 DEFAULT_CONFIG = {
     "src_lang": "en",
     "dst_lang": "zh-Hans",
-    "model": "tiny",
+    "model": "distil-large-v3",
     "device": "cpu",
     "compute_type": "int8",
     "beam_size": 5,
@@ -33,7 +35,7 @@ DEFAULT_CONFIG = {
     "openai_base_url": "",
     "audio_override_path": "",
     "load_existing_segments": True,
-    "preview_seconds": 60,
+    "preview_seconds": None,
     "style": asdict(BilingualSubtitleStyle()),
 }
 
@@ -43,8 +45,6 @@ STATE = {
     "history": [],
     "last_manifest": None,
     "last_error": None,
-    "imported_videos": [],
-    "imported_audios": [],
 }
 STATE_LOCK = threading.Lock()
 
@@ -76,24 +76,27 @@ def list_input_videos() -> list[dict]:
                     "stem": path.stem,
                     "path": str(path),
                     "size": path.stat().st_size,
+                    "external": False,
                 }
             )
     return videos
 
 
-def collect_videos() -> list[dict]:
-    builtin = list_input_videos()
-    imported = STATE.get("imported_videos", [])
-    seen = {video["path"] for video in builtin}
-    merged = builtin[:]
-    for video in imported:
-        if video["path"] not in seen:
-            merged.append(video)
-    return merged
-
-
-def collect_audios() -> list[dict]:
-    return STATE.get("imported_audios", [])
+def list_audio_files() -> list[dict]:
+    ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    audios = []
+    for path in sorted(ATTACHMENTS_DIR.iterdir()):
+        if path.is_file() and path.suffix.lower() in {".mp3", ".wav", ".m4a", ".aac", ".flac"}:
+            audios.append(
+                {
+                    "name": path.name,
+                    "stem": path.stem,
+                    "path": str(path),
+                    "size": path.stat().st_size,
+                    "external": False,
+                }
+            )
+    return audios
 
 
 def read_output_tree() -> list[dict]:
@@ -116,90 +119,33 @@ def read_output_tree() -> list[dict]:
     return projects
 
 
-def pick_input_video() -> dict | None:
-    command = [
-        "powershell",
-        "-NoProfile",
-        "-Command",
-        (
-            "Add-Type -AssemblyName System.Windows.Forms; "
-            "$dialog = New-Object System.Windows.Forms.OpenFileDialog; "
-            "$dialog.Filter = 'Video Files|*.mp4;*.mkv;*.mov;*.avi;*.webm|All Files|*.*'; "
-            "$dialog.Multiselect = $false; "
-            "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { "
-            "Write-Output $dialog.FileName }"
-        ),
-    ]
-    completed = subprocess.run(
-        command,
-        check=False,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    chosen = (completed.stdout or "").strip()
-    if not chosen:
-        return None
-    path = Path(chosen)
+def safe_filename(name: str) -> str:
+    cleaned = Path(name).name.strip()
+    return cleaned or "upload.bin"
+
+
+def unique_destination(directory: Path, filename: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    candidate = directory / safe_filename(filename)
+    stem = candidate.stem
+    suffix = candidate.suffix
+    index = 1
+    while candidate.exists():
+        candidate = directory / f"{stem}_{index}{suffix}"
+        index += 1
+    return candidate
+
+
+def save_uploaded_file(target_dir: Path, filename: str, data: bytes) -> dict:
+    destination = unique_destination(target_dir, filename)
+    destination.write_bytes(data)
     return {
-        "name": path.name,
-        "stem": path.stem,
-        "path": str(path),
-        "size": path.stat().st_size,
-        "external": True,
+        "name": destination.name,
+        "stem": destination.stem,
+        "path": str(destination),
+        "size": destination.stat().st_size,
+        "external": False,
     }
-
-
-def pick_audio_file() -> dict | None:
-    command = [
-        "powershell",
-        "-NoProfile",
-        "-Command",
-        (
-            "Add-Type -AssemblyName System.Windows.Forms; "
-            "$dialog = New-Object System.Windows.Forms.OpenFileDialog; "
-            "$dialog.Filter = 'Audio Files|*.mp3;*.wav;*.m4a;*.aac;*.flac|All Files|*.*'; "
-            "$dialog.Multiselect = $false; "
-            "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { "
-            "Write-Output $dialog.FileName }"
-        ),
-    ]
-    completed = subprocess.run(
-        command,
-        check=False,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    chosen = (completed.stdout or "").strip()
-    if not chosen:
-        return None
-    path = Path(chosen)
-    return {
-        "name": path.name,
-        "stem": path.stem,
-        "path": str(path),
-        "size": path.stat().st_size,
-        "external": True,
-    }
-
-
-def register_imported_video(video: dict) -> None:
-    with STATE_LOCK:
-        imported = STATE["imported_videos"]
-        if all(item["path"] != video["path"] for item in imported):
-            imported.append(video)
-
-
-def register_imported_audio(audio: dict) -> None:
-    with STATE_LOCK:
-        imported = STATE["imported_audios"]
-        if all(item["path"] != audio["path"] for item in imported):
-            imported.append(audio)
 
 
 def open_output_in_explorer(project_path: str | None) -> str:
@@ -229,6 +175,8 @@ def open_output_in_explorer(project_path: str | None) -> str:
         if mp4_files:
             selected_path = mp4_files[-1]
 
+    import subprocess
+
     if selected_path is not None:
         subprocess.run(["explorer.exe", "/select,", str(selected_path)], check=False)
         return str(selected_path)
@@ -245,7 +193,6 @@ def append_history(stage: str, payload: dict) -> None:
 
 
 def run_pipeline_job(video_path: str, config: dict) -> None:
-    input_path = Path(video_path)
     style = BilingualSubtitleStyle(**config["style"])
     try:
         with STATE_LOCK:
@@ -255,7 +202,7 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
             STATE["last_error"] = None
 
         manifest = run_pipeline(
-            input_path=input_path,
+            input_path=video_path,
             output_root=OUTPUT_DIR,
             src_lang=config["src_lang"],
             dst_lang=config["dst_lang"],
@@ -286,11 +233,15 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
                 "message": str(exc),
                 "traceback": traceback.format_exc(),
             }
+        append_error_log(traceback.format_exc())
 
 
 class UIServerHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_DIR), **kwargs)
+
+    def log_message(self, format: str, *args) -> None:
+        return
 
     def _json_response(self, payload: dict, status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -302,13 +253,7 @@ class UIServerHandler(SimpleHTTPRequestHandler):
 
     def _error_response(self, exc: Exception) -> None:
         append_error_log(traceback.format_exc())
-        self._json_response(
-            {
-                "error": str(exc),
-                "traceback": traceback.format_exc(),
-            },
-            status=500,
-        )
+        self._json_response({"error": str(exc), "traceback": traceback.format_exc()}, status=500)
 
     def do_GET(self) -> None:
         try:
@@ -316,8 +261,9 @@ class UIServerHandler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/bootstrap":
                 self._json_response(
                     {
-                        "videos": collect_videos(),
-                        "audios": collect_audios(),
+                        "server_version": SERVER_VERSION,
+                        "videos": list_input_videos(),
+                        "audios": list_audio_files(),
                         "projects": read_output_tree(),
                         "config": read_config(),
                         "state": STATE,
@@ -328,10 +274,11 @@ class UIServerHandler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/state":
                 self._json_response(
                     {
-                        "state": STATE,
+                        "server_version": SERVER_VERSION,
+                        "videos": list_input_videos(),
+                        "audios": list_audio_files(),
                         "projects": read_output_tree(),
-                        "videos": collect_videos(),
-                        "audios": collect_audios(),
+                        "state": STATE,
                     }
                 )
                 return
@@ -343,12 +290,7 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 if not target.exists() or not target.is_file():
                     self._json_response({"error": "file not found"}, status=404)
                     return
-                self._json_response(
-                    {
-                        "path": str(target),
-                        "content": target.read_text(encoding="utf-8", errors="replace"),
-                    }
-                )
+                self._json_response({"path": str(target), "content": target.read_text(encoding="utf-8", errors="replace")})
                 return
 
             if parsed.path.startswith("/output/"):
@@ -379,30 +321,25 @@ class UIServerHandler(SimpleHTTPRequestHandler):
             parsed = urlparse(self.path)
             content_length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(content_length) if content_length else b"{}"
-            payload = json.loads(raw.decode("utf-8"))
+
+            if parsed.path == "/api/upload-video":
+                filename = unquote(self.headers.get("X-Filename", "upload.mp4"))
+                video = save_uploaded_file(INPUT_DIR, filename, raw)
+                self._json_response({"ok": True, "video": video, "videos": list_input_videos()})
+                return
+
+            if parsed.path == "/api/upload-audio":
+                filename = unquote(self.headers.get("X-Filename", "upload.mp3"))
+                audio = save_uploaded_file(ATTACHMENTS_DIR, filename, raw)
+                self._json_response({"ok": True, "audio": audio, "audios": list_audio_files()})
+                return
+
+            payload = json.loads(raw.decode("utf-8")) if raw else {}
 
             if parsed.path == "/api/save-config":
                 config = {**read_config(), **payload}
                 write_config(config)
                 self._json_response({"ok": True, "config": config})
-                return
-
-            if parsed.path == "/api/pick-input":
-                video = pick_input_video()
-                if video is None:
-                    self._json_response({"ok": False, "cancelled": True})
-                    return
-                register_imported_video(video)
-                self._json_response({"ok": True, "video": video, "videos": collect_videos()})
-                return
-
-            if parsed.path == "/api/pick-audio":
-                audio = pick_audio_file()
-                if audio is None:
-                    self._json_response({"ok": False, "cancelled": True})
-                    return
-                register_imported_audio(audio)
-                self._json_response({"ok": True, "audio": audio, "audios": collect_audios()})
                 return
 
             if parsed.path == "/api/open-output":
@@ -412,8 +349,7 @@ class UIServerHandler(SimpleHTTPRequestHandler):
 
             if parsed.path == "/api/run":
                 config = {**read_config(), **payload.get("config", {})}
-                video_path = payload["video_path"]
-                thread = threading.Thread(target=run_pipeline_job, args=(video_path, config), daemon=True)
+                thread = threading.Thread(target=run_pipeline_job, args=(payload["video_path"], config), daemon=True)
                 thread.start()
                 self._json_response({"ok": True})
                 return
@@ -426,9 +362,10 @@ class UIServerHandler(SimpleHTTPRequestHandler):
 def main() -> None:
     INPUT_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
     WEB_DIR.mkdir(parents=True, exist_ok=True)
-    server = ThreadingHTTPServer(("127.0.0.1", 8765), UIServerHandler)
-    print("UI server running at http://127.0.0.1:8765")
+    server = ThreadingHTTPServer(("127.0.0.1", SERVER_PORT), UIServerHandler)
+    print(f"UI server running at http://127.0.0.1:{SERVER_PORT}")
     server.serve_forever()
 
 
