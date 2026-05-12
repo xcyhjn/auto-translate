@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Autosub Studio</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">A</div>
+          <div>
+            <div class="brand-name">Autosub Studio</div>
+            <div class="brand-sub">本地化控制台</div>
+          </div>
+        </div>
+
+        <nav class="nav-group">
+          <div class="nav-title">Workspace</div>
+          <button class="nav-item active" data-panel="recognition">识别设置</button>
+          <button class="nav-item" data-panel="translation">翻译设置</button>
+          <button class="nav-item" data-panel="subtitle">字幕样式</button>
+          <button class="nav-item" data-panel="outputs">项目产物</button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="mini-stat">
+            <span>Server</span>
+            <strong id="serverState">Idle</strong>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-shell">
+        <header class="topbar">
+          <div>
+            <h1>自动翻译打轴平台</h1>
+            <p>可视化编排本地识别、翻译、双语字幕和烧录工作流，也支持给无声视频追加外部 MP3。</p>
+          </div>
+          <div class="topbar-actions">
+            <button id="pickInputBtn" class="ghost-btn">添加 Input</button>
+            <button id="pickAudioBtn" class="ghost-btn">追加 MP3</button>
+            <button id="openOutputBtn" class="ghost-btn">打开 Output</button>
+            <button id="saveConfigBtn" class="ghost-btn">保存配置</button>
+            <button id="runBtn" class="primary-btn">启动流程</button>
+          </div>
+        </header>
+
+        <section class="panel-grid">
+          <section class="hero-panel">
+            <div class="hero-copy">
+              <div class="eyebrow">Project</div>
+              <h2 id="selectedVideoName">未选择视频</h2>
+              <p id="selectedVideoMeta">从列表中选择一个视频，或点击顶部按钮从资源管理器导入，然后启动流程。</p>
+              <div class="linked-audio" id="linkedAudioLabel">当前附加音频：未设置</div>
+            </div>
+            <div class="hero-status">
+              <div class="status-pill" id="runStatePill">空闲</div>
+              <div class="status-stage" id="currentStageLabel">当前阶段：idle</div>
+            </div>
+          </section>
+
+          <section class="card video-picker">
+            <div class="card-head">
+              <h3>输入视频</h3>
+              <span>Input</span>
+            </div>
+            <div class="card-toolbar">
+              <button id="pickInputInlineBtn" class="mini-btn">从文件管理器添加视频</button>
+            </div>
+            <div id="videoList" class="video-list"></div>
+          </section>
+
+          <section class="card stage-feed">
+            <div class="card-head">
+              <h3>阶段进度</h3>
+              <span>Pipeline</span>
+            </div>
+            <div class="card-toolbar">
+              <button id="pickAudioInlineBtn" class="mini-btn">为当前视频追加 MP3</button>
+            </div>
+            <div id="stageFeed" class="stage-feed-list"></div>
+          </section>
+
+          <section class="workspace-card">
+            <div class="tabs">
+              <button class="tab active" data-panel="recognition">识别设置</button>
+              <button class="tab" data-panel="translation">翻译设置</button>
+              <button class="tab" data-panel="subtitle">字幕样式</button>
+              <button class="tab" data-panel="outputs">项目产物</button>
+            </div>
+
+            <div class="workspace-panels">
+              <section class="workspace-panel active" data-panel="recognition">
+                <div class="section-head">
+                  <div>
+                    <h3>识别后端设置</h3>
+                    <p>控制 faster-whisper 模型、设备、解码 beam 和预览时长。</p>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label><span>源语言</span><input id="src_lang" type="text" /></label>
+                  <label><span>识别模型</span><input id="model" type="text" /></label>
+                  <label><span>运行设备</span><input id="device" type="text" /></label>
+                  <label><span>计算类型</span><input id="compute_type" type="text" /></label>
+                  <label><span>Beam Size</span><input id="beam_size" type="number" /></label>
+                  <label><span>预览秒数</span><input id="preview_seconds" type="number" /></label>
+                </div>
+              </section>
+
+              <section class="workspace-panel" data-panel="translation">
+                <div class="section-head">
+                  <div>
+                    <h3>翻译设置</h3>
+                    <p>控制中转站、模型名、chunk 拆分和重试策略。</p>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label><span>目标语言</span><input id="dst_lang" type="text" /></label>
+                  <label><span>翻译模型</span><input id="translation_model" type="text" /></label>
+                  <label><span>Chunk Size</span><input id="translation_chunk_size" type="number" /></label>
+                  <label><span>重试次数</span><input id="translation_retries" type="number" /></label>
+                  <label class="wide"><span>OpenAI Base URL</span><input id="openai_base_url" type="text" /></label>
+                  <label class="wide"><span>附加音频路径</span><input id="audio_override_path" type="text" readonly /></label>
+                  <label class="toggle-row"><span>复用已有分段</span><input id="load_existing_segments" type="checkbox" /></label>
+                </div>
+              </section>
+
+              <section class="workspace-panel" data-panel="subtitle">
+                <div class="section-head">
+                  <div>
+                    <h3>双语字幕样式</h3>
+                    <p>中文主字幕和英文副字幕的字号、左右边距、离底部距离都可以在这里调整。</p>
+                  </div>
+                </div>
+                <div class="style-columns">
+                  <div class="style-card">
+                    <h4>中文字幕</h4>
+                    <div class="form-grid compact">
+                      <label><span>字体</span><input id="zh_font_name" type="text" /></label>
+                      <label><span>字号</span><input id="zh_font_size" type="number" /></label>
+                      <label><span>左边距</span><input id="zh_margin_l" type="number" /></label>
+                      <label><span>右边距</span><input id="zh_margin_r" type="number" /></label>
+                      <label><span>底边距</span><input id="zh_margin_v" type="number" /></label>
+                    </div>
+                  </div>
+                  <div class="style-card">
+                    <h4>英文副字幕</h4>
+                    <div class="form-grid compact">
+                      <label><span>字体</span><input id="en_font_name" type="text" /></label>
+                      <label><span>字号</span><input id="en_font_size" type="number" /></label>
+                      <label><span>左边距</span><input id="en_margin_l" type="number" /></label>
+                      <label><span>右边距</span><input id="en_margin_r" type="number" /></label>
+                      <label><span>底边距</span><input id="en_margin_v" type="number" /></label>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="workspace-panel" data-panel="outputs">
+                <div class="section-head">
+                  <div>
+                    <h3>项目产物</h3>
+                    <p>查看 JSON、SRT、ASS、视频和阶段输出。</p>
+                  </div>
+                  <button id="openOutputInlineBtn" class="mini-btn">在资源管理器中打开</button>
+                </div>
+                <div class="output-layout">
+                  <div id="projectList" class="project-list"></div>
+                  <div class="preview-pane">
+                    <div class="preview-head">
+                      <h4 id="previewTitle">文件预览</h4>
+                    </div>
+                    <video id="videoPreview" class="video-preview hidden" controls></video>
+                    <pre id="textPreview" class="text-preview"></pre>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+  </html>

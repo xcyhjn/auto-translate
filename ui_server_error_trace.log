@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 243, in do_POST
+    STATE["history"].append({"stage": stage, "payload": payload})
+                         ^^^^^^^^^^^^^^^^^^^^^
+KeyError: 'video_name'
+
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 243, in do_POST
+    STATE["history"].append({"stage": stage, "payload": payload})
+                         ^^^^^^^^^^^^^^^^^^^^^
+KeyError: 'video_name'
+
+
