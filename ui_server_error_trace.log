@@ -304,3 +304,57 @@ Traceback (most recent call last):
 yt_dlp.utils.DownloadError: [0;31mERROR:[0m [download] Got error: [WinError 10054] 远程主机强迫关闭了一个现有的连接。
 
 
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 852, in run_pipeline_job
+    "09_burned_bilingual_preview_60s.mp4",
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\pipeline_core.py", line 407, in run_pipeline
+    burn_subtitle(
+  File "D:\桌面\autosub_zh\pipeline_core.py", line 91, in burn_subtitle
+    run_ffmpeg_command(args, progress_callback=emit_progress if progress_callback else None)
+  File "D:\桌面\autosub_zh\media.py", line 171, in run_ffmpeg_command
+    raise RuntimeError(f"Command failed: {command}\n{details}")
+RuntimeError: Command failed: ffmpeg -progress pipe:1 -nostats -y -i D:\桌面\autosub_zh\input\5.14-yt\a bee's guide to being the universe.mp4 -t 60 -vf ass='C\:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' -c:v libx264 -preset medium -crf 25 -pix_fmt yuv420p -c:a copy D:\桌面\autosub_zh\output\a-bee-s-guide-to-being-the-universe\09_burned_bilingual_preview_60s.mp4
+ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 15.2.0 (Rev13, Built by MSYS2 project)
+  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-zlib --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-sdl2 --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxvid --enable-libaom --enable-libopenjpeg --enable-libvpx --enable-mediafoundation --enable-libass --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-openal --enable-libgme --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libtheora --enable-libvo-amrwbenc --enable-libgsm --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-librubberband
+  libavutil      60. 26.101 / 60. 26.101
+  libavcodec     62. 28.101 / 62. 28.101
+  libavformat    62. 12.101 / 62. 12.101
+  libavdevice    62.  3.101 / 62.  3.101
+  libavfilter    11. 14.101 / 11. 14.101
+  libswscale      9.  5.101 /  9.  5.101
+  libswresample   6.  3.101 /  6.  3.101
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\桌面\autosub_zh\input\5.14-yt\a bee's guide to being the universe.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.12.101
+  Duration: 00:03:45.56, start: 0.000000, bitrate: 1338 kb/s
+  Stream #0:0[0x1](und): Video: av1 (libaom-av1) (Main) (av01 / 0x31307661), yuv420p(tv, bt709), 1920x1080 [SAR 1:1 DAR 16:9], 1203 kb/s, 30 fps, 30 tbr, 15360 tbn (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+  Stream #0:1[0x2](eng): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 128 kb/s (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+[Parsed_ass_0 @ 0000023c7a852a00] libass API version: 0x1704000
+[Parsed_ass_0 @ 0000023c7a852a00] libass source: commit: 0.17.4-27-g1cbba0a8818c83495114b3c2b5730410eecbdb2c
+[Parsed_ass_0 @ 0000023c7a852a00] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+[Parsed_ass_0 @ 0000023c7a852a00] Using font provider directwrite (with GDI)
+[Parsed_ass_0 @ 0000023c7a852a00] Added subtitle file: 'C:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' (3 styles, 68 events)
+Stream mapping:
+  Stream #0:0 -> #0:0 (av1 (libaom-av1) -> h264 (libx264))
+  Stream #0:1 -> #0:1 (copy)
+Press [q] to stop, [?] for help
+[Parsed_ass_0 @ 0000023c7a8526c0] libass API version: 0x1704000
+[Parsed_ass_0 @ 0000023c7a8526c0] libass source: commit: 0.17.4-27-g1cbba0a8818c83495114b3c2b5730410eecbdb2c
+[Parsed_ass_0 @ 0000023c7a8526c0] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+[Parsed_ass_0 @ 0000023c7a8526c0] Using font provider directwrite (with GDI)
+[Parsed_ass_0 @ 0000023c7a8526c0] Added subtitle file: 'C:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' (3 styles, 68 events)
+[libx264 @ 0000023c7df500c0] using SAR=1/1
+[libx264 @ 0000023c7df500c0] using cpu capabilities: MMX2 SSE2Fast SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2
+[libx264 @ 0000023c7df500c0] profile High, level 4.0, 4:2:0, 8-bit
+[libx264 @ 0000023c7df500c0]
+
+

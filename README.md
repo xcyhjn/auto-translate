@@ -40,6 +40,17 @@ cd D:\桌面
 python -m autosub_zh.doctor
 ```
 
+## UI 下载模式
+
+Web UI 的下载区现在支持四种模式：
+
+- `auto`: 先用 yt-dlp 下载；失败后用 yt-dlp 解析直链并交给 IDM；仍失败则提示手动导入。
+- `ytdlp`: 只使用 yt-dlp。
+- `idm`: 只使用 IDM 桥接下载。
+- `manual`: 不自动下载，用户用浏览器/IDM 下载到 `input` 后点击“扫描 input”。
+
+IDM 默认会自动寻找 `C:\Program Files (x86)\Internet Download Manager\IDMan.exe`。如果安装位置不同，在 UI 里填写 `IDMan.exe` 路径后点击“检测 IDM”。
+
 ## 配置 OpenAI 中转
 
 临时配置，当前 PowerShell 窗口有效：

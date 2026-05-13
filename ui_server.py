@@ -13,8 +13,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
-from yt_dlp import YoutubeDL
 
+from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, check_idm
 from .models import BilingualSubtitleStyle
 from .media import probe_media
 from .pipeline_core import build_output_slug, run_pipeline
@@ -27,7 +27,7 @@ ATTACHMENTS_DIR = BASE_DIR / "attachments"
 WEB_DIR = BASE_DIR / "web"
 CONFIG_PATH = BASE_DIR / "ui_config.json"
 ERROR_LOG_PATH = BASE_DIR / "ui_server_error_trace.log"
-SERVER_VERSION = "20260513-ui-state-v3"
+SERVER_VERSION = "20260514-idm-download-v1"
 SERVER_PORT = int(os.environ.get("AUTOSUB_UI_PORT", "8777"))
 DEFAULT_HTTP_PROXY = "http://127.0.0.1:7890"
 
@@ -45,6 +45,13 @@ DEFAULT_CONFIG = {
     "audio_override_path": "",
     "load_existing_segments": False,
     "preview_seconds": None,
+    "download_backend": "auto",
+    "idm_exe_path": "",
+    "idm_output_dir": str(INPUT_DIR),
+    "idm_wait_timeout_seconds": 1800,
+    "idm_stable_seconds": 8,
+    "download_keep_intermediate_files": False,
+    "download_manual_fallback": True,
     "style": asdict(BilingualSubtitleStyle()),
 }
 
@@ -77,6 +84,25 @@ STAGE_META = {
     "complete": {"title": "完成", "description": "全部阶段已完成。", "overall_progress": 100},
     "error": {"title": "错误", "description": "任务执行失败。", "overall_progress": 100},
 }
+
+
+STAGE_META.update(
+    {
+        "download_ytdlp_start": {"title": "yt-dlp 下载", "description": "正在使用 yt-dlp 拉取视频。", "overall_progress": 5},
+        "download_ytdlp_failed": {"title": "yt-dlp 下载", "description": "yt-dlp 当前尝试失败，准备切换策略。", "overall_progress": 6},
+        "download_ytdlp_complete": {"title": "yt-dlp 下载", "description": "yt-dlp 下载完成。", "overall_progress": 8},
+        "download_auto_fallback": {"title": "切换到 IDM", "description": "yt-dlp 下载失败，正在尝试 IDM 桥接。", "overall_progress": 6},
+        "download_extract_start": {"title": "解析直链", "description": "正在用 yt-dlp 提取真实媒体地址。", "overall_progress": 6},
+        "download_extract_complete": {"title": "解析直链", "description": "已解析到可交给 IDM 的媒体地址。", "overall_progress": 7},
+        "download_idm_start": {"title": "IDM 下载", "description": "已把媒体地址交给 IDM。", "overall_progress": 7},
+        "download_idm_wait": {"title": "等待 IDM", "description": "正在等待 IDM 完成文件写入。", "overall_progress": 7},
+        "download_idm_complete": {"title": "IDM 下载", "description": "IDM 文件下载完成。", "overall_progress": 8},
+        "download_merge_start": {"title": "合并音视频", "description": "正在合并 IDM 下载的视频流和音频流。", "overall_progress": 8},
+        "download_merge_complete": {"title": "合并音视频", "description": "IDM 下载的音视频已合并完成。", "overall_progress": 9},
+        "download_manual_required": {"title": "等待手动导入", "description": "自动下载失败，请使用 IDM 手动下载到 input 目录。", "overall_progress": 6},
+        "download_backend_unknown": {"title": "下载策略", "description": "下载策略未知，已按自动模式处理。", "overall_progress": 4},
+    }
+)
 
 
 def default_phase_status() -> dict:
@@ -175,6 +201,13 @@ def strip_ansi_codes(text: str) -> str:
 def build_user_facing_error_message(exc: Exception) -> str:
     raw_message = strip_ansi_codes(str(exc))
     lowered = raw_message.lower()
+
+    if isinstance(exc, ManualImportRequired):
+        return (
+            f"{raw_message}\n\n"
+            "操作方式：打开 input 目录，用浏览器里的 IDM 集成下载视频到这个目录；"
+            "下载结束后点击“扫描 input”，再从队列启动流程。"
+        )
 
     if "winerror 10054" in lowered:
         return (
@@ -332,6 +365,13 @@ def test_proxy_connection() -> dict:
     }
 
 
+def scan_input_queue() -> list[dict]:
+    videos = list_input_videos()
+    for video in videos:
+        enqueue_video(video)
+    return videos
+
+
 def read_output_tree() -> list[dict]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     projects = []
@@ -413,6 +453,7 @@ def summarize_payload(payload: dict) -> dict:
         "processed_seconds",
         "duration_seconds",
         "remaining_seconds",
+        "direct_count",
         "fallback_count",
         "virtual_chunk_current",
         "virtual_chunk_total",
@@ -833,6 +874,14 @@ def open_output_in_explorer(project_path: str | None) -> str:
     return str(folder)
 
 
+def open_input_in_explorer() -> str:
+    INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    import subprocess
+
+    subprocess.run(["explorer.exe", str(INPUT_DIR)], check=False)
+    return str(INPUT_DIR)
+
+
 def run_pipeline_job(video_path: str, config: dict) -> None:
     style = BilingualSubtitleStyle(**config["style"])
     try:
@@ -886,85 +935,19 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
         append_error_log(traceback_text)
 
 
-def download_video_from_url(url: str) -> dict:
-    INPUT_DIR.mkdir(parents=True, exist_ok=True)
-    before = {item.resolve() for item in INPUT_DIR.iterdir() if item.is_file()}
-    proxy_url = (
-        os.environ.get("HTTPS_PROXY")
-        or os.environ.get("https_proxy")
-        or os.environ.get("HTTP_PROXY")
-        or os.environ.get("http_proxy")
-        or DEFAULT_HTTP_PROXY
+def build_download_config(config: dict) -> DownloadConfig:
+    return DownloadConfig.from_ui_config(
+        config,
+        input_dir=INPUT_DIR,
+        proxy_url=get_proxy_url(),
     )
-    options = {
-        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
-        "merge_output_format": "mp4",
-        "outtmpl": str(INPUT_DIR / "%(title)s.%(ext)s"),
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "proxy": proxy_url,
-        "socket_timeout": 30,
-        "retries": 8,
-        "fragment_retries": 8,
-        "extractor_retries": 3,
-        "file_access_retries": 3,
-        "concurrent_fragment_downloads": 1,
-        "continuedl": True,
-        "buffersize": 1024,
-        "http_chunk_size": 10485760,
-        "hls_prefer_native": True,
-        "nopart": False,
-    }
-    fallback_options = {
-        **options,
-        "format": "b[ext=mp4]/best",
-        "merge_output_format": None,
-    }
-    try:
-        with YoutubeDL(options) as ydl:
-            ydl.extract_info(url, download=True)
-    except Exception as primary_exc:
-        cleanup_partial_downloads(before)
-        try:
-            with YoutubeDL(fallback_options) as ydl:
-                ydl.extract_info(url, download=True)
-        except Exception:
-            cleanup_partial_downloads(before)
-            raise primary_exc
 
-    candidates = [
-        item
-        for item in INPUT_DIR.iterdir()
-        if item.is_file()
-        and item.resolve() not in before
-        and item.suffix.lower() in {".mp4", ".mkv", ".mov", ".avi", ".webm"}
-        and item.stat().st_size > 0
-    ]
-    if not candidates:
-        candidates = sorted(
-            [
-                item
-                for item in INPUT_DIR.iterdir()
-                if item.is_file()
-                and item.suffix.lower() in {".mp4", ".mkv", ".mov", ".avi", ".webm"}
-                and item.stat().st_size > 0
-            ],
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-    if not candidates:
-        raise RuntimeError("yt-dlp download finished, but no video file was found in input.")
 
-    video_path = sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True)[0]
-    return {
-        "name": video_path.name,
-        "stem": video_path.stem,
-        "path": str(video_path),
-        "size": video_path.stat().st_size,
-        "external": False,
-        "managed": True,
-    }
+def download_video_from_url(url: str, config: dict) -> dict:
+    download_config = build_download_config(config)
+    manager = DownloadManager(download_config, callback=append_history)
+    result = manager.download(url)
+    return result.as_video_dict()
 
 
 def download_and_optionally_run_job(url: str, config: dict, run_after_download: bool) -> None:
@@ -978,9 +961,17 @@ def download_and_optionally_run_job(url: str, config: dict, run_after_download: 
             update_runtime_meta("downloading", {})
         append_history("download_start", {"url": url})
 
-        video = download_video_from_url(url)
+        video = download_video_from_url(url, config)
         enqueue_video(video)
-        append_history("download_complete", {"path": video["path"], "name": video["name"], "size": video["size"]})
+        append_history(
+            "download_complete",
+            {
+                "path": video["path"],
+                "name": video["name"],
+                "size": video["size"],
+                "method": video.get("download_method", ""),
+            },
+        )
 
         with STATE_LOCK:
             STATE["running"] = False
@@ -1122,6 +1113,28 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 self._json_response({"ok": True, "opened": opened})
                 return
 
+            if parsed.path == "/api/open-input":
+                opened = open_input_in_explorer()
+                self._json_response({"ok": True, "opened": opened})
+                return
+
+            if parsed.path == "/api/scan-input":
+                videos = scan_input_queue()
+                self._json_response(
+                    {
+                        "ok": True,
+                        "videos": videos,
+                        "state": STATE,
+                        "projects": read_output_tree(),
+                    }
+                )
+                return
+
+            if parsed.path == "/api/check-idm":
+                config = {**read_config(), **payload.get("config", {})}
+                self._json_response({"ok": True, "idm": check_idm(build_download_config(config))})
+                return
+
             if parsed.path == "/api/queue/clear":
                 clear_queue()
                 self._json_response(
@@ -1169,7 +1182,7 @@ class UIServerHandler(SimpleHTTPRequestHandler):
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
-    allow_reuse_address = False
+    allow_reuse_address = True
 
 
 def main() -> None:

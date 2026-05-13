@@ -8,6 +8,7 @@ const state = {
   selectedFilePath: null,
   polling: null,
   proxyStatus: null,
+  idmStatus: null,
   selectedMediaInfo: null,
   mediaInspectToken: 0,
   lastErrorPayload: null,
@@ -131,6 +132,13 @@ function readFormConfig() {
     audio_override_path: el("audio_override_path").value,
     preview_seconds: el("preview_seconds").value ? Number(el("preview_seconds").value) : null,
     load_existing_segments: el("load_existing_segments").checked,
+    download_backend: el("download_backend").value,
+    idm_exe_path: el("idm_exe_path").value,
+    idm_output_dir: el("idm_output_dir").value,
+    idm_wait_timeout_seconds: Number(el("idm_wait_timeout_seconds").value || 1800),
+    idm_stable_seconds: 8,
+    download_keep_intermediate_files: false,
+    download_manual_fallback: true,
     style: {
       zh_font_name: el("zh_font_name").value,
       zh_font_size: Number(el("zh_font_size").value),
@@ -161,6 +169,10 @@ function fillForm(config) {
   el("audio_override_path").value = config.audio_override_path || "";
   el("preview_seconds").value = config.preview_seconds ?? "";
   el("load_existing_segments").checked = Boolean(config.load_existing_segments);
+  el("download_backend").value = config.download_backend || "auto";
+  el("idm_exe_path").value = config.idm_exe_path || "";
+  el("idm_output_dir").value = config.idm_output_dir || "";
+  el("idm_wait_timeout_seconds").value = config.idm_wait_timeout_seconds ?? 1800;
 
   const style = config.style || {};
   el("zh_font_name").value = style.zh_font_name || "Microsoft YaHei";
@@ -545,6 +557,29 @@ function renderProxyStatus() {
   `;
 }
 
+function renderIdmStatus() {
+  const card = el("idmStatusCard");
+  const idm = state.idmStatus;
+  if (!idm) {
+    card.classList.add("hidden");
+    card.innerHTML = "";
+    return;
+  }
+
+  card.className = `proxy-status-card ${idm.ok ? "proxy-ok" : "proxy-bad"}`;
+  card.innerHTML = `
+    <div class="proxy-status-head">
+      <strong>${idm.ok ? "IDM 已就绪" : "IDM 未就绪"}</strong>
+      <span>${idm.output_dir_writable ? "目录可写" : "目录不可写"}</span>
+    </div>
+    <div class="proxy-status-meta">程序：${idm.resolved_path || idm.configured_path || "未找到"}</div>
+    <div class="proxy-status-list">
+      <div class="proxy-status-row"><span>输出目录</span><strong>${idm.output_dir || ""}</strong></div>
+      <div class="proxy-status-row"><span>目录存在</span><strong>${idm.output_dir_exists ? "是" : "否"}</strong></div>
+    </div>
+  `;
+}
+
 function renderRuntime(runtime, lastError) {
   const title = runtime?.title || "等待中";
   const progress = Math.max(0, Math.min(100, Number(runtime?.overall_progress || 0)));
@@ -567,6 +602,7 @@ function renderState(payload) {
   if (payload.videos) renderVideos(payload.videos);
   if (payload.config) fillForm(payload.config);
   renderProxyStatus();
+  renderIdmStatus();
 }
 
 async function testProxy() {
@@ -586,6 +622,32 @@ async function testProxy() {
     renderProxyStatus();
   } finally {
     el("testProxyBtn").disabled = false;
+  }
+}
+
+async function checkIdm() {
+  el("checkIdmBtn").disabled = true;
+  try {
+    const response = await fetch("/api/check-idm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: readFormConfig() }),
+    });
+    const payload = await response.json();
+    state.idmStatus = payload.idm || null;
+    renderIdmStatus();
+  } catch {
+    state.idmStatus = {
+      ok: false,
+      configured_path: el("idm_exe_path").value,
+      resolved_path: "",
+      output_dir: el("idm_output_dir").value,
+      output_dir_exists: false,
+      output_dir_writable: false,
+    };
+    renderIdmStatus();
+  } finally {
+    el("checkIdmBtn").disabled = false;
   }
 }
 
@@ -675,14 +737,35 @@ function bindActions() {
     });
   };
 
+  const openInput = () => {
+    fetch("/api/open-input", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  };
+
+  const scanInput = () => {
+    fetch("/api/scan-input", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        renderState(payload);
+        showToast("已扫描 input");
+      });
+  };
+
   const runDownload = (runAfterDownload) => {
     const url = el("downloadUrlInput").value.trim();
     if (!url) return;
-    if (state.proxyStatus && !state.proxyStatus.ok) {
+    const config = readFormConfig();
+    if (state.proxyStatus && !state.proxyStatus.ok && config.download_backend === "ytdlp") {
       showToast("代理检测失败，请先修复代理");
       return;
     }
-    const config = readFormConfig();
     fetch("/api/download-video", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -716,6 +799,9 @@ function bindActions() {
   el("downloadOnlyBtn").addEventListener("click", () => runDownload(false));
   el("downloadAndRunBtn").addEventListener("click", () => runDownload(true));
   el("testProxyBtn").addEventListener("click", testProxy);
+  el("checkIdmBtn").addEventListener("click", checkIdm);
+  el("openInputBtn").addEventListener("click", openInput);
+  el("scanInputBtn").addEventListener("click", scanInput);
   el("copyErrorBtn").addEventListener("click", () => {
     const payload = state.lastErrorPayload;
     if (!payload) return;

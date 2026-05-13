@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Autosub Studio</title>
-    <link rel="stylesheet" href="./styles.css?v=20260513e" />
+    <link rel="stylesheet" href="./styles.css?v=20260514-idm1" />
   </head>
   <body>
     <div class="app-shell">
@@ -99,13 +99,40 @@
             </div>
             <div class="download-block">
               <input id="downloadUrlInput" type="text" placeholder="粘贴 YouTube 链接，例如 https://www.youtube.com/watch?v=..." />
+              <div class="download-settings">
+                <label>
+                  <span>下载方式</span>
+                  <select id="download_backend">
+                    <option value="auto">自动：yt-dlp → IDM → 手动</option>
+                    <option value="ytdlp">仅 yt-dlp</option>
+                    <option value="idm">仅 IDM 桥接</option>
+                    <option value="manual">手动导入</option>
+                  </select>
+                </label>
+                <label>
+                  <span>IDM 路径</span>
+                  <input id="idm_exe_path" type="text" placeholder="C:\Program Files (x86)\Internet Download Manager\IDMan.exe" />
+                </label>
+                <label>
+                  <span>IDM 输出目录</span>
+                  <input id="idm_output_dir" type="text" />
+                </label>
+                <label>
+                  <span>IDM 等待秒数</span>
+                  <input id="idm_wait_timeout_seconds" type="number" min="30" />
+                </label>
+              </div>
               <div class="download-actions">
                 <button id="downloadOnlyBtn" class="mini-btn">下载到队列</button>
                 <button id="downloadAndRunBtn" class="mini-btn">下载并开烤</button>
                 <button id="testProxyBtn" class="mini-btn">测试代理</button>
+                <button id="checkIdmBtn" class="mini-btn">检测 IDM</button>
+                <button id="openInputBtn" class="mini-btn">打开 input</button>
+                <button id="scanInputBtn" class="mini-btn">扫描 input</button>
               </div>
             </div>
             <div id="proxyStatusCard" class="proxy-status-card hidden"></div>
+            <div id="idmStatusCard" class="proxy-status-card hidden"></div>
             <div class="card-toolbar">
               <button id="pickInputInlineBtn" class="mini-btn">从文件管理器添加视频</button>
             </div>
@@ -233,6 +260,6 @@
 
     <div id="toast" class="toast hidden"></div>
 
-    <script src="./app.js?v=20260513e"></script>
+    <script src="./app.js?v=20260514-idm1"></script>
   </body>
   </html>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -132,8 +133,18 @@ def run_ffmpeg_command(
         ) from exc
 
     stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
     progress_data: dict[str, str] = {}
     assert process.stdout is not None
+
+    def read_stderr() -> None:
+        if process.stderr is None:
+            return
+        for raw_line in process.stderr:
+            stderr_lines.append(raw_line)
+
+    stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+    stderr_thread.start()
 
     for raw_line in process.stdout:
         line = raw_line.strip()
@@ -157,8 +168,9 @@ def run_ffmpeg_command(
 
         progress_data[key] = value
 
-    stderr_text = process.stderr.read() if process.stderr is not None else ""
     return_code = process.wait()
+    stderr_thread.join(timeout=2)
+    stderr_text = "".join(stderr_lines)
     completed = subprocess.CompletedProcess(
         progress_args,
         return_code,
