@@ -14,9 +14,15 @@ function el(id) {
 }
 
 function bytes(size) {
+  if (!size) return "0 B";
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function safeText(value) {
+  return value || "";
 }
 
 function setRunState(stateText) {
@@ -99,7 +105,7 @@ function renderVideos(videos) {
     item.className = "video-item" + (state.selectedVideo?.path === video.path ? " active" : "");
     item.innerHTML = `
       <div><strong>${video.name}</strong></div>
-      <div class="meta-row"><span>${video.external ? "外部导入" : "input目录"}</span><span>${bytes(video.size)}</span></div>
+      <div class="meta-row"><span>${video.managed ? "本次会话" : "初始输入"}</span><span>${bytes(video.size)}</span></div>
     `;
     item.addEventListener("click", () => {
       state.selectedVideo = video;
@@ -109,6 +115,14 @@ function renderVideos(videos) {
     });
     root.appendChild(item);
   });
+
+  if (!videos.length) {
+    root.innerHTML = `<div class="stage-item"><strong>暂无输入视频</strong><div class="meta-row"><span>点击“添加 Input”或下载视频后会出现在这里。</span></div></div>`;
+    state.selectedVideo = null;
+    el("selectedVideoName").textContent = "未选择视频";
+    el("selectedVideoMeta").textContent = "请添加视频后开始处理。";
+    return;
+  }
 
   if (!state.selectedVideo && videos.length) {
     state.selectedVideo = videos[0];
@@ -121,15 +135,22 @@ function renderVideos(videos) {
 function renderStageFeed(history) {
   const root = el("stageFeed");
   root.innerHTML = "";
-  history.slice().reverse().forEach((entry) => {
+  const entries = history.slice().reverse();
+  entries.forEach((entry) => {
     const node = document.createElement("div");
     node.className = "stage-item";
+    const detail = Object.entries(entry.summary || {})
+      .map(([key, value]) => `<div class="summary-row"><span>${key}</span><strong>${safeText(String(value))}</strong></div>`)
+      .join("");
     node.innerHTML = `
       <div><strong>${entry.stage}</strong></div>
-      <div class="meta-row"><span>${JSON.stringify(entry.payload)}</span></div>
+      <div class="summary-grid">${detail}</div>
     `;
     root.appendChild(node);
   });
+  if (!entries.length) {
+    root.innerHTML = `<div class="stage-item"><strong>暂无运行日志</strong><div class="meta-row"><span>流程启动后会在这里展示结构化阶段摘要。</span></div></div>`;
+  }
 }
 
 function renderQueue(queue) {
@@ -140,16 +161,46 @@ function renderQueue(queue) {
     node.className = "stage-item";
     node.innerHTML = `
       <div><strong>${index + 1}. ${item.name}</strong></div>
-      <div class="meta-row"><span>${item.path}</span><span>${bytes(item.size || 0)}</span></div>
+      <div class="meta-row"><span class="path-text">${item.path}</span><span>${bytes(item.size || 0)}</span></div>
     `;
     root.appendChild(node);
   });
   if (!queue || !queue.length) {
-    const empty = document.createElement("div");
-    empty.className = "stage-item";
-    empty.innerHTML = `<div><strong>队列为空</strong></div><div class="meta-row"><span>下载到队列或添加 Input 后会显示在这里。</span></div>`;
-    root.appendChild(empty);
+    root.innerHTML = `<div class="stage-item"><strong>队列为空</strong><div class="meta-row"><span>下载到队列或添加 Input 后会显示在这里。</span></div></div>`;
   }
+}
+
+function renderPhaseStatus(phaseStatus) {
+  const labelMap = {
+    audio_extract: "音频提取",
+    asr: "音频处理",
+    translation: "翻译文本",
+    burn: "烧录输出",
+  };
+
+  const root = el("phaseStatusList");
+  if (!root) return;
+  root.innerHTML = "";
+
+  Object.entries(phaseStatus || {}).forEach(([key, phase]) => {
+    const card = document.createElement("div");
+    card.className = "phase-card";
+    const progress = Math.max(0, Math.min(100, Number(phase.progress || 0)));
+    const meta = [];
+    if (phase.current && phase.total) meta.push(`${phase.current}/${phase.total}`);
+    if (phase.size_bytes) meta.push(`当前大小 ${bytes(phase.size_bytes)}`);
+    if (phase.estimated_final_size) meta.push(`预计最终 ${bytes(phase.estimated_final_size)}`);
+    card.innerHTML = `
+      <div class="phase-head">
+        <strong>${labelMap[key] || key}</strong>
+        <span>${phase.status || "idle"}</span>
+      </div>
+      <div class="phase-label">${phase.label || ""}</div>
+      <div class="phase-progress"><div class="phase-progress-fill" style="width:${progress}%"></div></div>
+      <div class="meta-row"><span>${progress.toFixed(0)}%</span><span>${meta.join(" · ")}</span></div>
+    `;
+    root.appendChild(card);
+  });
 }
 
 function openFile(path, name) {
@@ -222,6 +273,7 @@ function renderState(payload) {
   el("currentStageLabel").textContent = `当前阶段：${payload.state.current_stage}`;
   renderStageFeed(payload.state.history || []);
   renderQueue(payload.state.queue || []);
+  renderPhaseStatus(payload.state.phase_status || {});
   renderProjects(payload.projects || []);
   if (payload.videos) renderVideos(payload.videos);
   if (payload.config) fillForm(payload.config);
@@ -291,7 +343,7 @@ function bindActions() {
     if (!file) return;
     const payload = await uploadFile("/api/upload-video", file);
     if (!payload.ok) return;
-    renderVideos(payload.videos);
+    renderState(payload);
     state.selectedVideo = payload.video;
     el("selectedVideoName").textContent = payload.video.name;
     el("selectedVideoMeta").textContent = `输入路径：${payload.video.path}`;
@@ -359,7 +411,11 @@ function bindActions() {
       body: JSON.stringify({}),
     })
       .then((res) => res.json())
-      .then((payload) => renderState({ state: payload.state, projects: state.projects, videos: state.videos }));
+      .then((payload) => {
+        state.selectedProject = null;
+        state.selectedFilePath = null;
+        renderState(payload);
+      });
   });
   el("openOutputBtn").addEventListener("click", openOutput);
   el("openOutputInlineBtn").addEventListener("click", openOutput);

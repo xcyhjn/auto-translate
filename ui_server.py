@@ -21,7 +21,7 @@ ATTACHMENTS_DIR = BASE_DIR / "attachments"
 WEB_DIR = BASE_DIR / "web"
 CONFIG_PATH = BASE_DIR / "ui_config.json"
 ERROR_LOG_PATH = BASE_DIR / "ui_server_error_trace.log"
-SERVER_VERSION = "20260513-ui-upload-v2"
+SERVER_VERSION = "20260513-ui-state-v1"
 SERVER_PORT = 8777
 DEFAULT_HTTP_PROXY = "http://127.0.0.1:7890"
 
@@ -29,18 +29,28 @@ DEFAULT_CONFIG = {
     "src_lang": "en",
     "dst_lang": "zh-Hans",
     "model": "distil-large-v3",
-    "device": "cpu",
-    "compute_type": "int8",
+    "device": "cuda",
+    "compute_type": "float16",
     "beam_size": 5,
     "translation_model": "gpt-5.4-mini",
     "translation_chunk_size": 40,
     "translation_retries": 2,
     "openai_base_url": "",
     "audio_override_path": "",
-    "load_existing_segments": True,
+    "load_existing_segments": False,
     "preview_seconds": None,
     "style": asdict(BilingualSubtitleStyle()),
 }
+
+
+def default_phase_status() -> dict:
+    return {
+        "audio_extract": {"status": "idle", "progress": 0, "label": "等待中"},
+        "asr": {"status": "idle", "progress": 0, "current": 0, "total": 0, "label": "等待中"},
+        "translation": {"status": "idle", "progress": 0, "current": 0, "total": 0, "label": "等待中"},
+        "burn": {"status": "idle", "progress": 0, "size_bytes": 0, "estimated_final_size": 0, "label": "等待中"},
+    }
+
 
 STATE = {
     "running": False,
@@ -49,8 +59,10 @@ STATE = {
     "last_manifest": None,
     "last_error": None,
     "queue": [],
+    "phase_status": default_phase_status(),
 }
 STATE_LOCK = threading.Lock()
+INITIAL_INPUT_SNAPSHOT: set[str] = set()
 
 
 def read_config() -> dict:
@@ -87,6 +99,7 @@ def list_input_videos() -> list[dict]:
                     "path": str(path),
                     "size": path.stat().st_size,
                     "external": False,
+                    "managed": str(path.resolve()) not in INITIAL_INPUT_SNAPSHOT,
                 }
             )
     return videos
@@ -155,6 +168,7 @@ def save_uploaded_file(target_dir: Path, filename: str, data: bytes) -> dict:
         "path": str(destination),
         "size": destination.stat().st_size,
         "external": False,
+        "managed": True,
     }
 
 
@@ -164,47 +178,78 @@ def enqueue_video(video: dict) -> None:
             STATE["queue"].append(video)
 
 
+def reset_runtime_state() -> None:
+    STATE["running"] = False
+    STATE["current_stage"] = "idle"
+    STATE["history"] = []
+    STATE["last_manifest"] = None
+    STATE["last_error"] = None
+    STATE["phase_status"] = default_phase_status()
+
+
 def clear_queue() -> None:
+    managed_paths = [Path(item["path"]) for item in list_input_videos() if item.get("managed")]
+    for path in managed_paths:
+        try:
+            if path.exists():
+                path.unlink()
+        except Exception:
+            pass
+
     with STATE_LOCK:
         STATE["queue"] = []
+        reset_runtime_state()
 
 
-def download_video_from_url(url: str) -> dict:
-    INPUT_DIR.mkdir(parents=True, exist_ok=True)
-    before = {item.resolve() for item in INPUT_DIR.iterdir() if item.is_file()}
-    options = {
-        "format": "bestvideo+bestaudio/best",
-        "merge_output_format": "mp4",
-        "outtmpl": str(INPUT_DIR / "%(title)s.%(ext)s"),
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-    }
-    with YoutubeDL(options) as ydl:
-        ydl.extract_info(url, download=True)
+def summarize_payload(payload: dict) -> dict:
+    summary = {}
+    for key, value in payload.items():
+        if key.endswith("path") or key.endswith("dir") or key == "url":
+            summary[key] = str(value)
+        elif key in {"count", "errors", "warnings", "chunk_index", "chunk_total", "segment_count", "progress", "size_bytes", "estimated_final_size"}:
+            summary[key] = value
+    if not summary:
+        for key, value in list(payload.items())[:4]:
+            summary[key] = value
+    return summary
 
-    candidates = [
-        item
-        for item in INPUT_DIR.iterdir()
-        if item.is_file() and item.resolve() not in before and item.suffix.lower() in {".mp4", ".mkv", ".mov", ".avi", ".webm"}
-    ]
-    if not candidates:
-        candidates = sorted(
-            [item for item in INPUT_DIR.iterdir() if item.is_file() and item.suffix.lower() in {".mp4", ".mkv", ".mov", ".avi", ".webm"}],
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-    if not candidates:
-        raise RuntimeError("yt-dlp download finished, but no video file was found in input.")
 
-    video_path = sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True)[0]
-    return {
-        "name": video_path.name,
-        "stem": video_path.stem,
-        "path": str(video_path),
-        "size": video_path.stat().st_size,
-        "external": False,
-    }
+def append_history(stage: str, payload: dict) -> None:
+    with STATE_LOCK:
+        STATE["current_stage"] = stage
+        STATE["history"].append({"stage": stage, "summary": summarize_payload(payload)})
+        STATE["history"] = STATE["history"][-120:]
+
+        phase = STATE["phase_status"]
+        if stage == "download_start":
+            phase["audio_extract"]["label"] = "等待下载"
+        elif stage == "download_complete":
+            phase["audio_extract"]["label"] = "下载完成"
+        elif stage == "probe_media":
+            phase["audio_extract"] = {"status": "running", "progress": 15, "label": "媒体探测"}
+        elif stage == "extract_audio":
+            phase["audio_extract"] = {"status": "complete", "progress": 100, "label": "音频提取完成"}
+            phase["asr"]["status"] = "running"
+            phase["asr"]["label"] = "音频处理中"
+        elif stage == "asr_raw":
+            count = int(payload.get("count", 0))
+            phase["asr"].update({"status": "running", "current": count, "total": count, "progress": 70, "label": f"识别完成 {count} 段"})
+        elif stage == "timed_source":
+            count = int(payload.get("count", 0))
+            phase["asr"].update({"status": "complete", "current": count, "total": count, "progress": 100, "label": f"打轴完成 {count} 段"})
+            phase["translation"]["status"] = "running"
+            phase["translation"]["label"] = "准备翻译"
+        elif stage == "translated":
+            count = int(payload.get("count", 0))
+            phase["translation"].update({"status": "complete", "progress": 100, "label": f"翻译完成 {count} 段"})
+            phase["burn"]["status"] = "running"
+            phase["burn"]["label"] = "准备烧录"
+        elif stage == "qa":
+            phase["burn"]["label"] = f"QA 完成，警告 {payload.get('warnings', 0)} 条"
+        elif stage == "burned_video":
+            phase["burn"].update({"status": "complete", "progress": 100, "label": "烧录完成"})
+        elif stage == "complete":
+            STATE["current_stage"] = "complete"
 
 
 def open_output_in_explorer(project_path: str | None) -> str:
@@ -244,13 +289,6 @@ def open_output_in_explorer(project_path: str | None) -> str:
     return str(folder)
 
 
-def append_history(stage: str, payload: dict) -> None:
-    with STATE_LOCK:
-        STATE["current_stage"] = stage
-        STATE["history"].append({"stage": stage, "payload": payload})
-        STATE["history"] = STATE["history"][-200:]
-
-
 def run_pipeline_job(video_path: str, config: dict) -> None:
     style = BilingualSubtitleStyle(**config["style"])
     try:
@@ -259,6 +297,7 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
             STATE["current_stage"] = "starting"
             STATE["history"] = []
             STATE["last_error"] = None
+            STATE["phase_status"] = default_phase_status()
 
         manifest = run_pipeline(
             input_path=video_path,
@@ -295,17 +334,58 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
         append_error_log(traceback.format_exc())
 
 
+def download_video_from_url(url: str) -> dict:
+    INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    before = {item.resolve() for item in INPUT_DIR.iterdir() if item.is_file()}
+    options = {
+        "format": "bestvideo+bestaudio/best",
+        "merge_output_format": "mp4",
+        "outtmpl": str(INPUT_DIR / "%(title)s.%(ext)s"),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with YoutubeDL(options) as ydl:
+        ydl.extract_info(url, download=True)
+
+    candidates = [
+        item
+        for item in INPUT_DIR.iterdir()
+        if item.is_file() and item.resolve() not in before and item.suffix.lower() in {".mp4", ".mkv", ".mov", ".avi", ".webm"}
+    ]
+    if not candidates:
+        candidates = sorted(
+            [item for item in INPUT_DIR.iterdir() if item.is_file() and item.suffix.lower() in {".mp4", ".mkv", ".mov", ".avi", ".webm"}],
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    if not candidates:
+        raise RuntimeError("yt-dlp download finished, but no video file was found in input.")
+
+    video_path = sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True)[0]
+    return {
+        "name": video_path.name,
+        "stem": video_path.stem,
+        "path": str(video_path),
+        "size": video_path.stat().st_size,
+        "external": False,
+        "managed": True,
+    }
+
+
 def download_and_optionally_run_job(url: str, config: dict, run_after_download: bool) -> None:
     try:
         with STATE_LOCK:
             STATE["running"] = True
             STATE["current_stage"] = "downloading"
             STATE["last_error"] = None
+            STATE["history"] = []
+            STATE["phase_status"] = default_phase_status()
         append_history("download_start", {"url": url})
 
         video = download_video_from_url(url)
         enqueue_video(video)
-        append_history("download_complete", {"path": video["path"], "name": video["name"]})
+        append_history("download_complete", {"path": video["path"], "name": video["name"], "size": video["size"]})
 
         with STATE_LOCK:
             STATE["running"] = False
@@ -414,13 +494,13 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 filename = unquote(self.headers.get("X-Filename", "upload.mp4"))
                 video = save_uploaded_file(INPUT_DIR, filename, raw)
                 enqueue_video(video)
-                self._json_response({"ok": True, "video": video, "videos": list_input_videos()})
+                self._json_response({"ok": True, "video": video, "videos": list_input_videos(), "state": STATE})
                 return
 
             if parsed.path == "/api/upload-audio":
                 filename = unquote(self.headers.get("X-Filename", "upload.mp3"))
                 audio = save_uploaded_file(ATTACHMENTS_DIR, filename, raw)
-                self._json_response({"ok": True, "audio": audio, "audios": list_audio_files()})
+                self._json_response({"ok": True, "audio": audio, "audios": list_audio_files(), "state": STATE})
                 return
 
             payload = json.loads(raw.decode("utf-8")) if raw else {}
@@ -438,7 +518,14 @@ class UIServerHandler(SimpleHTTPRequestHandler):
 
             if parsed.path == "/api/queue/clear":
                 clear_queue()
-                self._json_response({"ok": True, "state": STATE})
+                self._json_response(
+                    {
+                        "ok": True,
+                        "state": STATE,
+                        "videos": list_input_videos(),
+                        "projects": read_output_tree(),
+                    }
+                )
                 return
 
             if parsed.path == "/api/download-video":
@@ -471,6 +558,8 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
     WEB_DIR.mkdir(parents=True, exist_ok=True)
+    global INITIAL_INPUT_SNAPSHOT
+    INITIAL_INPUT_SNAPSHOT = {str(item.resolve()) for item in INPUT_DIR.iterdir() if item.is_file()}
     ensure_proxy_environment()
     server = ThreadingHTTPServer(("127.0.0.1", SERVER_PORT), UIServerHandler)
     print(f"UI server running at http://127.0.0.1:{SERVER_PORT}")

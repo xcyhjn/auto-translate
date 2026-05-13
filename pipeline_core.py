@@ -53,7 +53,23 @@ def burn_subtitle(
     ]
     if preview_seconds is not None:
         args.extend(["-t", str(preview_seconds)])
-    args.extend(["-vf", subtitle_filter, "-c:a", "copy", str(output_path)])
+    args.extend(
+        [
+            "-vf",
+            subtitle_filter,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "25",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "copy",
+            str(output_path),
+        ]
+    )
     run_command(args)
 
 
