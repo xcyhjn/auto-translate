@@ -13,3 +13,4 @@ venv/
 *.ass
 *.json
 
+/input
