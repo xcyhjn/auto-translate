@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Autosub Studio</title>
-    <link rel="stylesheet" href="./styles.css?v=20260513c" />
+    <link rel="stylesheet" href="./styles.css?v=20260513e" />
   </head>
   <body>
     <div class="app-shell">
@@ -59,10 +59,27 @@
               <h2 id="selectedVideoName">未选择视频</h2>
               <p id="selectedVideoMeta">从列表中选择一个视频，或点击顶部按钮从资源管理器导入，然后启动流程。</p>
               <div class="linked-audio" id="linkedAudioLabel">当前附加音频：未设置</div>
+              <div id="mediaAlertCard" class="alert-card hidden"></div>
             </div>
             <div class="hero-status">
               <div class="status-pill" id="runStatePill">空闲</div>
-              <div class="status-stage" id="currentStageLabel">当前阶段：idle</div>
+              <div class="status-stage" id="currentStageLabel">当前阶段：等待中</div>
+              <div id="errorCard" class="error-card hidden">
+                <div class="error-card-head">
+                  <strong>当前报错</strong>
+                  <button id="copyErrorBtn" class="mini-btn" type="button">复制报错</button>
+                </div>
+                <div id="errorCardText" class="error-card-text"></div>
+              </div>
+              <div class="hero-progress">
+                <div class="hero-progress-track">
+                  <div id="overallProgressFill" class="hero-progress-fill" style="width:0%"></div>
+                </div>
+                <div class="hero-progress-meta">
+                  <span id="overallProgressLabel">总进度 0%</span>
+                  <span id="currentStageDescription">等待开始新的任务。</span>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -72,6 +89,7 @@
               <span>Runtime</span>
             </div>
             <div id="phaseStatusList" class="phase-status-list"></div>
+            <div id="chunkPanel" class="chunk-panel hidden"></div>
           </section>
 
           <section class="card video-picker">
@@ -84,8 +102,10 @@
               <div class="download-actions">
                 <button id="downloadOnlyBtn" class="mini-btn">下载到队列</button>
                 <button id="downloadAndRunBtn" class="mini-btn">下载并开烤</button>
+                <button id="testProxyBtn" class="mini-btn">测试代理</button>
               </div>
             </div>
+            <div id="proxyStatusCard" class="proxy-status-card hidden"></div>
             <div class="card-toolbar">
               <button id="pickInputInlineBtn" class="mini-btn">从文件管理器添加视频</button>
             </div>
@@ -211,6 +231,8 @@
       </main>
     </div>
 
-    <script src="./app.js?v=20260513c"></script>
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="./app.js?v=20260513e"></script>
   </body>
   </html>

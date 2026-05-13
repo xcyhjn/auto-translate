@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Callable
 
 from .models import Segment, Word
 from .utils import normalize_text
 
 
 CUDA_BIN_DIR = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin"
+AsrProgressCallback = Callable[[dict], None]
 
 
 def ensure_cuda_runtime_on_path() -> None:
@@ -28,6 +30,7 @@ def transcribe_audio(
     compute_type: str = "default",
     beam_size: int = 5,
     vad_filter: bool = True,
+    progress_callback: AsrProgressCallback | None = None,
 ) -> list[Segment]:
     if device == "cuda":
         ensure_cuda_runtime_on_path()
@@ -83,5 +86,12 @@ def transcribe_audio(
                 source="asr",
             )
         )
+        if progress_callback:
+            progress_callback(
+                {
+                    "segment_count": len(segments),
+                    "processed_seconds": float(item.end),
+                }
+            )
 
     return segments

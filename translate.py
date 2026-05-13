@@ -4,8 +4,11 @@ import json
 import os
 import time
 from typing import Any
+from typing import Callable
 
 from .models import Segment
+
+TranslationProgressCallback = Callable[[str, dict], None]
 
 
 def load_glossary(glossary: str | None) -> str:
@@ -287,6 +290,7 @@ def translate_segments(
     chunk_size: int = 40,
     max_retries: int = 2,
     openai_base_url: str | None = None,
+    progress_callback: TranslationProgressCallback | None = None,
 ) -> list[Segment]:
     if not enabled:
         for segment in segments:
@@ -303,7 +307,17 @@ def translate_segments(
     resolved_base_url = resolve_openai_base_url(openai_base_url)
     chunks = chunk_segments(segments, chunk_size)
     for chunk_index, chunk in enumerate(chunks, start=1):
+        if progress_callback:
+            progress_callback(
+                "translation_chunk_start",
+                {
+                    "chunk_index": chunk_index,
+                    "chunk_total": len(chunks),
+                    "segment_count": len(chunk),
+                },
+            )
         print(f"Translating chunk {chunk_index}/{len(chunks)} with {len(chunk)} segments.")
+        started_at = time.time()
         translations = translate_chunk_with_openai(
             chunk,
             src_lang=src_lang,
@@ -313,7 +327,22 @@ def translate_segments(
             base_url=resolved_base_url,
             max_retries=max_retries,
         )
+        fallback_count = 0
         for segment in chunk:
-            segment.target_text = translations.get(segment.id, "").strip()
+            translated_text = translations.get(segment.id, "").strip()
+            if translated_text == segment.source_text.strip():
+                fallback_count += 1
+            segment.target_text = translated_text
+        if progress_callback:
+            progress_callback(
+                "translation_chunk_complete",
+                {
+                    "chunk_index": chunk_index,
+                    "chunk_total": len(chunks),
+                    "segment_count": len(chunk),
+                    "fallback_count": fallback_count,
+                    "elapsed_seconds": round(time.time() - started_at, 2),
+                },
+            )
 
     return segments

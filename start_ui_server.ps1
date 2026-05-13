@@ -13,6 +13,17 @@ if (Test-Path $cudaBin) {
 $env:HTTP_PROXY = 'http://127.0.0.1:7890'
 $env:HTTPS_PROXY = 'http://127.0.0.1:7890'
 
+# 清理旧的 UI 进程，避免同一个端口残留多份旧服务。
+$uiProcesses = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like '*autosub_zh.ui_server*' }
+foreach ($proc in $uiProcesses) {
+    try {
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+    }
+    catch {
+    }
+}
+
 Write-Host "Starting Autosub UI server..." -ForegroundColor Cyan
 Write-Host "Project root: $projectRoot" -ForegroundColor DarkGray
 Write-Host "CUDA bin in PATH: $((($env:PATH -split ';') -contains $cudaBin))" -ForegroundColor DarkGray

@@ -253,3 +253,54 @@ Error opening output file D:\桌面\autosub_zh\output\fern\fern.wav.
 Error opening output files: Invalid argument
 
 
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 824, in download_and_optionally_run_job
+    video = download_video_from_url(url)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\ui_server.py", line 786, in download_video_from_url
+    ydl.extract_info(url, download=True)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1687, in extract_info
+    return self.__extract_info(url, self.get_info_extractor(key), download, extra_info, process)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1698, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1854, in __extract_info
+    return self.process_ie_result(ie_result, download, extra_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1913, in process_ie_result
+    ie_result = self.process_video_result(ie_result, download=download)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 3096, in process_video_result
+    self.process_info(new_info)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 189, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 3526, in process_info
+    partial_success, real_download = self.dl(fname, new_info)
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 3285, in dl
+    return fd.download(name, new_info, subtitle)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\downloader\common.py", line 480, in download
+    ret = self.real_download(filename, info_dict)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\downloader\http.py", line 360, in real_download
+    for retry in RetryManager(self.params.get('retries'), self.report_retry):
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\utils\_utils.py", line 5274, in __iter__
+    self.error_callback(self.error, self.attempt, self.retries)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\downloader\common.py", line 413, in report_retry
+    RetryManager.report_retry(
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\utils\_utils.py", line 5281, in report_retry
+    return error(f'{e}. Giving up after {count - 1} retries') if count > 1 else error(str(e))
+                                                                                ^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\downloader\common.py", line 416, in <lambda>
+    error=IDENTITY if not fatal else lambda e: self.report_error(f'\r[download] Got error: {e}'),
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1154, in report_error
+    self.trouble(f'{self._format_err("ERROR:", self.Styles.ERROR)} {message}', *args, **kwargs)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1093, in trouble
+    raise DownloadError(message, exc_info)
+yt_dlp.utils.DownloadError: [0;31mERROR:[0m [download] Got error: [WinError 10054] 远程主机强迫关闭了一个现有的连接。
+
+
