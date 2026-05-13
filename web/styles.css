@@ -195,6 +195,18 @@ body {
 }
 
 .card-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.download-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.download-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 .card-head h3,
 .section-head h3,
 .preview-head h4 { margin: 0; }

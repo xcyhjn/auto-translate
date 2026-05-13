@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from .models import BilingualSubtitleStyle
 from .pipeline_core import run_pipeline
+from yt_dlp import YoutubeDL
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -47,6 +48,7 @@ STATE = {
     "history": [],
     "last_manifest": None,
     "last_error": None,
+    "queue": [],
 }
 STATE_LOCK = threading.Lock()
 
@@ -156,6 +158,55 @@ def save_uploaded_file(target_dir: Path, filename: str, data: bytes) -> dict:
     }
 
 
+def enqueue_video(video: dict) -> None:
+    with STATE_LOCK:
+        if all(item["path"] != video["path"] for item in STATE["queue"]):
+            STATE["queue"].append(video)
+
+
+def clear_queue() -> None:
+    with STATE_LOCK:
+        STATE["queue"] = []
+
+
+def download_video_from_url(url: str) -> dict:
+    INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    before = {item.resolve() for item in INPUT_DIR.iterdir() if item.is_file()}
+    options = {
+        "format": "bestvideo+bestaudio/best",
+        "merge_output_format": "mp4",
+        "outtmpl": str(INPUT_DIR / "%(title)s.%(ext)s"),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with YoutubeDL(options) as ydl:
+        ydl.extract_info(url, download=True)
+
+    candidates = [
+        item
+        for item in INPUT_DIR.iterdir()
+        if item.is_file() and item.resolve() not in before and item.suffix.lower() in {".mp4", ".mkv", ".mov", ".avi", ".webm"}
+    ]
+    if not candidates:
+        candidates = sorted(
+            [item for item in INPUT_DIR.iterdir() if item.is_file() and item.suffix.lower() in {".mp4", ".mkv", ".mov", ".avi", ".webm"}],
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    if not candidates:
+        raise RuntimeError("yt-dlp download finished, but no video file was found in input.")
+
+    video_path = sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True)[0]
+    return {
+        "name": video_path.name,
+        "stem": video_path.stem,
+        "path": str(video_path),
+        "size": video_path.stat().st_size,
+        "external": False,
+    }
+
+
 def open_output_in_explorer(project_path: str | None) -> str:
     if project_path:
         folder = Path(project_path)
@@ -233,6 +284,35 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
             STATE["running"] = False
             STATE["current_stage"] = "complete"
             STATE["last_manifest"] = manifest
+    except Exception as exc:
+        with STATE_LOCK:
+            STATE["running"] = False
+            STATE["current_stage"] = "error"
+            STATE["last_error"] = {
+                "message": str(exc),
+                "traceback": traceback.format_exc(),
+            }
+        append_error_log(traceback.format_exc())
+
+
+def download_and_optionally_run_job(url: str, config: dict, run_after_download: bool) -> None:
+    try:
+        with STATE_LOCK:
+            STATE["running"] = True
+            STATE["current_stage"] = "downloading"
+            STATE["last_error"] = None
+        append_history("download_start", {"url": url})
+
+        video = download_video_from_url(url)
+        enqueue_video(video)
+        append_history("download_complete", {"path": video["path"], "name": video["name"]})
+
+        with STATE_LOCK:
+            STATE["running"] = False
+            STATE["current_stage"] = "idle"
+
+        if run_after_download:
+            run_pipeline_job(video["path"], config)
     except Exception as exc:
         with STATE_LOCK:
             STATE["running"] = False
@@ -333,6 +413,7 @@ class UIServerHandler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/upload-video":
                 filename = unquote(self.headers.get("X-Filename", "upload.mp4"))
                 video = save_uploaded_file(INPUT_DIR, filename, raw)
+                enqueue_video(video)
                 self._json_response({"ok": True, "video": video, "videos": list_input_videos()})
                 return
 
@@ -353,6 +434,24 @@ class UIServerHandler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/open-output":
                 opened = open_output_in_explorer(payload.get("project_path"))
                 self._json_response({"ok": True, "opened": opened})
+                return
+
+            if parsed.path == "/api/queue/clear":
+                clear_queue()
+                self._json_response({"ok": True, "state": STATE})
+                return
+
+            if parsed.path == "/api/download-video":
+                config = {**read_config(), **payload.get("config", {})}
+                url = payload["url"]
+                run_after_download = bool(payload.get("run_after_download"))
+                thread = threading.Thread(
+                    target=download_and_optionally_run_job,
+                    args=(url, config, run_after_download),
+                    daemon=True,
+                )
+                thread.start()
+                self._json_response({"ok": True})
                 return
 
             if parsed.path == "/api/run":

@@ -132,6 +132,26 @@ function renderStageFeed(history) {
   });
 }
 
+function renderQueue(queue) {
+  const root = el("queueList");
+  root.innerHTML = "";
+  (queue || []).forEach((item, index) => {
+    const node = document.createElement("div");
+    node.className = "stage-item";
+    node.innerHTML = `
+      <div><strong>${index + 1}. ${item.name}</strong></div>
+      <div class="meta-row"><span>${item.path}</span><span>${bytes(item.size || 0)}</span></div>
+    `;
+    root.appendChild(node);
+  });
+  if (!queue || !queue.length) {
+    const empty = document.createElement("div");
+    empty.className = "stage-item";
+    empty.innerHTML = `<div><strong>队列为空</strong></div><div class="meta-row"><span>下载到队列或添加 Input 后会显示在这里。</span></div>`;
+    root.appendChild(empty);
+  }
+}
+
 function openFile(path, name) {
   state.selectedFilePath = path;
   el("previewTitle").textContent = name;
@@ -201,6 +221,7 @@ function renderState(payload) {
   setRunState(runState);
   el("currentStageLabel").textContent = `当前阶段：${payload.state.current_stage}`;
   renderStageFeed(payload.state.history || []);
+  renderQueue(payload.state.queue || []);
   renderProjects(payload.projects || []);
   if (payload.videos) renderVideos(payload.videos);
   if (payload.config) fillForm(payload.config);
@@ -295,6 +316,21 @@ function bindActions() {
     });
   };
 
+  const runDownload = (runAfterDownload) => {
+    const url = el("downloadUrlInput").value.trim();
+    if (!url) return;
+    const config = readFormConfig();
+    fetch("/api/download-video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        run_after_download: runAfterDownload,
+        config,
+      }),
+    });
+  };
+
   const runPipeline = (previewSeconds = null) => {
     if (!state.selectedVideo) return;
     const config = readFormConfig();
@@ -314,6 +350,17 @@ function bindActions() {
   el("pickAudioBtn").addEventListener("click", pickAudio);
   el("pickAudioInlineBtn").addEventListener("click", pickAudio);
   el("previewBtn").addEventListener("click", () => runPipeline(60));
+  el("downloadOnlyBtn").addEventListener("click", () => runDownload(false));
+  el("downloadAndRunBtn").addEventListener("click", () => runDownload(true));
+  el("clearQueueBtn").addEventListener("click", () => {
+    fetch("/api/queue/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    })
+      .then((res) => res.json())
+      .then((payload) => renderState({ state: payload.state, projects: state.projects, videos: state.videos }));
+  });
   el("openOutputBtn").addEventListener("click", openOutput);
   el("openOutputInlineBtn").addEventListener("click", openOutput);
 

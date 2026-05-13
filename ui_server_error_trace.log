@@ -204,3 +204,52 @@ Error opening output file D:\桌面\autosub_zh\output\fern\fern.wav.
 Error opening output files: Invalid argument
 
 
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\media.py", line 30, in run_command
+    return subprocess.run(
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['ffmpeg', '-y', '-i', 'D:\\桌面\\autosub_zh\\input\\fern.mp4', '-vn', '-ac', '1', '-ar', '16000', 'D:\\桌面\\autosub_zh\\output\\fern\\fern.wav']' returned non-zero exit status 4294967274.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 263, in run_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\pipeline_core.py", line 142, in run_pipeline
+    audio_path = extract_audio(processing_video_path, work_dir=output_dir)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\media.py", line 102, in extract_audio
+    run_command(
+  File "D:\桌面\autosub_zh\media.py", line 48, in run_command
+    raise RuntimeError(f"Command failed: {command}\n{details}") from exc
+RuntimeError: Command failed: ffmpeg -y -i D:\桌面\autosub_zh\input\fern.mp4 -vn -ac 1 -ar 16000 D:\桌面\autosub_zh\output\fern\fern.wav
+ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 15.2.0 (Rev13, Built by MSYS2 project)
+  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-zlib --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-sdl2 --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxvid --enable-libaom --enable-libopenjpeg --enable-libvpx --enable-mediafoundation --enable-libass --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-openal --enable-libgme --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libtheora --enable-libvo-amrwbenc --enable-libgsm --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-librubberband
+  libavutil      60. 26.101 / 60. 26.101
+  libavcodec     62. 28.101 / 62. 28.101
+  libavformat    62. 12.101 / 62. 12.101
+  libavdevice    62.  3.101 / 62.  3.101
+  libavfilter    11. 14.101 / 11. 14.101
+  libswscale      9.  5.101 /  9.  5.101
+  libswresample   6.  3.101 /  6.  3.101
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\桌面\autosub_zh\input\fern.mp4':
+  Metadata:
+    major_brand     : dash
+    minor_version   : 0
+    compatible_brands: iso6av01mp41
+    creation_time   : 2026-05-04T08:19:18.000000Z
+  Duration: 00:30:02.04, start: 0.000000, bitrate: 3135 kb/s
+  Stream #0:0[0x1](und): Video: av1 (libaom-av1) (Main) (av01 / 0x31307661), yuv420p(tv, bt709), 3840x1920 [SAR 1:1 DAR 2:1], 5784 kb/s, 25 fps, 25 tbr, 12800 tbn (default)
+    Metadata:
+      creation_time   : 2026-05-04T08:19:18.000000Z
+      handler_name    : ISO Media file produced by Google Inc.
+Output #0, wav, to 'D:\桌面\autosub_zh\output\fern\fern.wav':
+[out#0/wav @ 0000021a7dc4e280] Output file does not contain any stream
+Error opening output file D:\桌面\autosub_zh\output\fern\fern.wav.
+Error opening output files: Invalid argument
+
+

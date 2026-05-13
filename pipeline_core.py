@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
@@ -65,7 +66,11 @@ def create_safe_ass_copy(subtitle_path: Path) -> Path:
 
 
 def resolve_output_dir(input_path: Path, output_root: Path) -> Path:
-    output_dir = output_root / input_path.stem
+    stem = input_path.stem
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-._")
+    if not slug:
+        slug = f"video-{abs(hash(stem)) % 10_000_000}"
+    output_dir = output_root / slug
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
