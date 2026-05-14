@@ -19,6 +19,9 @@ from .translate import translate_segments
 
 StageCallback = Callable[[str, dict], None]
 
+VIDEO_ENCODER = "h264_nvenc"
+VIDEO_ENCODER_FALLBACK = "libx264"
+
 
 def write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,10 +64,10 @@ def burn_subtitle(
             "-vf",
             subtitle_filter,
             "-c:v",
-            "libx264",
+            VIDEO_ENCODER,
             "-preset",
-            "medium",
-            "-crf",
+            "p5",
+            "-cq",
             "25",
             "-pix_fmt",
             "yuv420p",
@@ -88,7 +91,19 @@ def burn_subtitle(
                 payload["estimated_final_size"] = int(size_bytes / progress_ratio)
         emit(progress_callback, "burn_progress", payload)
 
-    run_ffmpeg_command(args, progress_callback=emit_progress if progress_callback else None)
+    try:
+        run_ffmpeg_command(args, progress_callback=emit_progress if progress_callback else None)
+    except RuntimeError:
+        if output_path.exists():
+            output_path.unlink()
+        fallback_args = list(args)
+        encoder_index = fallback_args.index("-c:v") + 1
+        fallback_args[encoder_index] = VIDEO_ENCODER_FALLBACK
+        preset_index = fallback_args.index("-preset") + 1
+        fallback_args[preset_index] = "medium"
+        cq_index = fallback_args.index("-cq")
+        fallback_args[cq_index : cq_index + 2] = ["-crf", "25"]
+        run_ffmpeg_command(fallback_args, progress_callback=emit_progress if progress_callback else None)
 
 
 def create_safe_ass_copy(subtitle_path: Path) -> Path:
@@ -152,6 +167,7 @@ def run_pipeline(
     output_root.mkdir(parents=True, exist_ok=True)
     output_dir = resolve_output_dir(input_path, output_root)
     translated_json_path = output_dir / "05_translated_segments.json"
+    timed_json_path = output_dir / "03_timed_source_segments.json"
     processing_video_path = input_path
 
     emit(
@@ -236,104 +252,117 @@ def run_pipeline(
             },
         )
     else:
-        def on_extract_progress(progress_payload: dict) -> None:
-            payload = dict(progress_payload)
-            if probe.duration:
-                processed_seconds = float(payload.get("out_time_seconds", 0.0))
-                payload["duration_seconds"] = probe.duration
-                payload["progress"] = round(max(0.0, min(1.0, processed_seconds / probe.duration)) * 100, 2)
-            emit(callback, "extract_audio_progress", payload)
-
-        emit(
-            callback,
-            "extract_audio_start",
-            {
-                "input_path": str(processing_video_path),
-                "duration_seconds": probe.duration,
-            },
-        )
-        audio_path = extract_audio(
-            processing_video_path,
-            work_dir=output_dir,
-            progress_callback=on_extract_progress,
-        )
-        renamed_audio_path = output_dir / "01_audio_16k.wav"
-        if audio_path != renamed_audio_path:
-            renamed_audio_path.write_bytes(audio_path.read_bytes())
-            audio_path = renamed_audio_path
-        emit(
-            callback,
-            "extract_audio_complete",
-            {
-                "path": str(audio_path),
-                "size_bytes": audio_path.stat().st_size,
-                "duration_seconds": probe.duration,
-            },
-        )
-
-        emit(
-            callback,
-            "asr_start",
-            {
-                "audio_path": str(audio_path),
-                "duration_seconds": probe.duration,
-            },
-        )
-        raw_segments = transcribe_audio(
-            audio_path,
-            model_name=model,
-            language=src_lang,
-            device=device,
-            compute_type=compute_type,
-            beam_size=beam_size,
-            vad_filter=True,
-            progress_callback=lambda progress: emit(
+        if load_existing_segments and timed_json_path.exists():
+            timed_segments = load_segments(timed_json_path)
+            emit(
                 callback,
-                "asr_progress",
+                "timing_complete",
                 {
-                    **progress,
-                    "duration_seconds": probe.duration,
-                    "virtual_chunk_current": seconds_to_virtual_chunks(
-                        float(progress.get("processed_seconds", 0.0)),
-                        float(probe.duration or 0.0),
-                    )[0],
-                    "virtual_chunk_total": seconds_to_virtual_chunks(
-                        float(progress.get("processed_seconds", 0.0)),
-                        float(probe.duration or 0.0),
-                    )[1],
+                    "path": str(timed_json_path),
+                    "count": len(timed_segments),
+                    "source_count": len(timed_segments),
+                    "reused": True,
                 },
-            ),
-        )
-        save_segments(raw_segments, output_dir / "02_asr_raw_segments.json")
-        emit(
-            callback,
-            "asr_complete",
-            {
-                "path": str(output_dir / "02_asr_raw_segments.json"),
-                "count": len(raw_segments),
-                "duration_seconds": probe.duration,
-            },
-        )
+            )
+        else:
+            def on_extract_progress(progress_payload: dict) -> None:
+                payload = dict(progress_payload)
+                if probe.duration:
+                    processed_seconds = float(payload.get("out_time_seconds", 0.0))
+                    payload["duration_seconds"] = probe.duration
+                    payload["progress"] = round(max(0.0, min(1.0, processed_seconds / probe.duration)) * 100, 2)
+                emit(callback, "extract_audio_progress", payload)
 
-        emit(
-            callback,
-            "timing_start",
-            {
-                "segment_count": len(raw_segments),
-            },
-        )
-        timed_segments = refine_timing(raw_segments)
-        save_segments(timed_segments, output_dir / "03_timed_source_segments.json")
-        write_srt(timed_segments, output_dir / "04_source_en.srt")
-        emit(
-            callback,
-            "timing_complete",
-            {
-                "path": str(output_dir / "03_timed_source_segments.json"),
-                "count": len(timed_segments),
-                "source_count": len(raw_segments),
-            },
-        )
+            emit(
+                callback,
+                "extract_audio_start",
+                {
+                    "input_path": str(processing_video_path),
+                    "duration_seconds": probe.duration,
+                },
+            )
+            audio_path = extract_audio(
+                processing_video_path,
+                work_dir=output_dir,
+                progress_callback=on_extract_progress,
+            )
+            renamed_audio_path = output_dir / "01_audio_16k.wav"
+            if audio_path != renamed_audio_path:
+                renamed_audio_path.write_bytes(audio_path.read_bytes())
+                audio_path = renamed_audio_path
+            emit(
+                callback,
+                "extract_audio_complete",
+                {
+                    "path": str(audio_path),
+                    "size_bytes": audio_path.stat().st_size,
+                    "duration_seconds": probe.duration,
+                },
+            )
+
+            emit(
+                callback,
+                "asr_start",
+                {
+                    "audio_path": str(audio_path),
+                    "duration_seconds": probe.duration,
+                },
+            )
+            raw_segments = transcribe_audio(
+                audio_path,
+                model_name=model,
+                language=src_lang,
+                device=device,
+                compute_type=compute_type,
+                beam_size=beam_size,
+                vad_filter=True,
+                progress_callback=lambda progress: emit(
+                    callback,
+                    "asr_progress",
+                    {
+                        **progress,
+                        "duration_seconds": probe.duration,
+                        "virtual_chunk_current": seconds_to_virtual_chunks(
+                            float(progress.get("processed_seconds", 0.0)),
+                            float(probe.duration or 0.0),
+                        )[0],
+                        "virtual_chunk_total": seconds_to_virtual_chunks(
+                            float(progress.get("processed_seconds", 0.0)),
+                            float(probe.duration or 0.0),
+                        )[1],
+                    },
+                ),
+            )
+            save_segments(raw_segments, output_dir / "02_asr_raw_segments.json")
+            emit(
+                callback,
+                "asr_complete",
+                {
+                    "path": str(output_dir / "02_asr_raw_segments.json"),
+                    "count": len(raw_segments),
+                    "duration_seconds": probe.duration,
+                },
+            )
+
+            emit(
+                callback,
+                "timing_start",
+                {
+                    "segment_count": len(raw_segments),
+                },
+            )
+            timed_segments = refine_timing(raw_segments)
+            save_segments(timed_segments, timed_json_path)
+            write_srt(timed_segments, output_dir / "04_source_en.srt")
+            emit(
+                callback,
+                "timing_complete",
+                {
+                    "path": str(timed_json_path),
+                    "count": len(timed_segments),
+                    "source_count": len(raw_segments),
+                },
+            )
 
         emit(
             callback,
@@ -399,9 +428,9 @@ def run_pipeline(
         {
             "path": str(output_video_path),
             "duration_seconds": burn_duration,
-            "encoder": "libx264",
-            "crf": 25,
-            "preset": "medium",
+            "encoder": VIDEO_ENCODER,
+            "quality": 25,
+            "preset": "p5",
         },
     )
     burn_subtitle(

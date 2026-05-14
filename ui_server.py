@@ -145,9 +145,9 @@ def default_phase_status() -> dict:
             "duration_seconds": 0,
             "remaining_seconds": 0,
             "speed": 0,
-            "encoder": "libx264",
-            "crf": 25,
-            "preset": "medium",
+            "encoder": "h264_nvenc",
+            "quality": 25,
+            "preset": "p5",
             "label": "等待中",
         },
     }
@@ -761,9 +761,9 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "progress": 0,
                 "label": "正在烧录双语视频",
                 "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
-                "encoder": str(payload.get("encoder", "libx264")),
-                "crf": int(payload.get("crf", 25) or 25),
-                "preset": str(payload.get("preset", "medium")),
+                "encoder": str(payload.get("encoder", "h264_nvenc")),
+                "quality": int(payload.get("quality", payload.get("crf", 25)) or 25),
+                "preset": str(payload.get("preset", "p5")),
             }
         )
         return
@@ -883,7 +883,11 @@ def open_input_in_explorer() -> str:
 
 
 def run_pipeline_job(video_path: str, config: dict) -> None:
-    style = BilingualSubtitleStyle(**config["style"])
+    style_config = dict(config.get("style") or {})
+    if "en_max_words_per_line" in style_config and "en_max_single_line_chars" not in style_config:
+        style_config["en_max_single_line_chars"] = max(50, int(style_config.pop("en_max_words_per_line") or 12) * 6)
+    style_config.pop("en_max_words_per_line", None)
+    style = BilingualSubtitleStyle(**style_config)
     try:
         with STATE_LOCK:
             STATE["running"] = True
@@ -993,6 +997,13 @@ def download_and_optionally_run_job(url: str, config: dict, run_after_download: 
 
 
 class UIServerHandler(SimpleHTTPRequestHandler):
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".js": "application/javascript; charset=utf-8",
+    }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_DIR), **kwargs)
 

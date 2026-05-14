@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Autosub Studio</title>
-    <link rel="stylesheet" href="./styles.css?v=20260514-idm1" />
+    <link rel="stylesheet" href="./styles.css?v=20260514-utf8fix1" />
   </head>
   <body>
     <div class="app-shell">
@@ -43,7 +43,7 @@
             <button id="pickInputBtn" class="ghost-btn">添加 Input</button>
             <button id="pickAudioBtn" class="ghost-btn">追加 MP3</button>
             <button id="previewBtn" class="ghost-btn">生成 60s 预览</button>
-            <button id="clearQueueBtn" class="ghost-btn">清除原先队列</button>
+            <button id="clearQueueBtn" class="ghost-btn">清除队列</button>
             <button id="openOutputBtn" class="ghost-btn">打开 Output</button>
             <button id="saveConfigBtn" class="ghost-btn">保存配置</button>
             <button id="runBtn" class="primary-btn">启动流程</button>
@@ -124,7 +124,7 @@
               </div>
               <div class="download-actions">
                 <button id="downloadOnlyBtn" class="mini-btn">下载到队列</button>
-                <button id="downloadAndRunBtn" class="mini-btn">下载并开烤</button>
+                <button id="downloadAndRunBtn" class="mini-btn">下载并开跑</button>
                 <button id="testProxyBtn" class="mini-btn">测试代理</button>
                 <button id="checkIdmBtn" class="mini-btn">检测 IDM</button>
                 <button id="openInputBtn" class="mini-btn">打开 input</button>
@@ -206,7 +206,7 @@
                 <div class="section-head">
                   <div>
                     <h3>双语字幕样式</h3>
-                    <p>中文主字幕和英文副字幕的字号、左右边距、离底部距离都可以在这里调整。</p>
+                    <p>中文只在过长时语义换行；英文保持单行，过长时自动拆到下一段字幕。</p>
                   </div>
                 </div>
                 <div class="style-columns">
@@ -218,6 +218,9 @@
                       <label><span>左边距</span><input id="zh_margin_l" type="number" /></label>
                       <label><span>右边距</span><input id="zh_margin_r" type="number" /></label>
                       <label><span>底边距</span><input id="zh_margin_v" type="number" /></label>
+                      <label><span>换行触发</span><input id="zh_wrap_trigger_chars" type="number" min="8" /></label>
+                      <label><span>单行上限</span><input id="zh_max_chars_per_line" type="number" min="8" /></label>
+                      <label><span>最多行数</span><input id="zh_max_lines" type="number" min="1" /></label>
                     </div>
                   </div>
                   <div class="style-card">
@@ -228,6 +231,9 @@
                       <label><span>左边距</span><input id="en_margin_l" type="number" /></label>
                       <label><span>右边距</span><input id="en_margin_r" type="number" /></label>
                       <label><span>底边距</span><input id="en_margin_v" type="number" /></label>
+                      <label><span>单行上限</span><input id="en_max_single_line_chars" type="number" min="30" /></label>
+                      <label><span>最多拆段</span><input id="en_max_split_parts" type="number" min="1" /></label>
+                      <label><span>最短拆段</span><input id="min_split_duration" type="number" min="0.2" step="0.1" /></label>
                     </div>
                   </div>
                 </div>
@@ -260,6 +266,6 @@
 
     <div id="toast" class="toast hidden"></div>
 
-    <script src="./app.js?v=20260514-idm1"></script>
+    <script src="./app.js?v=20260514-utf8fix1"></script>
   </body>
-  </html>
+</html>

@@ -8,6 +8,11 @@ SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")
 
 
 def clone_segment(segment: Segment, *, words: list[Word], text: str) -> Segment:
+    """Clone a segment after a word-boundary split.
+
+    Word objects are atomic throughout the timing layer. Splits may happen
+    between Word items, but never inside ``word.word``.
+    """
     return Segment(
         id=segment.id,
         start=float(words[0].start),
@@ -45,6 +50,7 @@ def should_split_after_word(
 
 
 def split_segment_by_max_duration(segment: Segment, rules: SubtitleRules) -> list[Segment]:
+    """Split long segments only at word boundaries."""
     if not segment.words:
         return [segment]
 
@@ -80,6 +86,7 @@ def split_segment_by_max_duration(segment: Segment, rules: SubtitleRules) -> lis
 
 
 def split_segment_on_pause(segment: Segment, rules: SubtitleRules) -> list[Segment]:
+    """Split on pauses only after a complete Word item."""
     if not segment.words:
         return [segment]
 

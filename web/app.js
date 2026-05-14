@@ -145,11 +145,17 @@ function readFormConfig() {
       zh_margin_l: Number(el("zh_margin_l").value),
       zh_margin_r: Number(el("zh_margin_r").value),
       zh_margin_v: Number(el("zh_margin_v").value),
+      zh_wrap_trigger_chars: Number(el("zh_wrap_trigger_chars").value || 32),
+      zh_max_chars_per_line: Number(el("zh_max_chars_per_line").value || 28),
+      zh_max_lines: Number(el("zh_max_lines").value || 2),
       en_font_name: el("en_font_name").value,
       en_font_size: Number(el("en_font_size").value),
       en_margin_l: Number(el("en_margin_l").value),
       en_margin_r: Number(el("en_margin_r").value),
       en_margin_v: Number(el("en_margin_v").value),
+      en_max_single_line_chars: Number(el("en_max_single_line_chars").value || 78),
+      en_max_split_parts: Number(el("en_max_split_parts").value || 3),
+      min_split_duration: Number(el("min_split_duration").value || 0.9),
     },
   };
 }
@@ -180,11 +186,17 @@ function fillForm(config) {
   el("zh_margin_l").value = style.zh_margin_l ?? 90;
   el("zh_margin_r").value = style.zh_margin_r ?? 90;
   el("zh_margin_v").value = style.zh_margin_v ?? 94;
+  el("zh_wrap_trigger_chars").value = style.zh_wrap_trigger_chars ?? 32;
+  el("zh_max_chars_per_line").value = style.zh_max_chars_per_line ?? 28;
+  el("zh_max_lines").value = style.zh_max_lines ?? 2;
   el("en_font_name").value = style.en_font_name || "Arial";
   el("en_font_size").value = style.en_font_size ?? 40;
   el("en_margin_l").value = style.en_margin_l ?? 80;
   el("en_margin_r").value = style.en_margin_r ?? 100;
   el("en_margin_v").value = style.en_margin_v ?? 44;
+  el("en_max_single_line_chars").value = style.en_max_single_line_chars ?? Math.max(50, (style.en_max_words_per_line ?? 13) * 6);
+  el("en_max_split_parts").value = style.en_max_split_parts ?? 3;
+  el("min_split_duration").value = style.min_split_duration ?? 0.9;
 
   setLinkedAudioLabel(config.audio_override_path || "");
 }
@@ -414,7 +426,7 @@ function renderPhaseStatus(phaseStatus) {
       if (phase.estimated_final_size) stats.push(`预计 ${bytes(phase.estimated_final_size)}`);
       if (phase.speed) stats.push(`速度 ${Number(phase.speed).toFixed(2)}x`);
       if (phase.remaining_seconds) stats.push(`剩余 ${seconds(phase.remaining_seconds)}`);
-      stats.push(`${phase.encoder || "libx264"} · CRF ${phase.crf || 25} · ${phase.preset || "medium"}`);
+      stats.push(`${phase.encoder || "h264_nvenc"} · Q ${phase.quality || phase.crf || 25} · ${phase.preset || "p5"}`);
     }
 
     card.innerHTML = `

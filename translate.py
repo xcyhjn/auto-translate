@@ -103,6 +103,10 @@ def build_translation_prompt(
         "- Translate naturally for on-screen subtitles.\n"
         "- Keep the translation concise; avoid explanatory expansion.\n"
         "- Preserve names, numbers, and domain terms according to the glossary.\n\n"
+        "- Do not add manual line breaks, markdown, bullets, or numbering inside target_text.\n"
+        "- Preserve the input IDs exactly; each ID must return one complete translation.\n"
+        "- Do not split, truncate, or rearrange technical words, names, commands, paths, or identifiers.\n"
+        "- Treat every word/token in the source as atomic; never break a word into pieces for layout.\n\n"
         f"Glossary:\n{glossary_block}\n\n"
         "Input JSON:\n"
         f"{json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -160,7 +164,7 @@ def translate_chunk_with_openai(
             "OPENAI_API_KEY is not set. Set it before using --translate-provider openai."
         )
 
-    client_kwargs = {}
+    client_kwargs = {"timeout": 600.0}
     if base_url:
         # 如果你使用 GPTCodePlan 这类中转站，就在这里把 base_url 传给 SDK。
         client_kwargs["base_url"] = base_url
@@ -203,9 +207,9 @@ def translate_chunk_with_openai(
                     "OpenAI translation failed after retries. Last raw output:\n"
                     f"{raw_text}"
                 ) from last_error
-            # 简单的指数退避可以避免短暂的网络/接口波动
-            # 直接把长翻译任务打断。
-            time.sleep(2**attempt)
+            # 网络代理和中转站偶尔会在 TLS 握手或首包阶段抖动；
+            # 长视频翻译不能因为一次短暂超时就整条流水线倒掉。
+            time.sleep(min(30, 5 * (2**attempt)))
 
     translations: dict[int, str] = {}
     if isinstance(payload, dict):
@@ -262,7 +266,7 @@ def dry_run_openai_translation(
         ) from exc
 
     resolved_base_url = resolve_openai_base_url(base_url)
-    client_kwargs = {}
+    client_kwargs = {"timeout": 600.0}
     if resolved_base_url:
         client_kwargs["base_url"] = resolved_base_url
 

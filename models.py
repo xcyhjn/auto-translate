@@ -43,11 +43,17 @@ class BilingualSubtitleStyle:
     zh_margin_l: int = 90
     zh_margin_r: int = 90
     zh_margin_v: int = 94
+    zh_wrap_trigger_chars: int = 32
+    zh_max_chars_per_line: int = 28
+    zh_max_lines: int = 2
     en_font_name: str = "Arial"
     en_font_size: int = 40
     en_margin_l: int = 80
     en_margin_r: int = 100
     en_margin_v: int = 44
+    en_max_single_line_chars: int = 78
+    en_max_split_parts: int = 3
+    min_split_duration: float = 0.9
 
 
 @dataclass(slots=True)
