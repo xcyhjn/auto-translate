@@ -48,6 +48,9 @@ class DisplayCue:
     en_text: str
     zh_text: str | None = None
     words: list[Word] | None = None
+    source_segment_id: int | None = None
+    group_index: int = 1
+    group_total: int = 1
 
 
 def contains_chinese(text: str) -> bool:
@@ -283,6 +286,53 @@ def split_english_text(text: str, max_chars: int, max_parts: int = 3) -> list[st
     return [part for part in parts if part]
 
 
+def score_grouping_quality(groups: list[str], *, max_chars: int) -> float:
+    if not groups:
+        return 1_000_000
+    overflow = sum(max(0, visible_text_length(group) - max_chars) for group in groups)
+    short_penalty = sum(1 for group in groups if visible_text_length(group) < max(6, max_chars // 4))
+    variance = 0.0
+    lengths = [visible_text_length(group) for group in groups]
+    avg = sum(lengths) / len(lengths)
+    variance = sum((length - avg) ** 2 for length in lengths)
+    return overflow * 100 + short_penalty * 25 + variance
+
+
+def merge_english_groups_for_alignment(
+    groups: list[str],
+    *,
+    max_chars: int,
+    target_group_count: int,
+) -> list[str]:
+    groups = [normalize_inline_text(group) for group in groups if normalize_inline_text(group)]
+    target_group_count = max(1, target_group_count)
+    soft_limit = int(max_chars * 1.28)
+    while len(groups) > target_group_count:
+        best_index = None
+        best_score = None
+        for index in range(len(groups) - 1):
+            merged = normalize_inline_text(f"{groups[index]} {groups[index + 1]}")
+            merged_length = visible_text_length(merged)
+            overflow_penalty = max(0, merged_length - soft_limit) * 100
+            split_penalty = abs(visible_text_length(groups[index]) - visible_text_length(groups[index + 1]))
+            score = overflow_penalty + split_penalty + score_grouping_quality(
+                groups[:index] + [merged] + groups[index + 2 :],
+                max_chars=max_chars,
+            )
+            if best_score is None or score < best_score:
+                best_score = score
+                best_index = index
+        if best_index is None:
+            break
+        merged = normalize_inline_text(f"{groups[best_index]} {groups[best_index + 1]}")
+        groups[best_index : best_index + 2] = [merged]
+    return groups
+
+
+def count_adjacent_repeats(items: list[str]) -> int:
+    return sum(1 for previous, current in zip(items, items[1:]) if previous and current and previous == current)
+
+
 def split_words_by_english_parts(words: list[Word], text_parts: list[str]) -> list[list[Word]]:
     if not words or not text_parts:
         return []
@@ -336,16 +386,138 @@ def split_chinese_for_parts(text: str, part_count: int) -> list[str]:
             groups[-1] = f"{groups[-1]}{tail}".strip()
         return [group for group in groups if group]
 
-    # 中文语义块少于英文拆分段时，不再留空子段。
-    # 我们按顺序继承最近的中文语义，让每个英文子段都有中文字幕对应。
+    # 中文语义块少于英文拆分段时，尽量把中文按顺序再细分，
+    # 而不是简单重复整句去填满后续英文子段。
     if len(chunks) == 1:
-        return [chunks[0]] * part_count
+        return split_single_chinese_chunk(chunks[0], part_count)
+
+    if len(chunks) < part_count:
+        expanded: list[str] = []
+        base_weights = [visible_text_length(chunk) for chunk in chunks]
+        total_weight = max(1, sum(base_weights))
+        for chunk_index, chunk in enumerate(chunks):
+            weight = base_weights[chunk_index]
+            allocated = max(1, round(part_count * weight / total_weight))
+            split_parts = split_single_chinese_chunk(chunk, allocated)
+            expanded.extend(split_parts)
+        return [part for part in expanded if part]
 
     parts: list[str] = []
     for index in range(part_count):
         mapped_index = min(len(chunks) - 1, round(index * (len(chunks) - 1) / max(1, part_count - 1)))
         parts.append(chunks[mapped_index])
     return parts
+
+
+def split_single_chinese_chunk(text: str, part_count: int) -> list[str]:
+    text = normalize_inline_text(text)
+    if part_count <= 1 or not text:
+        return [text] if text else []
+
+    tokens = [token for token in tokenize_mixed_text(text) if token]
+    if not tokens:
+        return [text]
+
+    total_visible = max(1, visible_text_length(text))
+    target_visible = max(1, total_visible // part_count)
+    parts: list[str] = []
+    current = ""
+
+    for token_index, token in enumerate(tokens):
+        candidate = f"{current}{token}" if current else token
+        remaining_tokens = len(tokens) - (token_index + 1)
+        remaining_parts = part_count - len(parts) - 1
+        if (
+            current.strip()
+            and visible_text_length(candidate) > target_visible
+            and remaining_tokens >= remaining_parts
+        ):
+            parts.append(current.strip())
+            current = token
+        else:
+            current = candidate
+
+    if current.strip():
+        parts.append(current.strip())
+
+    while len(parts) < part_count and parts:
+        longest_index = max(range(len(parts)), key=lambda idx: visible_text_length(parts[idx]))
+        longest = parts.pop(longest_index)
+        split_parts = split_long_chinese_chunk(longest, max(1, visible_text_length(longest) // 2))
+        if len(split_parts) <= 1:
+            parts.insert(longest_index, longest)
+            break
+        for offset, part in enumerate(split_parts):
+            parts.insert(longest_index + offset, part)
+
+    while len(parts) > part_count:
+        tail = parts.pop()
+        parts[-1] = f"{parts[-1]}{tail}".strip()
+
+    return parts[:part_count]
+
+
+def build_chinese_groups_for_english(text: str, english_groups: list[str]) -> list[str]:
+    text = normalize_inline_text(text)
+    if not english_groups:
+        return []
+    if len(english_groups) == 1 or not text:
+        return [text] if text else [""]
+
+    base_chunks = split_by_meaning(text)
+    target_count = len(english_groups)
+
+    while len(base_chunks) < target_count:
+        split_index = max(range(len(base_chunks)), key=lambda idx: visible_text_length(base_chunks[idx]))
+        split_parts = split_single_chinese_chunk(base_chunks[split_index], 2)
+        if len(split_parts) <= 1:
+            break
+        base_chunks[split_index : split_index + 1] = split_parts
+
+    if len(base_chunks) == target_count:
+        return [normalize_inline_text(chunk) for chunk in base_chunks]
+
+    if len(base_chunks) > target_count:
+        weights = [max(1, visible_text_length(group)) for group in english_groups]
+        total_weight = sum(weights)
+        total_chars = max(1, sum(visible_text_length(chunk) for chunk in base_chunks))
+        target_chars = [max(1, round(total_chars * weight / total_weight)) for weight in weights]
+        groups: list[str] = []
+        current_chunks: list[str] = []
+        current_chars = 0
+        chunk_index = 0
+        for group_index, target_char in enumerate(target_chars):
+            remaining_groups = target_count - group_index - 1
+            while chunk_index < len(base_chunks):
+                chunk = base_chunks[chunk_index]
+                chunk_chars = visible_text_length(chunk)
+                if current_chunks and current_chars >= target_char and len(base_chunks) - chunk_index > remaining_groups:
+                    break
+                current_chunks.append(chunk)
+                current_chars += chunk_chars
+                chunk_index += 1
+                if len(base_chunks) - chunk_index < remaining_groups:
+                    break
+            groups.append(normalize_inline_text("".join(current_chunks)))
+            current_chunks = []
+            current_chars = 0
+        if chunk_index < len(base_chunks) and groups:
+            groups[-1] = normalize_inline_text(groups[-1] + "".join(base_chunks[chunk_index:]))
+        while len(groups) > target_count:
+            tail = groups.pop()
+            groups[-1] = normalize_inline_text(groups[-1] + tail)
+        while len(groups) < target_count:
+            groups.append(groups[-1] if groups else text)
+        return [normalize_inline_text(group) for group in groups]
+
+    expanded = base_chunks[:]
+    while len(expanded) < target_count:
+        split_index = max(range(len(expanded)), key=lambda idx: visible_text_length(expanded[idx]))
+        split_parts = split_single_chinese_chunk(expanded[split_index], 2)
+        if len(split_parts) <= 1:
+            break
+        expanded[split_index : split_index + 1] = split_parts
+    return [normalize_inline_text(chunk) for chunk in expanded if normalize_inline_text(chunk)]
 
 
 def duration_for_split(segment: Segment, part_count: int, index: int) -> tuple[float, float]:
@@ -358,39 +530,68 @@ def duration_for_split(segment: Segment, part_count: int, index: int) -> tuple[f
 def split_segment_for_bilingual_ass(
     segment: Segment,
     style: BilingualSubtitleStyle,
-) -> list[DisplayCue]:
+) -> tuple[list[DisplayCue], dict]:
     source_text = normalize_inline_text(segment.source_text)
     target_text = normalize_inline_text(segment.target_text or "")
     max_chars = int(style.en_max_single_line_chars or 78)
     max_parts = int(style.en_max_split_parts or 3)
 
     if english_fits_single_line(source_text, max_chars):
-        return [
+        cues = [
             DisplayCue(
                 start=segment.start,
                 end=segment.end,
                 en_text=source_text,
                 zh_text=target_text or None,
                 words=segment.words,
+                source_segment_id=segment.id,
+                group_index=1,
+                group_total=1,
             )
         ]
+        return cues, build_alignment_debug(segment, [source_text], [target_text or ""], cues, merged=False)
 
     text_parts = split_english_text(source_text, max_chars, max_parts=max_parts)
-    if len(text_parts) <= 1:
-        return [
+    merged = False
+    base_target_groups = max(1, len(split_by_meaning(target_text))) if target_text else 1
+    max_allowed_groups = min(max_parts, max(len(text_parts), base_target_groups))
+    chosen_english_parts: list[str] | None = None
+    chosen_zh_parts: list[str] | None = None
+
+    for candidate_count in range(max_allowed_groups, 0, -1):
+        english_candidate = merge_english_groups_for_alignment(
+            text_parts,
+            max_chars=max_chars,
+            target_group_count=candidate_count,
+        )
+        zh_candidate = build_chinese_groups_for_english(target_text, english_candidate)
+        if len(english_candidate) != len(zh_candidate):
+            continue
+        if count_adjacent_repeats(zh_candidate) > 0 and candidate_count > 1:
+            continue
+        chosen_english_parts = english_candidate
+        chosen_zh_parts = zh_candidate
+        merged = merged or (english_candidate != text_parts)
+        break
+
+    if not chosen_english_parts or not chosen_zh_parts:
+        cues = [
             DisplayCue(
                 start=segment.start,
                 end=segment.end,
                 en_text=source_text,
                 zh_text=target_text or None,
                 words=segment.words,
+                source_segment_id=segment.id,
+                group_index=1,
+                group_total=1,
             )
         ]
+        return cues, build_alignment_debug(segment, [source_text], [target_text or ""], cues, merged=merged)
 
+    text_parts = chosen_english_parts
+    zh_parts = chosen_zh_parts
     word_groups = split_words_by_english_parts(segment.words, text_parts) if segment.words else []
-    zh_parts = split_chinese_for_parts(target_text, len(text_parts))
-    if len(zh_parts) < len(text_parts):
-        zh_parts.extend([""] * (len(text_parts) - len(zh_parts)))
 
     split_segments: list[DisplayCue] = []
     for index, english_part in enumerate(text_parts):
@@ -413,10 +614,14 @@ def split_segment_for_bilingual_ass(
                 en_text=english_part,
                 zh_text=zh_parts[index] if index < len(zh_parts) else None,
                 words=words,
+                source_segment_id=segment.id,
+                group_index=index + 1,
+                group_total=len(text_parts),
             )
         )
 
-    return enforce_minimum_split_durations(split_segments, segment, style.min_split_duration)
+    cues = enforce_minimum_split_durations(split_segments, segment, style.min_split_duration)
+    return cues, build_alignment_debug(segment, text_parts, zh_parts, cues, merged=merged)
 
 
 def enforce_minimum_split_durations(
@@ -451,12 +656,56 @@ def enforce_minimum_split_durations(
 def prepare_bilingual_ass_segments(
     segments: list[Segment],
     style: BilingualSubtitleStyle,
-) -> list[DisplayCue]:
+) -> tuple[list[DisplayCue], list[dict]]:
     prepared: list[DisplayCue] = []
+    debug_rows: list[dict] = []
     for segment in segments:
-        prepared.extend(split_segment_for_bilingual_ass(segment, style))
+        cues, debug_row = split_segment_for_bilingual_ass(segment, style)
+        prepared.extend(cues)
+        debug_rows.append(debug_row)
 
-    return prepared
+    return prepared, debug_rows
+
+
+def build_alignment_debug(
+    segment: Segment,
+    english_groups: list[str],
+    chinese_groups: list[str],
+    cues: list[DisplayCue],
+    *,
+    merged: bool,
+) -> dict:
+    return {
+        "segment_id": segment.id,
+        "start": segment.start,
+        "end": segment.end,
+        "source_text": segment.source_text,
+        "target_text": segment.target_text or "",
+        "english_groups": english_groups,
+        "chinese_groups": chinese_groups,
+        "english_group_count": len(english_groups),
+        "chinese_group_count": len(chinese_groups),
+        "english_merged_for_alignment": merged,
+        "cues": [
+            {
+                "group_index": cue.group_index,
+                "group_total": cue.group_total,
+                "start": cue.start,
+                "end": cue.end,
+                "en_text": cue.en_text,
+                "zh_text": cue.zh_text or "",
+            }
+            for cue in cues
+        ],
+        "group_pairings": [
+            {
+                "index": cue.group_index,
+                "english": english_groups[cue.group_index - 1] if cue.group_index - 1 < len(english_groups) else "",
+                "chinese": chinese_groups[cue.group_index - 1] if cue.group_index - 1 < len(chinese_groups) else "",
+            }
+            for cue in cues
+        ],
+    }
 
 
 def write_srt(segments: list[Segment], output_path: str | Path) -> None:
@@ -481,7 +730,7 @@ def write_bilingual_ass(
     segments: list[Segment],
     output_path: str | Path,
     style: BilingualSubtitleStyle | None = None,
-) -> None:
+) -> list[dict]:
     ensure_parent(output_path)
     if style is None:
         style = BilingualSubtitleStyle()
@@ -504,7 +753,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     lines: list[str] = [header.rstrip()]
-    for cue in prepare_bilingual_ass_segments(segments, style):
+    cues, debug_rows = prepare_bilingual_ass_segments(segments, style)
+    for cue in cues:
         start = format_ass_timestamp(cue.start)
         end = format_ass_timestamp(cue.end)
 
@@ -524,6 +774,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             lines.append(f"Dialogue: 1,{start},{end},EnglishSmall,,0,0,0,,{en_text}")
 
     Path(output_path).write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+    return debug_rows
 
 
 def write_zh_ass(

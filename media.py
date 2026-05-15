@@ -184,6 +184,22 @@ def run_ffmpeg_command(
     return completed
 
 
+def command_available(args: list[str]) -> bool:
+    try:
+        subprocess.run(
+            args,
+            check=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def probe_media(input_path: str | Path) -> MediaInfo:
     path = str(input_path)
     completed = run_command(
@@ -207,6 +223,7 @@ def probe_media(input_path: str | Path) -> MediaInfo:
         duration = float(fmt["duration"])
 
     has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
+    video_stream = next((stream for stream in streams if stream.get("codec_type") == "video"), {})
     text_subtitle_streams = []
     image_subtitle_streams = []
 
@@ -223,9 +240,41 @@ def probe_media(input_path: str | Path) -> MediaInfo:
         path=path,
         duration=duration,
         has_audio=has_audio,
+        video_width=_parse_int(str(video_stream.get("width") or "")),
+        video_height=_parse_int(str(video_stream.get("height") or "")),
         text_subtitle_streams=text_subtitle_streams,
         image_subtitle_streams=image_subtitle_streams,
     )
+
+
+def suggest_hwaccel_decoder(input_path: str | Path) -> tuple[str | None, str | None]:
+    media = probe_media(input_path)
+    completed = run_command(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(input_path),
+        ]
+    )
+    codec = completed.stdout.strip().lower()
+    decoder_map = {
+        "av1": "av1_cuvid",
+        "h264": "h264_cuvid",
+        "hevc": "hevc_cuvid",
+    }
+    decoder = decoder_map.get(codec)
+    if not decoder:
+        return (None, None)
+    if not command_available(["ffmpeg", "-hide_banner", "-decoders"]):
+        return (None, None)
+    return ("cuda", decoder)
 
 
 def extract_audio(

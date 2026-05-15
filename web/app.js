@@ -9,6 +9,7 @@ const state = {
   polling: null,
   proxyStatus: null,
   idmStatus: null,
+  youtubeMeta: null,
   selectedMediaInfo: null,
   mediaInspectToken: 0,
   lastErrorPayload: null,
@@ -75,6 +76,15 @@ function seconds(value) {
 
 function safeText(value) {
   return value || "";
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function setRunState(stateText) {
@@ -427,6 +437,7 @@ function renderPhaseStatus(phaseStatus) {
       if (phase.speed) stats.push(`速度 ${Number(phase.speed).toFixed(2)}x`);
       if (phase.remaining_seconds) stats.push(`剩余 ${seconds(phase.remaining_seconds)}`);
       stats.push(`${phase.encoder || "h264_nvenc"} · Q ${phase.quality || phase.crf || 25} · ${phase.preset || "p5"}`);
+      if (phase.decoder && phase.decoder !== "default") stats.push(`解码 ${phase.hwaccel ? `${phase.hwaccel}/${phase.decoder}` : phase.decoder}`);
     }
 
     card.innerHTML = `
@@ -452,6 +463,9 @@ function openFile(path, name) {
   el("previewTitle").textContent = name;
   const video = el("videoPreview");
   const text = el("textPreview");
+  const reburnBtn = el("reburnFromAssBtn");
+  const isAss = /\.ass$/i.test(path);
+  reburnBtn.disabled = !isAss;
 
   if (/\.(mp4|wav)$/i.test(path)) {
     const relative = path.split("output\\").pop().replaceAll("\\", "/");
@@ -477,6 +491,7 @@ function syncSelectedProject(projects) {
       el("textPreview").textContent = "";
       el("videoPreview").classList.add("hidden");
       el("videoPreview").src = "";
+      el("reburnFromAssBtn").disabled = true;
     }
     return;
   }
@@ -592,6 +607,43 @@ function renderIdmStatus() {
   `;
 }
 
+function renderYoutubeMeta() {
+  const card = el("youtubeMetaCard");
+  const meta = state.youtubeMeta;
+  const cover = el("youtubeCoverPreview");
+  const info = el("youtubeInfoPreview");
+  if (!meta) {
+    card.classList.add("hidden");
+    card.innerHTML = "";
+    cover.classList.add("hidden");
+    cover.removeAttribute("src");
+    info.textContent = "";
+    return;
+  }
+
+  card.className = "proxy-status-card proxy-ok";
+  card.innerHTML = `
+    <div class="proxy-status-head">
+      <strong>原视频信息</strong>
+      <span>${meta.published_at || ""}</span>
+    </div>
+    <div class="proxy-status-list">
+      <div class="proxy-status-row"><span>原作者</span><strong>${escapeHtml(meta.author || "")}</strong></div>
+      <div class="proxy-status-row"><span>原发布时间</span><strong>${escapeHtml(meta.published_at || "")}</strong></div>
+      <div class="proxy-status-row"><span>原视频标题</span><strong>${escapeHtml(meta.title || "")}</strong></div>
+      <div class="proxy-status-row"><span>原视频简介</span><strong>${escapeHtml(meta.description || "")}</strong></div>
+    </div>
+  `;
+  info.textContent = `原作者：【${meta.author || ""}】\n原发布时间：【${meta.published_at || ""}】\n原视频标题：【${meta.title || ""}】\n原视频简介：【${meta.description || ""}】\n`;
+  if (meta.cover_path) {
+    cover.src = `/output/${encodeURI(meta.cover_path.split("\\output\\").pop().replaceAll("\\", "/"))}`;
+    cover.classList.remove("hidden");
+  } else if (meta.cover_url) {
+    cover.src = meta.cover_url;
+    cover.classList.remove("hidden");
+  }
+}
+
 function renderRuntime(runtime, lastError) {
   const title = runtime?.title || "等待中";
   const progress = Math.max(0, Math.min(100, Number(runtime?.overall_progress || 0)));
@@ -615,6 +667,7 @@ function renderState(payload) {
   if (payload.config) fillForm(payload.config);
   renderProxyStatus();
   renderIdmStatus();
+  renderYoutubeMeta();
 }
 
 async function testProxy() {
@@ -757,6 +810,57 @@ function bindActions() {
     });
   };
 
+  const fetchYoutubeInfo = () => {
+    const url = el("downloadUrlInput").value.trim();
+    if (!url) return;
+    fetch("/api/youtube-meta", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload.ok) return;
+        state.youtubeMeta = { ...(payload.meta || {}), output_dir: payload.output_dir, output_path: payload.output_path, info_path: payload.info_path, info_text: payload.info_text, cover_path: payload.cover_path };
+        renderYoutubeMeta();
+        showToast("信息已获取");
+      });
+  };
+
+  const fetchYoutubeCover = () => {
+    const url = el("downloadUrlInput").value.trim();
+    if (!url) return;
+    fetch("/api/youtube-cover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload.ok) return;
+        state.youtubeMeta = { ...(payload.meta || {}), output_dir: payload.output_dir, output_path: payload.output_path, info_path: payload.info_path, cover_path: payload.cover_path, cover_1280x960_path: payload.cover_1280x960_path };
+        renderYoutubeMeta();
+        showToast("封面已获取");
+      });
+  };
+
+  const rebuildPaddedCover = () => {
+    const outputDir = state.youtubeMeta?.output_path || state.youtubeMeta?.output_dir || null;
+    if (!outputDir) return;
+    fetch("/api/rebuild-youtube-cover-1280x960", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_path: outputDir }),
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload.ok) return;
+        state.youtubeMeta = { ...(state.youtubeMeta || {}), output_dir: payload.output_dir, output_path: payload.output_path, cover_path: payload.cover_path, cover_1280x960_path: payload.cover_1280x960_path };
+        renderYoutubeMeta();
+        showToast("1280x960 封面已重建");
+      });
+  };
+
   const scanInput = () => {
     fetch("/api/scan-input", {
       method: "POST",
@@ -812,8 +916,20 @@ function bindActions() {
   el("downloadAndRunBtn").addEventListener("click", () => runDownload(true));
   el("testProxyBtn").addEventListener("click", testProxy);
   el("checkIdmBtn").addEventListener("click", checkIdm);
+  el("fetchYoutubeInfoBtn").addEventListener("click", fetchYoutubeInfo);
+  el("fetchYoutubeCoverBtn").addEventListener("click", fetchYoutubeCover);
+  el("rebuildPaddedCoverBtn").addEventListener("click", rebuildPaddedCover);
   el("openInputBtn").addEventListener("click", openInput);
   el("scanInputBtn").addEventListener("click", scanInput);
+  el("openYoutubeOutputBtn").addEventListener("click", () => {
+    const outputDir = state.youtubeMeta?.output_path || state.youtubeMeta?.output_dir || null;
+    if (!outputDir) return;
+    fetch("/api/open-output", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_path: outputDir }),
+    });
+  });
   el("copyErrorBtn").addEventListener("click", () => {
     const payload = state.lastErrorPayload;
     if (!payload) return;
@@ -836,6 +952,20 @@ function bindActions() {
   });
   el("openOutputBtn").addEventListener("click", openOutput);
   el("openOutputInlineBtn").addEventListener("click", openOutput);
+  el("reburnFromAssBtn").addEventListener("click", () => {
+    const projectPath = state.selectedProject?.path || null;
+    if (!projectPath || !state.selectedFilePath || !/\.ass$/i.test(state.selectedFilePath)) return;
+    fetch("/api/reburn-from-ass", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_path: projectPath }),
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload.ok) return;
+        showToast("已开始重新烧录");
+      });
+  });
 
   el("saveConfigBtn").addEventListener("click", () => {
     const config = readFormConfig();

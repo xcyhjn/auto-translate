@@ -61,6 +61,8 @@ class MediaInfo:
     path: str
     duration: float | None
     has_audio: bool
+    video_width: int | None
+    video_height: int | None
     text_subtitle_streams: list[dict]
     image_subtitle_streams: list[dict]
 

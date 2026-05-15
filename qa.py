@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .models import Segment, SubtitleRules
+from .subtitle_io import DisplayCue
 
 DEFAULT_MAX_CHARS = 42
 DEFAULT_MAX_CPS = 18.0
@@ -43,6 +44,7 @@ def qa_check(
         return report
 
     previous_end = -1.0
+    previous_text = ""
     for expected_id, segment in enumerate(segments, start=1):
         if segment.id != expected_id:
             report.warnings.append(f"Segment id {segment.id} should be {expected_id}.")
@@ -54,6 +56,11 @@ def qa_check(
         text = (segment.target_text or segment.source_text).strip()
         if not text:
             report.errors.append(f"Segment {segment.id} has empty text.")
+
+        if previous_text and text == previous_text:
+            report.warnings.append(
+                f"Segment {segment.id} repeats the previous subtitle text exactly."
+            )
 
         if len(text) > max_chars:
             report.warnings.append(
@@ -74,5 +81,52 @@ def qa_check(
             )
 
         previous_end = segment.end
+        previous_text = text
+
+    return report
+
+
+def qa_display_cues(cues: list[DisplayCue]) -> QaReport:
+    report = QaReport()
+    previous_zh = ""
+    previous_source_segment_id = None
+    source_zh_runs: dict[int | None, list[str]] = {}
+
+    for index, cue in enumerate(cues, start=1):
+        zh_text = (cue.zh_text or "").strip()
+        en_text = cue.en_text.strip()
+        source_zh_runs.setdefault(cue.source_segment_id, []).append(zh_text)
+        if previous_zh and zh_text and zh_text == previous_zh and en_text:
+            report.warnings.append(
+                f"Display cue {index} repeats the previous Chinese subtitle exactly."
+            )
+
+        if (
+            cue.source_segment_id is not None
+            and cue.source_segment_id == previous_source_segment_id
+            and zh_text
+            and previous_zh
+            and zh_text == previous_zh
+            and cue.group_total > 1
+        ):
+            report.warnings.append(
+                f"Display cue {index} may have alignment drift: repeated Chinese text within the same split segment."
+            )
+
+        previous_zh = zh_text or previous_zh
+        previous_source_segment_id = cue.source_segment_id
+
+    for segment_id, zh_texts in source_zh_runs.items():
+        repeated = sum(1 for prev, curr in zip(zh_texts, zh_texts[1:]) if prev and curr and prev == curr)
+        if repeated >= 1:
+            report.warnings.append(
+                f"Source segment {segment_id} contains repeated Chinese cue text {repeated} time(s)."
+            )
+        if len(zh_texts) >= 3:
+            unique_texts = {text for text in zh_texts if text}
+            if len(unique_texts) == 1:
+                report.warnings.append(
+                    f"Source segment {segment_id} maps to the same Chinese cue text across multiple display cues."
+                )
 
     return report

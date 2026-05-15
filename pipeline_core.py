@@ -8,11 +8,11 @@ from typing import Callable
 import tempfile
 
 from .asr import transcribe_audio
-from .media import extract_audio, merge_video_with_audio, probe_media, run_ffmpeg_command
+from .media import extract_audio, merge_video_with_audio, probe_media, run_ffmpeg_command, suggest_hwaccel_decoder
 from .models import BilingualSubtitleStyle, Segment
-from .qa import qa_check
+from .qa import qa_check, qa_display_cues
 from .segment_io import load_segments, save_segments
-from .subtitle_io import write_bilingual_ass, write_srt
+from .subtitle_io import prepare_bilingual_ass_segments, write_bilingual_ass, write_srt
 from .timing import refine_timing
 from .translate import translate_segments
 
@@ -21,6 +21,9 @@ StageCallback = Callable[[str, dict], None]
 
 VIDEO_ENCODER = "h264_nvenc"
 VIDEO_ENCODER_FALLBACK = "libx264"
+VIDEO_PRESET = "p4"
+VIDEO_QUALITY = "25"
+TARGET_MAX_HEIGHT = 1080
 
 
 def write_json(path: Path, payload: object) -> None:
@@ -39,6 +42,11 @@ def build_subtitle_filter_path(subtitle_path: Path) -> str:
     return resolved
 
 
+def needs_downscale(video_path: Path, *, target_max_height: int = TARGET_MAX_HEIGHT) -> bool:
+    probe = probe_media(video_path)
+    return bool(probe.video_height and probe.video_height > target_max_height)
+
+
 def burn_subtitle(
     video_path: Path,
     subtitle_path: Path,
@@ -50,25 +58,32 @@ def burn_subtitle(
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     subtitle_filter_path = build_subtitle_filter_path(subtitle_path)
+    filter_chain: list[str] = []
     subtitle_filter = f"ass='{subtitle_filter_path}'"
+    if needs_downscale(video_path):
+        filter_chain.append("scale=-2:1080:flags=lanczos")
+    filter_chain.append(subtitle_filter)
+    video_filter = ",".join(filter_chain)
     args = [
         "ffmpeg",
         "-y",
-        "-i",
-        str(video_path),
     ]
+    hwaccel, decoder = suggest_hwaccel_decoder(video_path)
+    if hwaccel and decoder:
+        args.extend(["-hwaccel", hwaccel, "-c:v", decoder])
+    args.extend(["-i", str(video_path)])
     if preview_seconds is not None:
         args.extend(["-t", str(preview_seconds)])
     args.extend(
         [
             "-vf",
-            subtitle_filter,
+            video_filter,
             "-c:v",
             VIDEO_ENCODER,
             "-preset",
-            "p5",
+            VIDEO_PRESET,
             "-cq",
-            "25",
+            VIDEO_QUALITY,
             "-pix_fmt",
             "yuv420p",
             "-c:a",
@@ -97,6 +112,9 @@ def burn_subtitle(
         if output_path.exists():
             output_path.unlink()
         fallback_args = list(args)
+        if "-hwaccel" in fallback_args and decoder:
+            hwaccel_index = fallback_args.index("-hwaccel")
+            del fallback_args[hwaccel_index : hwaccel_index + 4]
         encoder_index = fallback_args.index("-c:v") + 1
         fallback_args[encoder_index] = VIDEO_ENCODER_FALLBACK
         preset_index = fallback_args.index("-preset") + 1
@@ -104,6 +122,7 @@ def burn_subtitle(
         cq_index = fallback_args.index("-cq")
         fallback_args[cq_index : cq_index + 2] = ["-crf", "25"]
         run_ffmpeg_command(fallback_args, progress_callback=emit_progress if progress_callback else None)
+    return {"hwaccel": hwaccel or "", "decoder": decoder or "default"}
 
 
 def create_safe_ass_copy(subtitle_path: Path) -> Path:
@@ -396,10 +415,19 @@ def run_pipeline(
         )
 
     report = qa_check(translated_segments)
+    ass_path = output_dir / "08_bilingual_zh_en.ass"
+    alignment_debug = write_bilingual_ass(translated_segments, ass_path, style=bilingual_style)
+    display_cues, _ = prepare_bilingual_ass_segments(
+        translated_segments,
+        bilingual_style if bilingual_style is not None else BilingualSubtitleStyle(),
+    )
+    display_report = qa_display_cues(display_cues)
+    report.warnings.extend(display_report.warnings)
     write_json(
         output_dir / "07_qa_report.json",
         {"errors": report.errors, "warnings": report.warnings},
     )
+    write_json(output_dir / "08a_bilingual_alignment_debug.json", alignment_debug)
     emit(
         callback,
         "qa_complete",
@@ -412,8 +440,6 @@ def run_pipeline(
     if report.has_blocking_errors:
         raise RuntimeError("QA failed. See 07_qa_report.json")
 
-    ass_path = output_dir / "08_bilingual_zh_en.ass"
-    write_bilingual_ass(translated_segments, ass_path, style=bilingual_style)
     safe_ass_path = create_safe_ass_copy(ass_path)
     output_video_name = (
         f"09_burned_bilingual_preview_{preview_seconds}s.mp4"
@@ -429,11 +455,13 @@ def run_pipeline(
             "path": str(output_video_path),
             "duration_seconds": burn_duration,
             "encoder": VIDEO_ENCODER,
-            "quality": 25,
-            "preset": "p5",
+            "quality": int(VIDEO_QUALITY),
+            "preset": VIDEO_PRESET,
+            "decoder": "pending",
+            "hwaccel": "pending",
         },
     )
-    burn_subtitle(
+    burn_plan = burn_subtitle(
         processing_video_path,
         safe_ass_path,
         output_video_path,
@@ -455,6 +483,7 @@ def run_pipeline(
         "input_video": str(input_path),
         "output_root": str(output_root),
         "output_dir": str(output_dir),
+        "burn_plan": burn_plan,
         "files": [
             "00_media_probe.json",
             "00a_merged_with_external_audio.mp4" if audio_override_path else None,
@@ -466,6 +495,7 @@ def run_pipeline(
             "06_translated_zh.srt",
             "07_qa_report.json",
             "08_bilingual_zh_en.ass",
+            "08a_bilingual_alignment_debug.json",
             "08_bilingual_safe.ass",
             output_video_name,
         ],

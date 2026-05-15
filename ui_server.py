@@ -17,7 +17,8 @@ import httpx
 from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, check_idm
 from .models import BilingualSubtitleStyle
 from .media import probe_media
-from .pipeline_core import build_output_slug, run_pipeline
+from .pipeline_core import build_output_slug, burn_subtitle, create_safe_ass_copy, run_pipeline
+from .youtube_meta import ensure_cover, ensure_padded_cover, fetch_youtube_info, fetch_youtube_meta, safe_project_slug, save_youtube_meta
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -39,8 +40,8 @@ DEFAULT_CONFIG = {
     "compute_type": "float16",
     "beam_size": 5,
     "translation_model": "gpt-5.4-mini",
-    "translation_chunk_size": 40,
-    "translation_retries": 2,
+    "translation_chunk_size": 24,
+    "translation_retries": 4,
     "openai_base_url": "",
     "audio_override_path": "",
     "load_existing_segments": False,
@@ -147,7 +148,9 @@ def default_phase_status() -> dict:
             "speed": 0,
             "encoder": "h264_nvenc",
             "quality": 25,
-            "preset": "p5",
+            "preset": "p4",
+            "decoder": "default",
+            "hwaccel": "",
             "label": "等待中",
         },
     }
@@ -217,6 +220,9 @@ def build_user_facing_error_message(exc: Exception) -> str:
 
     if "operation timed out" in lowered or "timed out" in lowered:
         return "下载超时。请检查代理连通性，或稍后重试。"
+
+    if "rate limit" in lowered or "429" in lowered:
+        return "翻译接口触发了上游限流。请稍后重试，或调小 chunk size / 降低并发使用频率。"
 
     if "unable to download api page" in lowered or "unable to download webpage" in lowered:
         return "无法访问视频页面。请检查代理、网络连通性或目标链接是否仍可访问。"
@@ -763,7 +769,9 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
                 "encoder": str(payload.get("encoder", "h264_nvenc")),
                 "quality": int(payload.get("quality", payload.get("crf", 25)) or 25),
-                "preset": str(payload.get("preset", "p5")),
+                "preset": str(payload.get("preset", "p4")),
+                "decoder": str(payload.get("decoder", "default")),
+                "hwaccel": str(payload.get("hwaccel", "")),
             }
         )
         return
@@ -882,6 +890,94 @@ def open_input_in_explorer() -> str:
     return str(INPUT_DIR)
 
 
+def resolve_youtube_output_dir(meta_title: str) -> Path:
+    project_name = safe_project_slug(meta_title, fallback="youtube-video")
+    output_dir = OUTPUT_DIR / project_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def migrate_legacy_youtube_assets(video_id: str, target_dir: Path) -> None:
+    legacy_prefix = f"youtube-{video_id}-"
+    for folder in OUTPUT_DIR.iterdir():
+        if not folder.is_dir() or not folder.name.startswith(legacy_prefix):
+            continue
+        if folder.resolve() == target_dir.resolve():
+            continue
+        for name in ("00_youtube_meta.json", "00_youtube_info.txt", "00_youtube_cover.jpg", "10_youtube_manifest.json"):
+            source = folder / name
+            destination = target_dir / name
+            if source.exists() and not destination.exists():
+                shutil.move(str(source), str(destination))
+        try:
+            if not any(folder.iterdir()):
+                folder.rmdir()
+        except Exception:
+            pass
+
+
+def youtube_assets_job(url: str, *, download_cover_only: bool = False) -> dict:
+    meta = fetch_youtube_meta(url, proxy_url=get_proxy_url())
+    output_dir = resolve_youtube_output_dir(meta.title)
+    migrate_legacy_youtube_assets(meta.video_id, output_dir)
+    save_youtube_meta(output_dir, meta)
+    cover_path = None
+    padded_cover_path = ""
+    if download_cover_only:
+        cover_path = ensure_cover(meta, output_dir, proxy_url=get_proxy_url())
+        padded_cover_path = str(ensure_padded_cover(output_dir))
+    manifest = {
+        "input_url": url,
+        "output_dir": str(output_dir),
+        "output_path": str(output_dir),
+        "meta": meta.to_dict(),
+        "cover_path": str(cover_path) if cover_path else "",
+        "cover_1280x960_path": padded_cover_path,
+        "info_path": str(output_dir / "00_youtube_info.txt"),
+    }
+    (output_dir / "10_youtube_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest
+
+
+def youtube_info_job(url: str) -> dict:
+    meta = fetch_youtube_info(url, proxy_url=get_proxy_url())
+    output_dir = resolve_youtube_output_dir(meta.title)
+    migrate_legacy_youtube_assets(meta.video_id, output_dir)
+    save_youtube_meta(output_dir, meta)
+    manifest = {
+        "input_url": url,
+        "output_dir": str(output_dir),
+        "output_path": str(output_dir),
+        "meta": meta.to_dict(),
+        "info_text": meta.display_text(),
+        "info_path": str(output_dir / "00_youtube_info.txt"),
+        "cover_path": "",
+        "cover_1280x960_path": "",
+    }
+    (output_dir / "10_youtube_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest
+
+
+def rebuild_padded_cover_job(project_path: str) -> dict:
+    output_dir = Path(project_path)
+    padded_path = ensure_padded_cover(output_dir)
+    manifest_path = output_dir / "10_youtube_manifest.json"
+    manifest = {}
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["output_dir"] = str(output_dir)
+    manifest["output_path"] = str(output_dir)
+    manifest["cover_path"] = str(output_dir / "00_youtube_cover.jpg")
+    manifest["cover_1280x960_path"] = str(padded_path)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "output_dir": str(output_dir),
+        "output_path": str(output_dir),
+        "cover_path": str(output_dir / "00_youtube_cover.jpg"),
+        "cover_1280x960_path": str(padded_path),
+    }
+
+
 def run_pipeline_job(video_path: str, config: dict) -> None:
     style_config = dict(config.get("style") or {})
     if "en_max_words_per_line" in style_config and "en_max_single_line_chars" not in style_config:
@@ -937,6 +1033,79 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
         user_message = build_user_facing_error_message(exc)
         set_state_error(user_message, traceback_text)
         append_error_log(traceback_text)
+
+
+def reburn_from_ass_job(project_path: str) -> dict:
+    project_dir = Path(project_path)
+    manifest_path = project_dir / "10_manifest_bilingual.json"
+    ass_path = project_dir / "08_bilingual_zh_en.ass"
+    output_path = project_dir / "09_burned_bilingual_video.mp4"
+    if not project_dir.exists():
+        raise FileNotFoundError(f"Project folder not found: {project_dir}")
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+    if not ass_path.exists():
+        raise FileNotFoundError(f"ASS file not found: {ass_path}")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    input_video = Path(str(manifest.get("input_video") or ""))
+    if not input_video.exists():
+        raise FileNotFoundError(f"Input video not found: {input_video}")
+
+    probe = probe_media(input_video)
+    with STATE_LOCK:
+        STATE["running"] = True
+        STATE["current_stage"] = "burn_start"
+        STATE["last_error"] = None
+        STATE["runtime"] = {
+            "stage_key": "burn_start",
+            "title": "烧录中",
+            "description": "正在按当前 ASS 重新烧录。",
+            "overall_progress": 94,
+        }
+
+    append_history(
+        "burn_start",
+        {
+            "path": str(output_path),
+            "duration_seconds": probe.duration or 0,
+            "encoder": "h264_nvenc",
+            "quality": 25,
+            "preset": "p4",
+        },
+    )
+    safe_ass_path = create_safe_ass_copy(ass_path)
+    burn_subtitle(
+        input_video,
+        safe_ass_path,
+        output_path,
+        progress_callback=append_history,
+        total_duration=probe.duration or 0,
+    )
+    append_history(
+        "burn_complete",
+        {
+            "path": str(output_path),
+            "size_bytes": output_path.stat().st_size if output_path.exists() else 0,
+            "duration_seconds": probe.duration or 0,
+        },
+    )
+    with STATE_LOCK:
+        STATE["running"] = False
+        STATE["current_stage"] = "complete"
+        STATE["last_manifest"] = manifest
+        STATE["runtime"] = {
+            "stage_key": "complete",
+            "title": "完成",
+            "description": "按当前 ASS 重新烧录完成。",
+            "overall_progress": 100,
+        }
+    return {
+        "project_path": str(project_dir),
+        "ass_path": str(ass_path),
+        "output_path": str(output_path),
+        "input_video": str(input_video),
+    }
 
 
 def build_download_config(config: dict) -> DownloadConfig:
@@ -1146,6 +1315,33 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 self._json_response({"ok": True, "idm": check_idm(build_download_config(config))})
                 return
 
+            if parsed.path == "/api/youtube-meta":
+                url = str(payload.get("url") or "").strip()
+                if not url:
+                    self._json_response({"ok": False, "error": "url required"}, status=400)
+                    return
+                manifest = youtube_info_job(url)
+                self._json_response({"ok": True, **manifest})
+                return
+
+            if parsed.path == "/api/youtube-cover":
+                url = str(payload.get("url") or "").strip()
+                if not url:
+                    self._json_response({"ok": False, "error": "url required"}, status=400)
+                    return
+                manifest = youtube_assets_job(url, download_cover_only=True)
+                self._json_response({"ok": True, **manifest})
+                return
+
+            if parsed.path == "/api/rebuild-youtube-cover-1280x960":
+                project_path = str(payload.get("project_path") or "").strip()
+                if not project_path:
+                    self._json_response({"ok": False, "error": "project_path required"}, status=400)
+                    return
+                manifest = rebuild_padded_cover_job(project_path)
+                self._json_response({"ok": True, **manifest})
+                return
+
             if parsed.path == "/api/queue/clear":
                 clear_queue()
                 self._json_response(
@@ -1174,6 +1370,16 @@ class UIServerHandler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/run":
                 config = {**read_config(), **payload.get("config", {})}
                 thread = threading.Thread(target=run_pipeline_job, args=(payload["video_path"], config), daemon=True)
+                thread.start()
+                self._json_response({"ok": True})
+                return
+
+            if parsed.path == "/api/reburn-from-ass":
+                project_path = str(payload.get("project_path") or "").strip()
+                if not project_path:
+                    self._json_response({"ok": False, "error": "project_path required"}, status=400)
+                    return
+                thread = threading.Thread(target=reburn_from_ass_job, args=(project_path,), daemon=True)
                 thread.start()
                 self._json_response({"ok": True})
                 return

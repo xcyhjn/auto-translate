@@ -224,7 +224,7 @@ class YtdlpDownloader:
 
     def base_options(self) -> dict:
         options = {
-            "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+            "format": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]/best",
             "merge_output_format": "mp4",
             "outtmpl": str(self.config.input_dir / "%(title)s.%(ext)s"),
             "noplaylist": True,

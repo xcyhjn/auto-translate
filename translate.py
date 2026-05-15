@@ -3,12 +3,37 @@ from __future__ import annotations
 import json
 import os
 import time
+from dataclasses import dataclass
 from typing import Any
 from typing import Callable
 
 from .models import Segment
 
 TranslationProgressCallback = Callable[[str, dict], None]
+
+
+@dataclass(slots=True)
+class TranslationAttemptLog:
+    attempt: int
+    error_type: str
+    message: str
+    retry_after_seconds: float
+
+
+def short_error_message(exc: Exception) -> str:
+    message = str(exc).strip()
+    return message or exc.__class__.__name__
+
+
+def classify_retry(exc: Exception, attempt: int, max_retries: int) -> tuple[float, str]:
+    message = short_error_message(exc).lower()
+    if "rate limit" in message or "429" in message:
+        return (min(120.0, 20.0 * (attempt + 1)), "rate_limit")
+    if "timed out" in message or "timeout" in message:
+        return (min(90.0, 10.0 * (attempt + 1)), "timeout")
+    if "connection" in message or "handshake" in message:
+        return (min(60.0, 8.0 * (attempt + 1)), "network")
+    return (min(45.0, 5.0 * (attempt + 1)), "generic")
 
 
 def load_glossary(glossary: str | None) -> str:
@@ -180,6 +205,7 @@ def translate_chunk_with_openai(
 
     raw_text = ""
     last_error: Exception | None = None
+    attempt_logs: list[TranslationAttemptLog] = []
     for attempt in range(max_retries + 1):
         try:
             # OpenAI 的 Responses 接口更适合做文本生成。
@@ -202,14 +228,26 @@ def translate_chunk_with_openai(
             break
         except Exception as exc:
             last_error = exc
+            wait_seconds, retry_category = classify_retry(exc, attempt, max_retries)
+            attempt_logs.append(
+                TranslationAttemptLog(
+                    attempt=attempt + 1,
+                    error_type=retry_category,
+                    message=short_error_message(exc),
+                    retry_after_seconds=wait_seconds if attempt < max_retries else 0.0,
+                )
+            )
             if attempt >= max_retries:
+                log_lines = "\n".join(
+                    f"attempt {item.attempt}: [{item.error_type}] {item.message}"
+                    for item in attempt_logs
+                )
                 raise RuntimeError(
-                    "OpenAI translation failed after retries. Last raw output:\n"
-                    f"{raw_text}"
+                    "OpenAI translation failed after retries.\n"
+                    f"attempt_logs:\n{log_lines}\n"
+                    f"last_raw_output:\n{raw_text}"
                 ) from last_error
-            # 网络代理和中转站偶尔会在 TLS 握手或首包阶段抖动；
-            # 长视频翻译不能因为一次短暂超时就整条流水线倒掉。
-            time.sleep(min(30, 5 * (2**attempt)))
+            time.sleep(wait_seconds)
 
     translations: dict[int, str] = {}
     if isinstance(payload, dict):
@@ -322,15 +360,22 @@ def translate_segments(
             )
         print(f"Translating chunk {chunk_index}/{len(chunks)} with {len(chunk)} segments.")
         started_at = time.time()
-        translations = translate_chunk_with_openai(
-            chunk,
-            src_lang=src_lang,
-            dst_lang=dst_lang,
-            glossary_text=glossary_text,
-            model=model,
-            base_url=resolved_base_url,
-            max_retries=max_retries,
-        )
+        try:
+            translations = translate_chunk_with_openai(
+                chunk,
+                src_lang=src_lang,
+                dst_lang=dst_lang,
+                glossary_text=glossary_text,
+                model=model,
+                base_url=resolved_base_url,
+                max_retries=max_retries,
+            )
+        except Exception as exc:
+            chunk_summary = (
+                f"chunk {chunk_index}/{len(chunks)} failed after {round(time.time() - started_at, 2)}s; "
+                f"segment_ids={chunk[0].id}-{chunk[-1].id}; count={len(chunk)}"
+            )
+            raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
         fallback_count = 0
         for segment in chunk:
             translated_text = translations.get(segment.id, "").strip()

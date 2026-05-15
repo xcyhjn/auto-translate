@@ -127,14 +127,25 @@
                 <button id="downloadAndRunBtn" class="mini-btn">下载并开跑</button>
                 <button id="testProxyBtn" class="mini-btn">测试代理</button>
                 <button id="checkIdmBtn" class="mini-btn">检测 IDM</button>
+                <button id="fetchYoutubeInfoBtn" class="mini-btn">获取信息</button>
+                <button id="fetchYoutubeCoverBtn" class="mini-btn">获取封面</button>
+                <button id="rebuildPaddedCoverBtn" class="mini-btn">重建 1280x960 封面</button>
                 <button id="openInputBtn" class="mini-btn">打开 input</button>
                 <button id="scanInputBtn" class="mini-btn">扫描 input</button>
               </div>
             </div>
             <div id="proxyStatusCard" class="proxy-status-card hidden"></div>
             <div id="idmStatusCard" class="proxy-status-card hidden"></div>
+            <div id="youtubeMetaCard" class="proxy-status-card hidden"></div>
             <div class="card-toolbar">
               <button id="pickInputInlineBtn" class="mini-btn">从文件管理器添加视频</button>
+            </div>
+            <div class="card-toolbar">
+              <button id="openYoutubeOutputBtn" class="mini-btn">打开信息输出</button>
+            </div>
+            <div class="preview-pane youtube-preview">
+              <img id="youtubeCoverPreview" class="video-preview hidden" alt="YouTube cover" />
+              <pre id="youtubeInfoPreview" class="text-preview"></pre>
             </div>
             <div id="videoList" class="video-list"></div>
           </section>
@@ -252,6 +263,7 @@
                   <div class="preview-pane">
                     <div class="preview-head">
                       <h4 id="previewTitle">文件预览</h4>
+                      <button id="reburnFromAssBtn" class="mini-btn" type="button" disabled>按当前 ASS 重新烧录</button>
                     </div>
                     <video id="videoPreview" class="video-preview hidden" controls></video>
                     <pre id="textPreview" class="text-preview"></pre>
@@ -266,6 +278,6 @@
 
     <div id="toast" class="toast hidden"></div>
 
-    <script src="./app.js?v=20260514-utf8fix1"></script>
+    <script src="./app.js?v=20260515-reburn1"></script>
   </body>
 </html>
