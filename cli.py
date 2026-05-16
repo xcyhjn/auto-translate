@@ -206,7 +206,7 @@ def main() -> None:
         openai_base_url=args.openai_base_url,
     )
 
-    report = qa_check(segments)
+    report = qa_check(segments, dst_lang=args.dst_lang if args.translate else None)
     if args.save_report:
         save_report(report, args.save_report)
         print(f"Saved QA report: {args.save_report}")

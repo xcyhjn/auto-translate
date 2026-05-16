@@ -8,13 +8,22 @@ from typing import Callable
 import tempfile
 
 from .asr import transcribe_audio
+from .difficult_spans import detect_difficult_spans
+from .glossary import (
+    apply_glossary_alias_corrections,
+    ensure_project_glossary,
+    write_asr_terms,
+    write_resolved_glossary,
+)
 from .media import extract_audio, merge_video_with_audio, probe_media, run_ffmpeg_command, suggest_hwaccel_decoder
 from .models import BilingualSubtitleStyle, Segment
-from .qa import qa_check, qa_display_cues
+from .qa import build_quality_metrics, qa_check, qa_difficult_spans, qa_display_cues, qa_glossary_consistency
 from .segment_io import load_segments, save_segments
+from .span_repair import repair_difficult_spans
 from .subtitle_io import prepare_bilingual_ass_segments, write_bilingual_ass, write_srt
+from .text_quality import find_text_pollution, format_pollution_issues
 from .timing import refine_timing
-from .translate import translate_segments
+from .translate import load_glossary, translate_segments
 
 
 StageCallback = Callable[[str, dict], None]
@@ -148,6 +157,13 @@ def resolve_output_dir(input_path: Path, output_root: Path) -> Path:
     return output_dir
 
 
+def get_glossary_json_path(output_dir: Path) -> Path | None:
+    for candidate in (output_dir / "03_glossary_resolved.json", output_dir / "00_glossary_auto.json"):
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def emit(callback: StageCallback | None, stage: str, payload: dict) -> None:
     if callback:
         callback(stage, payload)
@@ -159,6 +175,21 @@ def seconds_to_virtual_chunks(processed_seconds: float, total_seconds: float, ch
     total_chunks = max(1, int((total_seconds + chunk_span - 1) // chunk_span))
     current_chunk = max(0, min(total_chunks, int(processed_seconds // chunk_span) + (1 if processed_seconds > 0 else 0)))
     return current_chunk, total_chunks
+
+
+def assert_no_target_text_pollution(segments: list[Segment], *, dst_lang: str | None) -> None:
+    polluted: list[str] = []
+    for segment in segments:
+        issues = find_text_pollution(segment.target_text or "", dst_lang=dst_lang)
+        if issues:
+            polluted.append(
+                f"Segment {segment.id}: {format_pollution_issues(issues)}"
+            )
+        if len(polluted) >= 10:
+            break
+    if polluted:
+        details = "; ".join(polluted)
+        raise RuntimeError(f"Refusing to write ASS because target text contains suspicious polluted text. {details}")
 
 
 def run_pipeline(
@@ -178,6 +209,9 @@ def run_pipeline(
     audio_override_path: str | Path | None = None,
     load_existing_segments: bool = False,
     preview_seconds: int | None = None,
+    skip_burn: bool = False,
+    repair_high_risk_spans: bool = True,
+    span_repair_max_spans: int = 12,
     bilingual_style: BilingualSubtitleStyle | None = None,
     callback: StageCallback | None = None,
 ) -> dict:
@@ -188,6 +222,8 @@ def run_pipeline(
     translated_json_path = output_dir / "05_translated_segments.json"
     timed_json_path = output_dir / "03_timed_source_segments.json"
     processing_video_path = input_path
+    auto_glossary_path = ensure_project_glossary(output_dir)
+    effective_style = bilingual_style if bilingual_style is not None else BilingualSubtitleStyle()
 
     emit(
         callback,
@@ -196,6 +232,7 @@ def run_pipeline(
             "input": str(input_path),
             "output_dir": str(output_dir),
             "audio_override_path": str(audio_override_path) if audio_override_path else None,
+            "glossary_path": str(auto_glossary_path) if auto_glossary_path else "",
         },
     )
 
@@ -268,11 +305,16 @@ def run_pipeline(
                 "path": str(translated_json_path),
                 "count": len(translated_segments),
                 "duration_seconds": probe.duration,
+                "note": "loaded translated display segments; rerun timing/translation if these were generated before display-level timing was introduced",
             },
         )
     else:
         if load_existing_segments and timed_json_path.exists():
             timed_segments = load_segments(timed_json_path)
+            alias_stats = apply_glossary_alias_corrections(timed_segments, get_glossary_json_path(output_dir))
+            if alias_stats["total_replacements"]:
+                save_segments(timed_segments, timed_json_path)
+                write_srt(timed_segments, output_dir / "04_source_en.srt")
             emit(
                 callback,
                 "timing_complete",
@@ -281,6 +323,7 @@ def run_pipeline(
                     "count": len(timed_segments),
                     "source_count": len(timed_segments),
                     "reused": True,
+                    "alias_corrections": alias_stats,
                 },
             )
         else:
@@ -353,6 +396,10 @@ def run_pipeline(
                 ),
             )
             save_segments(raw_segments, output_dir / "02_asr_raw_segments.json")
+            asr_terms_path = write_asr_terms(output_dir, raw_segments)
+            resolved_glossary_path = write_resolved_glossary(output_dir)
+            if resolved_glossary_path:
+                auto_glossary_path = resolved_glossary_path
             emit(
                 callback,
                 "asr_complete",
@@ -360,6 +407,8 @@ def run_pipeline(
                     "path": str(output_dir / "02_asr_raw_segments.json"),
                     "count": len(raw_segments),
                     "duration_seconds": probe.duration,
+                    "terms_path": str(asr_terms_path),
+                    "glossary_path": str(auto_glossary_path) if auto_glossary_path else "",
                 },
             )
 
@@ -370,7 +419,8 @@ def run_pipeline(
                     "segment_count": len(raw_segments),
                 },
             )
-            timed_segments = refine_timing(raw_segments)
+            timed_segments = refine_timing(raw_segments, style=effective_style)
+            alias_stats = apply_glossary_alias_corrections(timed_segments, get_glossary_json_path(output_dir))
             save_segments(timed_segments, timed_json_path)
             write_srt(timed_segments, output_dir / "04_source_en.srt")
             emit(
@@ -380,6 +430,8 @@ def run_pipeline(
                     "path": str(timed_json_path),
                     "count": len(timed_segments),
                     "source_count": len(raw_segments),
+                    "timing_mode": "display_level",
+                    "alias_corrections": alias_stats,
                 },
             )
 
@@ -395,14 +447,17 @@ def run_pipeline(
             timed_segments,
             src_lang=src_lang,
             dst_lang=dst_lang,
+            glossary=str(auto_glossary_path) if auto_glossary_path else None,
             enabled=True,
             provider="openai",
             model=translation_model,
             chunk_size=translation_chunk_size,
             max_retries=translation_retries,
             openai_base_url=openai_base_url,
+            context_window=4,
             progress_callback=lambda stage, progress: emit(callback, stage, progress),
         )
+        alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
         save_segments(translated_segments, translated_json_path)
         write_srt(translated_segments, output_dir / "06_translated_zh.srt")
         emit(
@@ -411,22 +466,125 @@ def run_pipeline(
             {
                 "path": str(translated_json_path),
                 "count": len(translated_segments),
+                "alias_corrections": alias_stats,
             },
         )
 
-    report = qa_check(translated_segments)
-    ass_path = output_dir / "08_bilingual_zh_en.ass"
-    alignment_debug = write_bilingual_ass(translated_segments, ass_path, style=bilingual_style)
-    display_cues, _ = prepare_bilingual_ass_segments(
+    alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
+    if alias_stats["total_replacements"]:
+        save_segments(translated_segments, translated_json_path)
+        write_srt(translated_segments, output_dir / "06_translated_zh.srt")
+        emit(
+            callback,
+            "glossary_alias_corrections",
+            {
+                "path": str(translated_json_path),
+                **alias_stats,
+            },
+        )
+
+    difficult_spans_initial = detect_difficult_spans(
         translated_segments,
-        bilingual_style if bilingual_style is not None else BilingualSubtitleStyle(),
+        zh_max_cps=18.0,
+        zh_max_chars=effective_style.zh_max_chars_per_line,
     )
-    display_report = qa_display_cues(display_cues)
+    write_json(output_dir / "07b_difficult_spans_initial.json", difficult_spans_initial)
+    emit(
+        callback,
+        "difficult_spans_detected",
+        {
+            "path": str(output_dir / "07b_difficult_spans_initial.json"),
+            **difficult_spans_initial["summary"],
+        },
+    )
+
+    span_repair_report = {
+        "summary": {
+            "candidate_count": 0,
+            "attempted_count": 0,
+            "repaired_segment_count": 0,
+            "failed_count": 0,
+            "enabled": bool(repair_high_risk_spans),
+        },
+        "results": [],
+    }
+    if repair_high_risk_spans and difficult_spans_initial["summary"]["needs_ai_repair_count"] > 0:
+        span_repair_report = repair_difficult_spans(
+            translated_segments,
+            difficult_spans_initial,
+            src_lang=src_lang,
+            dst_lang=dst_lang,
+            glossary_text=load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
+            model=translation_model,
+            base_url=openai_base_url,
+            max_retries=translation_retries,
+            max_spans=span_repair_max_spans,
+            progress_callback=lambda stage, progress: emit(callback, stage, progress),
+        )
+        span_repair_report["summary"]["enabled"] = True
+        alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
+        if alias_stats["total_replacements"]:
+            span_repair_report["summary"]["post_repair_alias_corrections"] = alias_stats
+        save_segments(translated_segments, translated_json_path)
+        write_srt(translated_segments, output_dir / "06_translated_zh.srt")
+    write_json(output_dir / "07c_span_repair_report.json", span_repair_report)
+
+    difficult_spans_final = detect_difficult_spans(
+        translated_segments,
+        zh_max_cps=18.0,
+        zh_max_chars=effective_style.zh_max_chars_per_line,
+    )
+    write_json(output_dir / "07b_difficult_spans.json", difficult_spans_final)
+    emit(
+        callback,
+        "difficult_spans_final",
+        {
+            "path": str(output_dir / "07b_difficult_spans.json"),
+            "repair_path": str(output_dir / "07c_span_repair_report.json"),
+            **difficult_spans_final["summary"],
+        },
+    )
+
+    assert_no_target_text_pollution(translated_segments, dst_lang=dst_lang)
+    report = qa_check(translated_segments, dst_lang=dst_lang)
+    ass_path = output_dir / "08_bilingual_zh_en.ass"
+    alignment_debug = write_bilingual_ass(translated_segments, ass_path, style=effective_style)
+    display_cues, _ = prepare_bilingual_ass_segments(translated_segments, effective_style)
+    display_report = qa_display_cues(
+        display_cues,
+        dst_lang=dst_lang,
+        zh_max_line_chars=effective_style.zh_max_chars_per_line,
+        en_max_line_chars=effective_style.en_max_single_line_chars,
+        zh_wrap_trigger_chars=effective_style.zh_wrap_trigger_chars,
+        zh_max_lines=effective_style.zh_max_lines,
+    )
+    glossary_json_path = get_glossary_json_path(output_dir)
+    glossary_report = qa_glossary_consistency(
+        translated_segments,
+        glossary_json_path,
+    )
+    difficult_span_report = qa_difficult_spans(difficult_spans_final)
+    quality_metrics = build_quality_metrics(
+        translated_segments,
+        display_cues,
+        dst_lang=dst_lang,
+        glossary_path=glossary_json_path,
+        zh_max_line_chars=effective_style.zh_max_chars_per_line,
+        en_max_line_chars=effective_style.en_max_single_line_chars,
+        zh_wrap_trigger_chars=effective_style.zh_wrap_trigger_chars,
+        zh_max_lines=effective_style.zh_max_lines,
+    )
+    report.errors.extend(display_report.errors)
+    report.errors.extend(glossary_report.errors)
+    report.errors.extend(difficult_span_report.errors)
     report.warnings.extend(display_report.warnings)
+    report.warnings.extend(glossary_report.warnings)
+    report.warnings.extend(difficult_span_report.warnings)
     write_json(
         output_dir / "07_qa_report.json",
-        {"errors": report.errors, "warnings": report.warnings},
+        {"errors": report.errors, "warnings": report.warnings, "metrics_summary": quality_metrics["summary"]},
     )
+    write_json(output_dir / "07a_quality_metrics.json", quality_metrics)
     write_json(output_dir / "08a_bilingual_alignment_debug.json", alignment_debug)
     emit(
         callback,
@@ -435,10 +593,49 @@ def run_pipeline(
             "path": str(output_dir / "07_qa_report.json"),
             "errors": len(report.errors),
             "warnings": len(report.warnings),
+            "metrics_summary": quality_metrics["summary"],
         },
     )
-    if report.has_blocking_errors:
+    if report.has_blocking_errors and not skip_burn:
         raise RuntimeError("QA failed. See 07_qa_report.json")
+
+    if skip_burn:
+        manifest = {
+            "input_video": str(input_path),
+            "output_root": str(output_root),
+            "output_dir": str(output_dir),
+            "qa": {
+                "pass": not report.has_blocking_errors,
+                "errors": len(report.errors),
+                "warnings": len(report.warnings),
+                "metrics_summary": quality_metrics["summary"],
+            },
+            "burn_plan": {"skipped": True, "reason": "skip_burn"},
+            "files": [
+                "00_media_probe.json",
+                "00a_merged_with_external_audio.mp4" if audio_override_path else None,
+                "01_audio_16k.wav",
+                "02_asr_raw_segments.json",
+                "02_terms_from_asr.json" if (output_dir / "02_terms_from_asr.json").exists() else None,
+                "03_timed_source_segments.json",
+                "03_glossary_resolved.json" if (output_dir / "03_glossary_resolved.json").exists() else None,
+                "03_glossary_resolved_prompt.txt" if (output_dir / "03_glossary_resolved_prompt.txt").exists() else None,
+                "04_source_en.srt",
+                "05_translated_segments.json",
+                "06_translated_zh.srt",
+                "07_qa_report.json",
+                "07a_quality_metrics.json",
+                "07b_difficult_spans_initial.json",
+                "07b_difficult_spans.json",
+                "07c_span_repair_report.json",
+                "08_bilingual_zh_en.ass",
+                "08a_bilingual_alignment_debug.json",
+            ],
+        }
+        manifest["files"] = [item for item in manifest["files"] if item]
+        write_json(output_dir / "10_manifest_bilingual.json", manifest)
+        emit(callback, "complete", manifest)
+        return manifest
 
     safe_ass_path = create_safe_ass_copy(ass_path)
     output_video_name = (
@@ -494,9 +691,19 @@ def run_pipeline(
             "05_translated_segments.json",
             "06_translated_zh.srt",
             "07_qa_report.json",
+            "07a_quality_metrics.json",
+            "07b_difficult_spans_initial.json",
+            "07b_difficult_spans.json",
+            "07c_span_repair_report.json",
             "08_bilingual_zh_en.ass",
             "08a_bilingual_alignment_debug.json",
             "08_bilingual_safe.ass",
+            "00_glossary_auto.json" if (output_dir / "00_glossary_auto.json").exists() else None,
+            "00_glossary_prompt.txt" if (output_dir / "00_glossary_prompt.txt").exists() else None,
+            "00_glossary_review.tsv" if (output_dir / "00_glossary_review.tsv").exists() else None,
+            "02_terms_from_asr.json" if (output_dir / "02_terms_from_asr.json").exists() else None,
+            "03_glossary_resolved.json" if (output_dir / "03_glossary_resolved.json").exists() else None,
+            "03_glossary_resolved_prompt.txt" if (output_dir / "03_glossary_resolved_prompt.txt").exists() else None,
             output_video_name,
         ],
     }

@@ -464,12 +464,15 @@ def build_chinese_groups_for_english(text: str, english_groups: list[str]) -> li
     if len(english_groups) == 1 or not text:
         return [text] if text else [""]
 
-    base_chunks = split_by_meaning(text)
+    base_chunks = [normalize_inline_text(chunk) for chunk in split_by_meaning(text) if normalize_inline_text(chunk)]
     target_count = len(english_groups)
+    if not base_chunks:
+        return []
 
     while len(base_chunks) < target_count:
         split_index = max(range(len(base_chunks)), key=lambda idx: visible_text_length(base_chunks[idx]))
         split_parts = split_single_chinese_chunk(base_chunks[split_index], 2)
+        split_parts = [normalize_inline_text(part) for part in split_parts if normalize_inline_text(part)]
         if len(split_parts) <= 1:
             break
         base_chunks[split_index : split_index + 1] = split_parts
@@ -483,41 +486,38 @@ def build_chinese_groups_for_english(text: str, english_groups: list[str]) -> li
         total_chars = max(1, sum(visible_text_length(chunk) for chunk in base_chunks))
         target_chars = [max(1, round(total_chars * weight / total_weight)) for weight in weights]
         groups: list[str] = []
-        current_chunks: list[str] = []
-        current_chars = 0
         chunk_index = 0
         for group_index, target_char in enumerate(target_chars):
             remaining_groups = target_count - group_index - 1
-            while chunk_index < len(base_chunks):
-                chunk = base_chunks[chunk_index]
-                chunk_chars = visible_text_length(chunk)
-                if current_chunks and current_chars >= target_char and len(base_chunks) - chunk_index > remaining_groups:
-                    break
-                current_chunks.append(chunk)
-                current_chars += chunk_chars
-                chunk_index += 1
-                if len(base_chunks) - chunk_index < remaining_groups:
-                    break
-            groups.append(normalize_inline_text("".join(current_chunks)))
-            current_chunks = []
+            current_chunks: list[str] = []
             current_chars = 0
+            while chunk_index < len(base_chunks) - remaining_groups:
+                if current_chunks and current_chars >= target_char:
+                    break
+                chunk = base_chunks[chunk_index]
+                current_chunks.append(chunk)
+                current_chars += visible_text_length(chunk)
+                chunk_index += 1
+            groups.append(normalize_inline_text("".join(current_chunks)))
         if chunk_index < len(base_chunks) and groups:
             groups[-1] = normalize_inline_text(groups[-1] + "".join(base_chunks[chunk_index:]))
-        while len(groups) > target_count:
-            tail = groups.pop()
-            groups[-1] = normalize_inline_text(groups[-1] + tail)
-        while len(groups) < target_count:
-            groups.append(groups[-1] if groups else text)
-        return [normalize_inline_text(group) for group in groups]
+        groups = [normalize_inline_text(group) for group in groups]
+        if len(groups) == target_count and all(groups):
+            return groups
+        return []
 
     expanded = base_chunks[:]
     while len(expanded) < target_count:
         split_index = max(range(len(expanded)), key=lambda idx: visible_text_length(expanded[idx]))
         split_parts = split_single_chinese_chunk(expanded[split_index], 2)
+        split_parts = [normalize_inline_text(part) for part in split_parts if normalize_inline_text(part)]
         if len(split_parts) <= 1:
             break
         expanded[split_index : split_index + 1] = split_parts
-    return [normalize_inline_text(chunk) for chunk in expanded if normalize_inline_text(chunk)]
+    expanded = [normalize_inline_text(chunk) for chunk in expanded if normalize_inline_text(chunk)]
+    if len(expanded) == target_count and all(expanded):
+        return expanded
+    return []
 
 
 def duration_for_split(segment: Segment, part_count: int, index: int) -> tuple[float, float]:
@@ -530,13 +530,15 @@ def duration_for_split(segment: Segment, part_count: int, index: int) -> tuple[f
 def split_segment_for_bilingual_ass(
     segment: Segment,
     style: BilingualSubtitleStyle,
+    *,
+    split_long_source: bool = False,
 ) -> tuple[list[DisplayCue], dict]:
     source_text = normalize_inline_text(segment.source_text)
     target_text = normalize_inline_text(segment.target_text or "")
     max_chars = int(style.en_max_single_line_chars or 78)
     max_parts = int(style.en_max_split_parts or 3)
 
-    if english_fits_single_line(source_text, max_chars):
+    if not split_long_source or english_fits_single_line(source_text, max_chars):
         cues = [
             DisplayCue(
                 start=segment.start,
@@ -566,6 +568,8 @@ def split_segment_for_bilingual_ass(
         )
         zh_candidate = build_chinese_groups_for_english(target_text, english_candidate)
         if len(english_candidate) != len(zh_candidate):
+            continue
+        if any(not item.strip() for item in zh_candidate):
             continue
         if count_adjacent_repeats(zh_candidate) > 0 and candidate_count > 1:
             continue
@@ -656,11 +660,13 @@ def enforce_minimum_split_durations(
 def prepare_bilingual_ass_segments(
     segments: list[Segment],
     style: BilingualSubtitleStyle,
+    *,
+    split_long_source: bool = False,
 ) -> tuple[list[DisplayCue], list[dict]]:
     prepared: list[DisplayCue] = []
     debug_rows: list[dict] = []
     for segment in segments:
-        cues, debug_row = split_segment_for_bilingual_ass(segment, style)
+        cues, debug_row = split_segment_for_bilingual_ass(segment, style, split_long_source=split_long_source)
         prepared.extend(cues)
         debug_rows.append(debug_row)
 
@@ -730,6 +736,8 @@ def write_bilingual_ass(
     segments: list[Segment],
     output_path: str | Path,
     style: BilingualSubtitleStyle | None = None,
+    *,
+    split_long_source: bool = False,
 ) -> list[dict]:
     ensure_parent(output_path)
     if style is None:
@@ -753,7 +761,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     lines: list[str] = [header.rstrip()]
-    cues, debug_rows = prepare_bilingual_ass_segments(segments, style)
+    cues, debug_rows = prepare_bilingual_ass_segments(segments, style, split_long_source=split_long_source)
     for cue in cues:
         start = format_ass_timestamp(cue.start)
         end = format_ass_timestamp(cue.end)

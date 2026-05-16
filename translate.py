@@ -2,14 +2,43 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
 from typing import Callable
 
 from .models import Segment
+from .text_quality import find_text_pollution
 
 TranslationProgressCallback = Callable[[str, dict], None]
+TRANSLATABLE_FUNCTION_WORDS = {
+    "am",
+    "are",
+    "been",
+    "being",
+    "can",
+    "could",
+    "did",
+    "does",
+    "had",
+    "has",
+    "have",
+    "is",
+    "might",
+    "must",
+    "should",
+    "that",
+    "these",
+    "they",
+    "this",
+    "those",
+    "was",
+    "were",
+    "will",
+    "would",
+    "you",
+}
 
 
 @dataclass(slots=True)
@@ -18,6 +47,13 @@ class TranslationAttemptLog:
     error_type: str
     message: str
     retry_after_seconds: float
+
+
+class TranslationValidationError(RuntimeError):
+    def __init__(self, issues: dict[str, list[int]]) -> None:
+        self.issues = {key: value for key, value in issues.items() if value}
+        details = ", ".join(f"{key}={value}" for key, value in self.issues.items())
+        super().__init__(f"Translation validation failed: {details}")
 
 
 def short_error_message(exc: Exception) -> str:
@@ -45,7 +81,45 @@ def load_glossary(glossary: str | None) -> str:
     if not glossary:
         return ""
     with open(glossary, "r", encoding="utf-8") as file:
-        return file.read().strip()
+        raw_text = file.read().strip()
+    if not raw_text:
+        return ""
+    if glossary.lower().endswith(".json"):
+        try:
+            payload = json.loads(raw_text)
+        except json.JSONDecodeError:
+            return raw_text
+        return render_structured_glossary(payload)
+    return raw_text
+
+
+def render_structured_glossary(payload: object) -> str:
+    if isinstance(payload, dict):
+        terms = payload.get("terms")
+    else:
+        terms = payload
+    if not isinstance(terms, list):
+        return json.dumps(payload, ensure_ascii=False)
+
+    lines: list[str] = []
+    for item in terms:
+        if not isinstance(item, dict):
+            continue
+        canonical = str(item.get("canonical") or "").strip()
+        if not canonical:
+            continue
+        zh = str(item.get("zh") or canonical).strip()
+        policy = str(item.get("policy") or "preserve").strip()
+        term_type = str(item.get("type") or "term").strip()
+        aliases = [str(value).strip() for value in item.get("aliases") or [] if str(value).strip()]
+        bad_aliases = [str(value).strip() for value in item.get("bad_aliases") or [] if str(value).strip()]
+        line = f"- {canonical} | zh={zh} | type={term_type} | policy={policy}"
+        if aliases:
+            line += f" | aliases={'; '.join(aliases)}"
+        if bad_aliases:
+            line += f" | correct_bad_aliases={'; '.join(bad_aliases)} -> {canonical}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def chunk_segments(segments: list[Segment], chunk_size: int) -> list[list[Segment]]:
@@ -57,6 +131,15 @@ def chunk_segments(segments: list[Segment], chunk_size: int) -> list[list[Segmen
     if chunk_size <= 0:
         raise ValueError("chunk_size must be greater than zero.")
     return [segments[index : index + chunk_size] for index in range(0, len(segments), chunk_size)]
+
+
+def chunk_segments_with_indexes(segments: list[Segment], chunk_size: int) -> list[tuple[int, int, list[Segment]]]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than zero.")
+    return [
+        (index, min(index + chunk_size, len(segments)), segments[index : index + chunk_size])
+        for index in range(0, len(segments), chunk_size)
+    ]
 
 
 def parse_json_payload(raw_text: str) -> list[dict]:
@@ -79,6 +162,133 @@ def parse_json_payload(raw_text: str) -> list[dict]:
     if isinstance(payload, dict) and isinstance(payload.get("translations"), list):
         return payload["translations"]
     raise ValueError("Translation response JSON must be a list or an object with a translations list.")
+
+
+def normalize_for_equality(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip()).casefold()
+
+
+def is_chinese_target_language(dst_lang: str | None) -> bool:
+    normalized = (dst_lang or "").strip().lower()
+    return normalized.startswith("zh") or "chinese" in normalized
+
+
+def contains_chinese(text: str) -> bool:
+    return bool(re.search(r"[\u3400-\u9fff]", text or ""))
+
+
+def normalize_term_text(text: str) -> str:
+    return re.sub(r"[\W_]+", "", (text or "").casefold())
+
+
+def extract_preserve_terms(glossary_text: str) -> set[str]:
+    preserved: set[str] = set()
+    for line in (glossary_text or "").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("- "):
+            continue
+        canonical = stripped[2:].split("|", 1)[0].strip()
+        if not canonical:
+            continue
+        if "policy=preserve" not in stripped:
+            continue
+        normalized = normalize_term_text(canonical)
+        if normalized:
+            preserved.add(normalized)
+    return preserved
+
+
+def extract_preserve_term_map(glossary_text: str) -> dict[str, str]:
+    preserved: dict[str, str] = {}
+    for line in (glossary_text or "").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("- "):
+            continue
+        canonical = stripped[2:].split("|", 1)[0].strip()
+        if not canonical or "policy=preserve" not in stripped:
+            continue
+        normalized = normalize_term_text(canonical)
+        if normalized and normalized not in preserved:
+            preserved[normalized] = canonical
+    return preserved
+
+
+def is_allowable_non_chinese_translation(source_text: str, translated_text: str, preserved_terms: set[str]) -> bool:
+    if not source_text or not translated_text:
+        return False
+    normalized_source = normalize_term_text(source_text)
+    normalized_target = normalize_term_text(translated_text)
+    if not normalized_source or not normalized_target:
+        return False
+    if normalized_target not in preserved_terms:
+        return False
+    return normalized_target == normalized_source or normalized_target in normalized_source or normalized_source in normalized_target
+
+
+def resolve_preserve_only_translation(source_text: str, preserve_term_map: dict[str, str]) -> str | None:
+    normalized_source = normalize_term_text(source_text)
+    if not normalized_source:
+        return None
+    for normalized_term, canonical in preserve_term_map.items():
+        if normalized_source == normalized_term or normalized_source in normalized_term or normalized_term in normalized_source:
+            return canonical
+    return None
+
+
+def has_translatable_alpha_text(text: str) -> bool:
+    words = [word.casefold() for word in re.findall(r"[A-Za-z]{2,}", text or "")]
+    if len(words) < 2:
+        return False
+    if re.search(r"[.!?]", text or "") and len(words) >= 3:
+        return True
+    if any(word in TRANSLATABLE_FUNCTION_WORDS for word in words):
+        return True
+    return len(words) >= 7
+
+
+def validate_translations(
+    chunk: list[Segment],
+    translations: dict[int, str],
+    *,
+    dst_lang: str | None,
+    preserved_terms: set[str] | None = None,
+) -> dict[str, list[int]]:
+    expected_ids = {segment.id for segment in chunk}
+    returned_ids = set(translations)
+    source_by_id = {segment.id: segment.source_text for segment in chunk}
+    preserved_terms = preserved_terms or set()
+
+    issues: dict[str, list[int]] = {
+        "missing": sorted(expected_ids - returned_ids),
+        "extra": sorted(returned_ids - expected_ids),
+        "empty": [],
+        "source_echo": [],
+        "target_without_chinese": [],
+        "text_pollution": [],
+    }
+    for segment_id in sorted(expected_ids & returned_ids):
+        translated_text = translations.get(segment_id, "").strip()
+        source_text = source_by_id.get(segment_id, "").strip()
+        if not translated_text:
+            issues["empty"].append(segment_id)
+            continue
+        if (
+            is_chinese_target_language(dst_lang)
+            and normalize_for_equality(translated_text) == normalize_for_equality(source_text)
+            and has_translatable_alpha_text(source_text)
+        ):
+            issues["source_echo"].append(segment_id)
+        if (
+            is_chinese_target_language(dst_lang)
+            and not contains_chinese(translated_text)
+            and has_translatable_alpha_text(source_text)
+            and not is_allowable_non_chinese_translation(source_text, translated_text, preserved_terms)
+        ):
+            issues["target_without_chinese"].append(segment_id)
+        pollution_issues = find_text_pollution(translated_text, dst_lang=dst_lang)
+        if pollution_issues:
+            issues["text_pollution"].append(segment_id)
+    return {key: value for key, value in issues.items() if value}
 
 
 def sanitize_base_url(base_url: str | None) -> str | None:
@@ -108,6 +318,8 @@ def build_translation_prompt(
     src_lang: str | None,
     dst_lang: str,
     glossary_text: str,
+    context_before: list[Segment] | None = None,
+    context_after: list[Segment] | None = None,
 ) -> str:
     payload = [
         {
@@ -118,6 +330,20 @@ def build_translation_prompt(
         }
         for segment in chunk
     ]
+    before_payload = [
+        {
+            "id": segment.id,
+            "source_text": segment.source_text,
+        }
+        for segment in context_before or []
+    ]
+    after_payload = [
+        {
+            "id": segment.id,
+            "source_text": segment.source_text,
+        }
+        for segment in context_after or []
+    ]
 
     glossary_block = glossary_text or "No glossary provided."
     return (
@@ -127,14 +353,22 @@ def build_translation_prompt(
         "Rules:\n"
         "- Translate naturally for on-screen subtitles.\n"
         "- Keep the translation concise; avoid explanatory expansion.\n"
+        "- If the target language is Chinese, every translatable English fragment must contain Chinese words, not only punctuation.\n"
         "- Preserve names, numbers, and domain terms according to the glossary.\n\n"
         "- Do not add manual line breaks, markdown, bullets, or numbering inside target_text.\n"
         "- Preserve the input IDs exactly; each ID must return one complete translation.\n"
+        "- Translate each input ID as its own on-screen subtitle; do not omit it or merge its meaning into another ID.\n"
         "- Do not split, truncate, or rearrange technical words, names, commands, paths, or identifiers.\n"
         "- Treat every word/token in the source as atomic; never break a word into pieces for layout.\n\n"
+        "- Use the surrounding context only to resolve pronouns, terminology, and continuity.\n"
+        "- Return translations only for Input JSON items; never return context item IDs.\n\n"
         f"Glossary:\n{glossary_block}\n\n"
+        "Previous context JSON (read-only, do not translate in output):\n"
+        f"{json.dumps(before_payload, ensure_ascii=False)}\n\n"
         "Input JSON:\n"
         f"{json.dumps(payload, ensure_ascii=False)}\n\n"
+        "Next context JSON (read-only, do not translate in output):\n"
+        f"{json.dumps(after_payload, ensure_ascii=False)}\n\n"
         "The output must follow the supplied JSON schema exactly."
     )
 
@@ -175,6 +409,9 @@ def translate_chunk_with_openai(
     model: str,
     base_url: str | None = None,
     max_retries: int = 2,
+    retry_invalid_individually: bool = True,
+    context_before: list[Segment] | None = None,
+    context_after: list[Segment] | None = None,
 ) -> dict[int, str]:
     try:
         from openai import OpenAI
@@ -200,8 +437,11 @@ def translate_chunk_with_openai(
         src_lang=src_lang,
         dst_lang=dst_lang,
         glossary_text=glossary_text,
+        context_before=context_before,
+        context_after=context_after,
     )
     translation_schema = build_translation_schema()
+    preserved_terms = extract_preserve_terms(glossary_text)
 
     raw_text = ""
     last_error: Exception | None = None
@@ -260,28 +500,39 @@ def translate_chunk_with_openai(
         translations[int(item["id"])] = str(item["target_text"]).strip()
 
     expected_ids = {segment.id for segment in chunk}
-    returned_ids = set(translations)
-    source_by_id = {segment.id: segment.source_text for segment in chunk}
-    if expected_ids != returned_ids:
-        missing = sorted(expected_ids - returned_ids)
-        extra = sorted(returned_ids - expected_ids)
-        if extra:
-            raise RuntimeError(f"Translation id mismatch. missing={missing}, extra={extra}")
-        for segment_id in missing:
-            source_text = source_by_id.get(segment_id, "").strip()
-            if source_text:
-                translations[segment_id] = source_text
-            else:
-                raise RuntimeError(f"Translation id mismatch. missing={missing}, extra={extra}")
+    extra_ids = sorted(set(translations) - expected_ids)
+    for segment_id in extra_ids:
+        translations.pop(segment_id, None)
 
-    empty_ids = [segment_id for segment_id, text in translations.items() if not text]
-    if empty_ids:
-        for segment_id in empty_ids:
-            source_text = source_by_id.get(segment_id, "").strip()
-            if source_text:
-                translations[segment_id] = source_text
-            else:
-                raise RuntimeError(f"OpenAI returned empty translations for ids: {empty_ids}")
+    issues = validate_translations(chunk, translations, dst_lang=dst_lang, preserved_terms=preserved_terms)
+    retryable_ids = sorted(
+        set(issues.get("missing", []))
+        | set(issues.get("empty", []))
+        | set(issues.get("source_echo", []))
+        | set(issues.get("target_without_chinese", []))
+        | set(issues.get("text_pollution", []))
+    )
+    if retryable_ids and retry_invalid_individually and len(chunk) > 1:
+        segment_by_id = {segment.id: segment for segment in chunk}
+        for segment_id in retryable_ids:
+            single_segment = segment_by_id[segment_id]
+            single_translation = translate_chunk_with_openai(
+                [single_segment],
+                src_lang=src_lang,
+                dst_lang=dst_lang,
+                glossary_text=glossary_text,
+                model=model,
+                base_url=base_url,
+                max_retries=max_retries,
+                retry_invalid_individually=False,
+                context_before=context_before,
+                context_after=context_after,
+            )
+            translations[segment_id] = single_translation[segment_id]
+        issues = validate_translations(chunk, translations, dst_lang=dst_lang, preserved_terms=preserved_terms)
+
+    if issues:
+        raise TranslationValidationError(issues)
 
     return translations
 
@@ -332,6 +583,7 @@ def translate_segments(
     chunk_size: int = 40,
     max_retries: int = 2,
     openai_base_url: str | None = None,
+    context_window: int = 4,
     progress_callback: TranslationProgressCallback | None = None,
 ) -> list[Segment]:
     if not enabled:
@@ -346,9 +598,19 @@ def translate_segments(
         raise ValueError("dst_lang is required when translation is enabled.")
 
     glossary_text = load_glossary(glossary)
+    preserve_term_map = extract_preserve_term_map(glossary_text)
     resolved_base_url = resolve_openai_base_url(openai_base_url)
-    chunks = chunk_segments(segments, chunk_size)
-    for chunk_index, chunk in enumerate(chunks, start=1):
+    chunks = chunk_segments_with_indexes(segments, chunk_size)
+    for chunk_index, (start_index, end_index, chunk) in enumerate(chunks, start=1):
+        direct_translations = {
+            segment.id: preserve_only
+            for segment in chunk
+            if (preserve_only := resolve_preserve_only_translation(segment.source_text, preserve_term_map))
+        }
+        chunk_for_model = [segment for segment in chunk if segment.id not in direct_translations]
+        context_window = max(0, int(context_window or 0))
+        context_before = segments[max(0, start_index - context_window) : start_index]
+        context_after = segments[end_index : min(len(segments), end_index + context_window)]
         if progress_callback:
             progress_callback(
                 "translation_chunk_start",
@@ -356,26 +618,34 @@ def translate_segments(
                     "chunk_index": chunk_index,
                     "chunk_total": len(chunks),
                     "segment_count": len(chunk),
+                    "direct_count": len(direct_translations),
+                    "context_before": len(context_before),
+                    "context_after": len(context_after),
                 },
             )
         print(f"Translating chunk {chunk_index}/{len(chunks)} with {len(chunk)} segments.")
         started_at = time.time()
-        try:
-            translations = translate_chunk_with_openai(
-                chunk,
-                src_lang=src_lang,
-                dst_lang=dst_lang,
-                glossary_text=glossary_text,
-                model=model,
-                base_url=resolved_base_url,
-                max_retries=max_retries,
-            )
-        except Exception as exc:
-            chunk_summary = (
-                f"chunk {chunk_index}/{len(chunks)} failed after {round(time.time() - started_at, 2)}s; "
-                f"segment_ids={chunk[0].id}-{chunk[-1].id}; count={len(chunk)}"
-            )
-            raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
+        translations = dict(direct_translations)
+        if chunk_for_model:
+            try:
+                model_translations = translate_chunk_with_openai(
+                    chunk_for_model,
+                    src_lang=src_lang,
+                    dst_lang=dst_lang,
+                    glossary_text=glossary_text,
+                    model=model,
+                    base_url=resolved_base_url,
+                    max_retries=max_retries,
+                    context_before=context_before,
+                    context_after=context_after,
+                )
+                translations.update(model_translations)
+            except Exception as exc:
+                chunk_summary = (
+                    f"chunk {chunk_index}/{len(chunks)} failed after {round(time.time() - started_at, 2)}s; "
+                    f"segment_ids={chunk[0].id}-{chunk[-1].id}; count={len(chunk)}"
+                )
+                raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
         fallback_count = 0
         for segment in chunk:
             translated_text = translations.get(segment.id, "").strip()
@@ -389,8 +659,11 @@ def translate_segments(
                     "chunk_index": chunk_index,
                     "chunk_total": len(chunks),
                     "segment_count": len(chunk),
+                    "direct_count": len(direct_translations),
                     "fallback_count": fallback_count,
                     "elapsed_seconds": round(time.time() - started_at, 2),
+                    "context_before": len(context_before),
+                    "context_after": len(context_after),
                 },
             )
 

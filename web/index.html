@@ -210,6 +210,9 @@
                   <label class="wide"><span>OpenAI Base URL</span><input id="openai_base_url" type="text" /></label>
                   <label class="wide"><span>附加音频路径</span><input id="audio_override_path" type="text" readonly /></label>
                   <label class="toggle-row"><span>复用已有分段</span><input id="load_existing_segments" type="checkbox" /></label>
+                  <label class="toggle-row"><span>只输出到 ASS</span><input id="skip_burn" type="checkbox" /></label>
+                  <label class="toggle-row"><span>启用难句 AI 修复</span><input id="repair_high_risk_spans" type="checkbox" /></label>
+                  <label><span>最多修复 Span</span><input id="span_repair_max_spans" type="number" min="0" /></label>
                 </div>
               </section>
 

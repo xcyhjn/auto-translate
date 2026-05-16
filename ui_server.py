@@ -18,6 +18,7 @@ from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, 
 from .models import BilingualSubtitleStyle
 from .media import probe_media
 from .pipeline_core import build_output_slug, burn_subtitle, create_safe_ass_copy, run_pipeline
+from .glossary import write_youtube_glossary
 from .youtube_meta import ensure_cover, ensure_padded_cover, fetch_youtube_info, fetch_youtube_meta, safe_project_slug, save_youtube_meta
 
 
@@ -46,6 +47,9 @@ DEFAULT_CONFIG = {
     "audio_override_path": "",
     "load_existing_segments": False,
     "preview_seconds": None,
+    "skip_burn": False,
+    "repair_high_risk_spans": True,
+    "span_repair_max_spans": 12,
     "download_backend": "auto",
     "idm_exe_path": "",
     "idm_output_dir": str(INPUT_DIR),
@@ -78,6 +82,10 @@ STAGE_META = {
     "translation_chunk_complete": {"title": "翻译中", "description": "分块翻译已返回结果。", "overall_progress": 82},
     "translation_complete": {"title": "翻译中", "description": "翻译完成。", "overall_progress": 88},
     "load_existing_segments": {"title": "翻译中", "description": "已复用既有分段结果。", "overall_progress": 88},
+    "difficult_spans_detected": {"title": "难句标记", "description": "正在标记长难句、对齐漂移和可疑源文。", "overall_progress": 89},
+    "span_repair_start": {"title": "难句修复", "description": "正在用 AI 局部修复高风险 span。", "overall_progress": 90},
+    "span_repair_complete": {"title": "难句修复", "description": "AI 局部修复已返回结果。", "overall_progress": 90},
+    "difficult_spans_final": {"title": "难句复查", "description": "正在输出最终难句 span 报告。", "overall_progress": 91},
     "qa_complete": {"title": "QA 检查", "description": "正在整理风险和警告。", "overall_progress": 91},
     "burn_start": {"title": "烧录中", "description": "正在写入双语字幕视频。", "overall_progress": 94},
     "burn_progress": {"title": "烧录中", "description": "正在写入双语字幕视频。", "overall_progress": 96},
@@ -461,6 +469,18 @@ def summarize_payload(payload: dict) -> dict:
         "remaining_seconds",
         "direct_count",
         "fallback_count",
+        "span_count",
+        "high_count",
+        "medium_count",
+        "low_count",
+        "needs_ai_repair_count",
+        "review_count",
+        "candidate_count",
+        "attempted_count",
+        "repaired_segment_count",
+        "failed_count",
+        "rejected_count",
+        "eligible_span_count",
         "virtual_chunk_current",
         "virtual_chunk_total",
         "speed",
@@ -751,6 +771,86 @@ def update_phase_status(stage: str, payload: dict) -> None:
         phase["burn"]["label"] = "准备烧录"
         return
 
+    if stage == "difficult_spans_detected":
+        span_count = int(payload.get("span_count", 0) or 0)
+        ai_count = int(payload.get("needs_ai_repair_count", 0) or 0)
+        phase["translation"].update(
+            {
+                "status": "running",
+                "progress": 100,
+                "label": f"已标记 {span_count} 个难句 span，待 AI 修复 {ai_count} 个",
+            }
+        )
+        phase["burn"].update(
+            {
+                "status": "running",
+                "label": f"难句标记完成：{span_count} 个 span",
+            }
+        )
+        return
+
+    if stage == "span_repair_start":
+        span_index = int(payload.get("span_index", 0) or 0)
+        span_total = int(payload.get("span_total", 0) or 0)
+        phase["translation"].update(
+            {
+                "status": "running",
+                "progress": 100,
+                "label": f"正在修复高风险 span {span_index}/{span_total}",
+            }
+        )
+        phase["burn"].update(
+            {
+                "status": "running",
+                "label": f"AI 修复 span {span_index}/{span_total}",
+            }
+        )
+        return
+
+    if stage == "span_repair_complete":
+        span_index = int(payload.get("span_index", 0) or 0)
+        span_total = int(payload.get("span_total", 0) or 0)
+        status = str(payload.get("status") or "done")
+        repaired_count = int(payload.get("repaired_count", 0) or 0)
+        status_label = {
+            "repaired": f"已修复 {repaired_count} 段",
+            "rejected": "已拒绝本次修复",
+            "failed": "修复失败",
+            "skipped": "已跳过",
+        }.get(status, status)
+        phase["translation"].update(
+            {
+                "status": "running",
+                "progress": 100,
+                "label": f"span {span_index}/{span_total}：{status_label}",
+            }
+        )
+        phase["burn"].update(
+            {
+                "status": "running",
+                "label": f"AI 难句修复进度 {span_index}/{span_total}",
+            }
+        )
+        return
+
+    if stage == "difficult_spans_final":
+        span_count = int(payload.get("span_count", 0) or 0)
+        ai_count = int(payload.get("needs_ai_repair_count", 0) or 0)
+        phase["translation"].update(
+            {
+                "status": "complete",
+                "progress": 100,
+                "label": f"难句复查完成：{span_count} 个 span，仍有 {ai_count} 个待人工/后续处理",
+            }
+        )
+        phase["burn"].update(
+            {
+                "status": "running",
+                "label": f"难句复查完成，剩余高风险 {ai_count} 个",
+            }
+        )
+        return
+
     if stage == "qa_complete":
         phase["burn"].update(
             {
@@ -921,6 +1021,7 @@ def youtube_assets_job(url: str, *, download_cover_only: bool = False) -> dict:
     output_dir = resolve_youtube_output_dir(meta.title)
     migrate_legacy_youtube_assets(meta.video_id, output_dir)
     save_youtube_meta(output_dir, meta)
+    glossary_path = write_youtube_glossary(output_dir, meta)
     cover_path = None
     padded_cover_path = ""
     if download_cover_only:
@@ -934,6 +1035,7 @@ def youtube_assets_job(url: str, *, download_cover_only: bool = False) -> dict:
         "cover_path": str(cover_path) if cover_path else "",
         "cover_1280x960_path": padded_cover_path,
         "info_path": str(output_dir / "00_youtube_info.txt"),
+        "glossary_path": str(glossary_path),
     }
     (output_dir / "10_youtube_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
@@ -944,6 +1046,7 @@ def youtube_info_job(url: str) -> dict:
     output_dir = resolve_youtube_output_dir(meta.title)
     migrate_legacy_youtube_assets(meta.video_id, output_dir)
     save_youtube_meta(output_dir, meta)
+    glossary_path = write_youtube_glossary(output_dir, meta)
     manifest = {
         "input_url": url,
         "output_dir": str(output_dir),
@@ -951,6 +1054,7 @@ def youtube_info_job(url: str) -> dict:
         "meta": meta.to_dict(),
         "info_text": meta.display_text(),
         "info_path": str(output_dir / "00_youtube_info.txt"),
+        "glossary_path": str(glossary_path),
         "cover_path": "",
         "cover_1280x960_path": "",
     }
@@ -1014,6 +1118,9 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
             audio_override_path=config.get("audio_override_path") or None,
             load_existing_segments=bool(config["load_existing_segments"]),
             preview_seconds=int(config["preview_seconds"]) if config["preview_seconds"] else None,
+            skip_burn=bool(config.get("skip_burn", False)),
+            repair_high_risk_spans=bool(config.get("repair_high_risk_spans", True)),
+            span_repair_max_spans=int(config.get("span_repair_max_spans", 12) or 12),
             bilingual_style=style,
             callback=append_history,
         )

@@ -51,6 +51,18 @@ const summaryLabels = {
   virtual_chunk_current: "块进度",
   virtual_chunk_total: "块总数",
   fallback_count: "回退条数",
+  span_count: "Span 数",
+  high_count: "高风险",
+  medium_count: "中风险",
+  low_count: "低风险",
+  needs_ai_repair_count: "待 AI 修复",
+  review_count: "待人工复核",
+  candidate_count: "候选 Span",
+  attempted_count: "尝试修复",
+  repaired_segment_count: "已修复段数",
+  failed_count: "修复失败",
+  rejected_count: "已拒绝修复",
+  eligible_span_count: "可修复 Span",
 };
 
 function el(id) {
@@ -142,6 +154,9 @@ function readFormConfig() {
     audio_override_path: el("audio_override_path").value,
     preview_seconds: el("preview_seconds").value ? Number(el("preview_seconds").value) : null,
     load_existing_segments: el("load_existing_segments").checked,
+    skip_burn: el("skip_burn").checked,
+    repair_high_risk_spans: el("repair_high_risk_spans").checked,
+    span_repair_max_spans: Number(el("span_repair_max_spans").value || 12),
     download_backend: el("download_backend").value,
     idm_exe_path: el("idm_exe_path").value,
     idm_output_dir: el("idm_output_dir").value,
@@ -185,6 +200,9 @@ function fillForm(config) {
   el("audio_override_path").value = config.audio_override_path || "";
   el("preview_seconds").value = config.preview_seconds ?? "";
   el("load_existing_segments").checked = Boolean(config.load_existing_segments);
+  el("skip_burn").checked = Boolean(config.skip_burn);
+  el("repair_high_risk_spans").checked = config.repair_high_risk_spans !== false;
+  el("span_repair_max_spans").value = config.span_repair_max_spans ?? 12;
   el("download_backend").value = config.download_backend || "auto";
   el("idm_exe_path").value = config.idm_exe_path || "";
   el("idm_output_dir").value = config.idm_output_dir || "";

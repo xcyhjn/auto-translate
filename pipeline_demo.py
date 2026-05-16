@@ -28,6 +28,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--audio-override", default=None, help="为无声视频追加的外部音频文件路径。")
     parser.add_argument("--load-existing-segments", action="store_true", help="读取已有阶段文件，跳过 probe、抽音频、ASR 和翻译。")
     parser.add_argument("--preview-seconds", type=int, default=None, help="只输出前 N 秒的烧录预览视频。")
+    parser.add_argument("--skip-burn", action="store_true", help="只生成到双语 ASS 和 QA 产物，不烧录视频。")
+    parser.add_argument("--no-span-repair", action="store_true", help="只标记难句 span，不调用 AI 局部修复。")
+    parser.add_argument("--span-repair-max-spans", type=int, default=12, help="最多调用 AI 修复的高风险 span 数。")
     parser.add_argument("--zh-font-size", type=int, default=64, help="中文字幕字号。")
     parser.add_argument("--zh-margin-l", type=int, default=90, help="中文字幕左边距。")
     parser.add_argument("--zh-margin-r", type=int, default=90, help="中文字幕右边距。")
@@ -69,6 +72,9 @@ def main() -> None:
         audio_override_path=args.audio_override,
         load_existing_segments=args.load_existing_segments,
         preview_seconds=args.preview_seconds,
+        skip_burn=args.skip_burn,
+        repair_high_risk_spans=not args.no_span_repair,
+        span_repair_max_spans=args.span_repair_max_spans,
         bilingual_style=style,
     )
     manifest["bilingual_style"] = asdict(style)
