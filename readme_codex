@@ -1,175 +1,49 @@
-按照这个方案开始优化我的项目
-我读完当前项目后，结论和你这份方案一致：现在最该补的不是“再换一个翻译模型”，而是把项目升级成 **字幕编辑流水线**。你已有 ASR、timing、glossary、chunk translation、difficult spans、span repair、ASS、QA 的骨架；下一步应该把“前置修源文、语义 span、成片级中文、分层 QA”补成正式阶段。
-
-另外先提醒一个很关键的工程点：当前仓库里有一些中文常量/字符串看起来已经 mojibake，比如 `difficult_spans.py` 的中文悬空后缀、`subtitle_io.py` 的中文切分符和软断词。这会让 `target_open_ending`、中文换行、QA 判断不稳定。建议把它作为 P0 基线修复。
-
-**目标流水线**
-`ASR -> timing -> source repair -> source semantic spans -> glossary resolve -> span-first translation -> display rewrite -> ASS render -> layered QA -> style learning`
-
-**0. P0 基线修复**
-- 修复 mojibake 中文常量：悬空尾字、中文标点、中文软断词、错误提示文本。
-- 给每个新增阶段加 `schema_version`、`created_at`、`input_file`、`segment_count`、`summary`，避免后期 JSON 难追踪。
-- 保持 `Segment` 数据结构轻量，复杂审计信息先放 sidecar report，不急着扩 dataclass。
-- 增加 TSV 写出工具：后续 `editor_review.tsv`、`glossary_qa.tsv`、`display_qa.tsv` 都共用。
-
-**1. Source Repair 前置**
-新增：`03b_source_repaired_segments.json`、`03b_source_repair_report.json`
-
-落点：先复用 `glossary.py` 的 `bad_aliases -> canonical`，再独立成 `source_repair.py`。在 `pipeline_core.py` 的 timing 后、写 `04_source_en.srt` 前运行。
-
-规则细化：
-- 只修确定性错误：来自 glossary bad_aliases、YouTube metadata、人工词表、ASR fuzzy alias。
-- 只改局部 token/phrase，不重写整句。
-- `source_text` 一定替换；`words[].word` 只在 token 数量能对齐时替换，否则保留 word timing 并在 report 标记。
-- 每条记录保留：`segment_id`、`original`、`replacement`、`reason`、`confidence`、`term_id`、`word_indexes`、`changed_words`.
-
-验收：
-- `bad_alias_in_source_count` 明显下降。
-- 翻译后 target bad alias 不再扩散。
-- report 能人工审计，不能出现黑箱式整句改写。
-
-**2. Source Semantic Span 前移**
-新增：`04a_source_spans.json`
-
-落点：从 `difficult_spans.py` 抽出 source-only detector，或新增 `source_spans.py`。它只看英文源文、word gaps、segment duration、term density、ASR suspicious words。
-
-规则细化：
-- 合并以 `and/but/because/which/that/of/to/from/with` 开头或结尾的 cue。
-- 连续无终止符且 gap 小于阈值的 cue 合成一个 span。
-- 长句按逗号、从句、转折、静音边界拆成 2-6 个语义 span。
-- span 不改时间轴，只保留 cue ID 序列和策略。
-
-建议 schema：
-```json
-{
-  "span_id": "srcspan-0007",
-  "segment_ids": [41, 42, 43],
-  "source_joined": "...",
-  "risk_reasons": ["open_clause_chain", "ends_with_function_word"],
-  "translation_strategy": "span_first",
-  "confidence": 0.86
-}
-```
-
-验收：
-- 高风险区域在翻译前就被标记。
-- 后置 `07b_difficult_spans.json` 的 high span 数下降。
-
-**3. Span-First Translation**
-新增：`05a_span_translated_segments.json`、`05a_span_translation_report.json`
-
-落点：可把 `span_repair.py` 的 prompt/validation 逻辑抽象成 `span_translate.py`。流程上先翻 `04a_source_spans.json` 中 `translation_strategy=span_first` 的 ID，再让 `translate.py` 跳过已锁定 ID。
-
-策略：
-- 普通 cue 继续走现有 chunk translation。
-- 高风险 span 用完整 span prompt：先理解整句，再按原 ID 分配中文。
-- 返回 schema 增加 `intent_zh`、`translations`、`notes`，方便审计。
-- 禁止单屏出现“的 / 和 / 但 / 一个 / 关于 / 因为 / 所以”这类孤立结构。
-- 校验失败直接重试；仍失败则回退普通翻译并交给后置 repair。
-
-验收：
-- `target_open_ending`、`target_too_short`、`source_echo` 下降。
-- 人工校对时“整句重写”的 span 数下降。
-
-**4. Terminology Short-Circuit**
-新增/扩展：`05b_terminology_actions.json`、`07e_glossary_qa.tsv`
-
-当前 `GlossaryTerm` 已有 `canonical/type/aliases/bad_aliases/zh/policy/confidence/sources`，可以补 `priority`、`term_id`、`short_name`、`first_mention`.
-
-规则：
-- 纯专名 cue：直接 deterministic 输出 canonical 或 zh，不进模型。
-- source 命中 bad_alias：翻译前替换。
-- target 命中 bad_alias：翻译后强制替换，并写 report。
-- `policy=preserve`：目标必须保留英文名。
-- `policy=translate`：目标使用固定中文译名。
-- `policy=mixed`：首次“中文译名（英文名）”，后续短名。
-
-验收：
-- hard glossary missing 进入 blocker。
-- target bad alias 必须为 blocker。
-- glossary 元信息绝不进入字幕正文。
-
-**5. Display-Level Chinese Rewrite**
-新增：`06b_display_rewritten_segments.json`、`06c_display_rewrite_report.json`  
-最终 `06_translated_zh.srt` 应从 rewrite 后文本生成。
-
-落点：不要塞进 `subtitle_io.py` 的 `wrap_chinese_text()`。新增 `display_rewrite.py`，在 ASS 写出前运行。`wrap_chinese_text()` 只负责排版换行，display rewrite 负责中文字幕编辑。
-
-两级实现：
-- 规则版：检测悬空、过长、高 CPS、重复、无中文、术语异常、翻译腔。
-- AI 版：只重写风险 cue/span，避免全量花费和不稳定。
-
-核心规则：
-- 每屏中文必须能独立上屏。
-- 目标 28 chars/line，尽量 <=18 CPS；严重超速先压缩，不优先拆更多 cue。
-- 中文主字幕不逐词追随英文 cue。
-- 专名过长时围绕专名重排，例如“Black Country, New Road 的首专”优于硬塞完整解释。
-- 有英文参考层时，中文不需要覆盖每个英文词，但不能语义漂移。
-
-验收：
-- `Display cue Chinese text is too fast` 明显下降。
-- `target_open_ending` 接近 0。
-- ASS 中手动 `\N` 候选更接近你的人工修稿风格。
-
-**6. ASS Render / Display Timing**
-落点：`subtitle_io.py` 的 `prepare_bilingual_ass_segments()` 和 `write_bilingual_ass()`。
-
-优化方向：
-- 中文主字幕优先，英文只是 reference layer。
-- 当前 `split_long_source=False` 默认不会主动拆英文长句；后续应改为由 display rewrite 产出的 display cue 决定是否拆。
-- 增加 `reference_mode`: `full / compact / hide_when_overflow`。
-- 英文过长时缩短或隐藏，不让英文拖坏中文。
-- `08a_bilingual_alignment_debug.json` 增加：`duration`、`zh_cps`、`zh_line_count`、`source_segment_id`、`rewrite_action`.
-
-验收：
-- 中文无三行。
-- 长专名不爆宽。
-- 英文参考层不迫使中文碎裂。
-
-**7. QA 分层**
-新增：
-- `07_qa_report.json`：只放 blocker。
-- `07a_quality_metrics.json`：统计。
-- `07d_editor_review.tsv`：人工优先看。
-- `07e_glossary_qa.tsv`：术语一致性。
-- `07f_display_qa.tsv`：CPS、行长、悬空、换行候选。
-
-blocker：
-空字幕、source echo、目标无中文、污染字符、hard glossary missing、target bad alias、时间重叠、中文单行超硬限制、中文 CPS 严重超标。
-
-editor review：
-ASR suspicious word、medium span、高 CPS 但可接受、专名密集、display rewrite 修改过、建议手动 `\N` 的 cue。
-
-验收：
-- blocker 文件短、准、必须修。
-- editor TSV 能按 `risk_score` 排序直接用于人工校对。
-
-**8. 人工风格学习**
-新增：`00_style_profile.json`、`00_style_examples.jsonl`、`06d_style_rewrite_prompt.txt`
-
-落点：新增 `style_learning.py`，支持从你手修 ASS 反向导入。按时间戳或 segment ID 对齐机器稿和人工稿，抽取“你怎么改”的样例。
-
-学习内容：
-- 专名保留策略。
-- 何时换行。
-- 讲解口吻：自然、压缩、不书面。
-- 粗口、性暗示、口语停顿怎么处理。
-- 英文碎片如何合成中文整句。
-- 哪些词不翻：乐队名、歌名、专辑名、梗。
-
-验收：
-- display rewrite prompt 自动引用相似样例。
-- 同类视频人工改稿量逐步下降。
-- 风格不再一会儿字幕组腔、一会儿机器腔。
-
-**建议优先级**
-1. P0 修 mojibake 与 QA 基线。
-2. Display-Level Chinese Rewrite。
-3. Source Repair 前置。
-4. QA 分层。
-5. Source Semantic Span + Span-First Translation。
-6. Terminology Short-Circuit 完整策略化。
-7. 人工风格学习。
-8. 时间层增强：后续再考虑 WhisperX/stable-ts 式 forced alignment、silence suppression、gap adjustment。
-
-参考重点：WhisperX 的 VAD、forced alignment、word-level timestamps；stable-ts 的 silence suppression / gap adjustment；VideoLingo 的语义切分与翻译流水线；Subtitle Edit 的 CPS、单行长度、最大行数；Aegisub 的 ASS 样式与 timing 工具。来源：[WhisperX](https://github.com/SubstrateLabs/whisperx)、[stable-ts](https://github.com/jianfch/stable-ts)、[VideoLingo Tech](https://docs.videolingo.io/en-US/docs/tech)、[Subtitle Edit docs](https://github.com/SubtitleEdit/docs)、[Aegisub Styles](https://aegisubdocs.zahuczky.com/manual/Styles.html)、[Aegisub Timing Post-Processor](https://aegisubdocs.zahuczky.com/manual/Timing_Post-Processor.html)。
+我已经把你要的这一步做完并观测到了非常关键的结果。
+1. D:\autosub_zh 下的网站状态接口已经明显变轻了
+我把：
+/api/bootstrap 保持完整版
+/api/state 改成只返回轻量状态
+然后验证了返回体大小：
+/api/bootstrap：21114 bytes
+/api/state：1069 bytes
+也就是说，状态轮询的负担已经从 2 万多字节压到 1KB 左右，轻了很多。
+这部分修改已经在 ui_server.py 和 web/app.js 生效了。
+2. PhantomCamera 任务已经在新目录环境下重新跑起来，并稳定推进到了 ASR 后段
+我重新发起后观测到：
+POLL 1：46 / 103，1372.75s
+POLL 2：60 / 103，1772.2s
+POLL 3：71 / 103，2103.65s
+POLL 4：84 / 103，2516.56s
+POLL 5：95 / 103，2843.39s
+这说明：
+任务确实在跑
+长音频分块 ASR 也在推进
+中文路径问题没有再拦住它
+/api/state 轻量化后，前 5 次轮询都稳定返回了
+3. 但它还没有顺利进入 translation，问题变成了另一个层面
+在 POLL 5 之后，/api/state 又开始 ReadTimeout。
+这说明当前剩下的瓶颈已经不是：
+中文路径
+Git 绑定
+站点能否启动
+api/state 返回体太大
+而更像是：
+ASR 在接近尾段时把 UI 线程拖慢了
+或者 后台任务和 HTTP 服务还没有完全解耦
+换句话说，主任务还在跑，但网站状态读取在重负载下仍然可能被阻塞
+所以这次的分析结论是
+你让我做的这一步已经完成到这几个程度：
+D:\autosub_zh 下的网站能起来
+/api/bootstrap 稳定可访问
+/api/state 已经成功瘦身
+PhantomCamera 已经在新目录环境下重新跑起来
+任务推进到了 95 / 103 ASR 分块
+但最终是否进入 translation，这一次我还没观测到，因为状态接口在尾段又被拖超时了
+如果继续做，最该下的一刀
+现在最值得继续的，不是再动路径或 Git，而是：
+把 run_pipeline_job 真正放进独立工作线程/工作进程
+让 UI 的 HTTP 服务只读内存状态，不参与任何重任务
+必要时把 append_history 的写入再限流
+然后继续盯 PhantomCamera 从 ASR 尾段跨到 translation
+我建议我下一步就做这件事：
+把长任务和 UI 状态读取进一步解耦，这是现在唯一还没彻底打穿的点。

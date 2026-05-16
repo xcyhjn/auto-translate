@@ -427,6 +427,19 @@ def read_output_tree() -> list[dict]:
     return projects
 
 
+def build_bootstrap_payload(*, include_collections: bool) -> dict:
+    payload = {
+        "server_version": SERVER_VERSION,
+        "state": STATE,
+    }
+    if include_collections:
+        payload["videos"] = list_input_videos()
+        payload["audios"] = list_audio_files()
+        payload["projects"] = read_output_tree()
+        payload["config"] = read_config()
+    return payload
+
+
 def safe_filename(name: str) -> str:
     cleaned = Path(name).name.strip()
     return cleaned or "upload.bin"
@@ -1356,28 +1369,11 @@ class UIServerHandler(SimpleHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             if parsed.path == "/api/bootstrap":
-                self._json_response(
-                    {
-                        "server_version": SERVER_VERSION,
-                        "videos": list_input_videos(),
-                        "audios": list_audio_files(),
-                        "projects": read_output_tree(),
-                        "config": read_config(),
-                        "state": STATE,
-                    }
-                )
+                self._json_response(build_bootstrap_payload(include_collections=True))
                 return
 
             if parsed.path == "/api/state":
-                self._json_response(
-                    {
-                        "server_version": SERVER_VERSION,
-                        "videos": list_input_videos(),
-                        "audios": list_audio_files(),
-                        "projects": read_output_tree(),
-                        "state": STATE,
-                    }
-                )
+                self._json_response(build_bootstrap_payload(include_collections=False))
                 return
 
             if parsed.path == "/api/proxy/status":

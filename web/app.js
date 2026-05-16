@@ -13,6 +13,7 @@ const state = {
   selectedMediaInfo: null,
   mediaInspectToken: 0,
   lastErrorPayload: null,
+  pollCount: 0,
 };
 
 const phaseLabels = {
@@ -689,7 +690,7 @@ function renderState(payload) {
   renderStageFeed(payload.state.history || []);
   renderQueue(payload.state.queue || []);
   renderPhaseStatus(payload.state.phase_status || {});
-  renderProjects(payload.projects || []);
+  if (payload.projects) renderProjects(payload.projects);
   if (payload.videos) renderVideos(payload.videos);
   if (payload.config) fillForm(payload.config);
   renderProxyStatus();
@@ -755,10 +756,20 @@ function bootstrap() {
 
 function startPolling() {
   if (state.polling) clearInterval(state.polling);
+  state.pollCount = 0;
   state.polling = setInterval(() => {
     fetch("/api/state")
       .then((res) => res.json())
-      .then((payload) => renderState(payload));
+      .then((payload) => {
+        renderState(payload);
+        state.pollCount += 1;
+        if (state.pollCount % 10 === 0) {
+          fetch("/api/bootstrap")
+            .then((res) => res.json())
+            .then((fullPayload) => renderState(fullPayload))
+            .catch(() => {});
+        }
+      });
   }, 1800);
 }
 

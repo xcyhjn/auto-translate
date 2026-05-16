@@ -696,3 +696,108 @@ Traceback (most recent call last):
 NameError: name 'decoder' is not defined
 
 
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 1352, in do_GET
+    self._json_response({"error": "file not found"}, status=404)
+  File "D:\桌面\autosub_zh\ui_server.py", line 1295, in _json_response
+    self.wfile.write(body)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\socketserver.py", line 834, in write
+    self._sock.sendall(b)
+ConnectionResetError: [WinError 10054] 远程主机强迫关闭了一个现有的连接。
+
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 1129, in run_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\pipeline_core.py", line 514, in run_pipeline
+    raw_segments = transcribe_audio(
+                   ^^^^^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\asr.py", line 54, in transcribe_audio
+    result_segments, _info = model.transcribe(
+                             ^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\faster_whisper\transcribe.py", line 916, in transcribe
+    features = self.feature_extractor(audio, chunk_length=chunk_length)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\faster_whisper\feature_extractor.py", line 215, in __call__
+    stft = self.stft(
+           ^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\faster_whisper\feature_extractor.py", line 189, in stft
+    output = np.fft.rfft(input_array, n=n_fft, axis=-1, norm=norm)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\numpy\fft\_pocketfft.py", line 417, in rfft
+    output = _raw_fft(a, n, axis, True, True, norm, out=out)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\numpy\fft\_pocketfft.py", line 101, in _raw_fft
+    return ufunc(a, fct, axes=[(axis,), (), (axis,)], out=out)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 926. MiB for an array with shape (1, 303450, 400) and data type float64
+
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\media.py", line 34, in run_command
+    return subprocess.run(
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['ffprobe', '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', 'D:\\??\\autosub_zh\\input\\The PhantomCamera In Godot is AMAZING (complete tutorial).mp4']' returned non-zero exit status 1.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 1129, in run_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\pipeline_core.py", line 313, in run_pipeline
+    input_probe = probe_media(input_path)
+                  ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\media.py", line 205, in probe_media
+    completed = run_command(
+                ^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\media.py", line 52, in run_command
+    raise RuntimeError(f"Command failed: {command}\n{details}") from exc
+RuntimeError: Command failed: ffprobe -v error -print_format json -show_format -show_streams D:\??\autosub_zh\input\The PhantomCamera In Godot is AMAZING (complete tutorial).mp4
+D:\??\autosub_zh\input\The PhantomCamera In Godot is AMAZING (complete tutorial).mp4: Invalid argument
+
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\media.py", line 34, in run_command
+    return subprocess.run(
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['ffprobe', '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', 'D:\\??\\autosub_zh\\input\\The PhantomCamera In Godot is AMAZING (complete tutorial).mp4']' returned non-zero exit status 1.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 1129, in run_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\pipeline_core.py", line 313, in run_pipeline
+    input_probe = probe_media(input_path)
+                  ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\media.py", line 205, in probe_media
+    completed = run_command(
+                ^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\media.py", line 52, in run_command
+    raise RuntimeError(f"Command failed: {command}\n{details}") from exc
+RuntimeError: Command failed: ffprobe -v error -print_format json -show_format -show_streams D:\??\autosub_zh\input\The PhantomCamera In Godot is AMAZING (complete tutorial).mp4
+D:\??\autosub_zh\input\The PhantomCamera In Godot is AMAZING (complete tutorial).mp4: Invalid argument
+
+
+Traceback (most recent call last):
+  File "D:\桌面\autosub_zh\ui_server.py", line 1533, in do_POST
+    "media": inspect_video(payload["video_path"]),
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\桌面\autosub_zh\ui_server.py", line 334, in inspect_video
+    raise FileNotFoundError(f"Input video not found: {target}")
+FileNotFoundError: Input video not found: D:\??\autosub_zh\input\The PhantomCamera In Godot is AMAZING (complete tutorial).mp4
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\The PhantomCamera In Godot is AMAZING (complete tutorial).mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\The PhantomCamera In Godot is AMAZING (complete tutorial).mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
