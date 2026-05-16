@@ -3,16 +3,16 @@
 本项目当前路径是：
 
 ```text
-D:\桌面\autosub_zh
+D:\autosub_zh
 ```
 
 因为 `autosub_zh` 是 Python 包名，所以用 `python -m autosub_zh.xxx` 运行时，终端要先进入它的父目录：
 
 ```powershell
-cd D:\桌面
+cd D:\
 ```
 
-如果你在 `D:\桌面\autosub_zh` 里面运行 `python -m autosub_zh.doctor`，Python 会把当前目录当作搜索根，反而找不到同名包，于是报 `ModuleNotFoundError: No module named 'autosub_zh'`。
+如果你在 `D:\autosub_zh` 里面运行 `python -m autosub_zh.doctor`，Python 会把当前目录当作搜索根，反而找不到同名包，于是报 `ModuleNotFoundError: No module named 'autosub_zh'`。
 
 ## 功能
 
@@ -29,14 +29,14 @@ cd D:\桌面
 ## 安装依赖
 
 ```powershell
-cd D:\桌面
+cd D:\
 python -m pip install -r .\autosub_zh\requirements.txt
 ```
 
 ## 检查环境
 
 ```powershell
-cd D:\桌面
+cd D:\
 python -m autosub_zh.doctor
 ```
 
@@ -72,28 +72,28 @@ $env:OPENAI_BASE_URL="https://www.gptcodeplan.com"
 ## 验证中转站
 
 ```powershell
-cd D:\桌面
+cd D:\
 python -m autosub_zh.cli --openai-dry-run
 ```
 
 ## 只转写，不翻译
 
 ```powershell
-cd D:\桌面
+cd D:\
 python -m autosub_zh.cli input.mp4 --src-lang en --model tiny --output input.en.srt
 ```
 
 ## 转写并翻译
 
 ```powershell
-cd D:\桌面
+cd D:\
 python -m autosub_zh.cli input.mp4 --src-lang en --dst-lang zh-Hans --model base --translate --translation-model gpt-5.4-mini --output input.zh.srt
 ```
 
 ## 保存和复用中间结果
 
 ```powershell
-cd D:\桌面
+cd D:\
 python -m autosub_zh.cli input.mp4 --src-lang en --save-segments output.segments.json --output output.en.srt
 python -m autosub_zh.cli input.mp4 --load-segments output.segments.json --translate --output output.zh.srt
 ```
@@ -103,14 +103,14 @@ python -m autosub_zh.cli input.mp4 --load-segments output.segments.json --transl
 CUDA GPU：
 
 ```powershell
-cd D:\桌面
+cd D:\
 python -m autosub_zh.cli input.mp4 --src-lang en --model small --device cuda --compute-type float16 --output input.en.srt
 ```
 
 CPU：
 
 ```powershell
-cd D:\桌面
+cd D:\
 python -m autosub_zh.cli input.mp4 --src-lang en --model small --device cpu --compute-type int8 --output input.en.srt
 ```
 

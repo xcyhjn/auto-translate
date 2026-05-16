@@ -3,7 +3,7 @@
 如果网页按钮或翻译阶段出现不稳定，请不要直接依赖后台静默服务，改用这个脚本启动：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "D:\桌面\autosub_zh\start_ui_server.ps1"
+powershell -ExecutionPolicy Bypass -File "D:\autosub_zh\start_ui_server.ps1"
 ```
 
 这个脚本会：

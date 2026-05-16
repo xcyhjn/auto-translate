@@ -329,9 +329,7 @@ def get_proxy_url() -> str:
 
 
 def inspect_video(path: str) -> dict:
-    target = Path(path)
-    if not target.exists() or not target.is_file():
-        raise FileNotFoundError(f"Input video not found: {target}")
+    target = resolve_input_video_path(path)
     media_info = probe_media(target)
     return {
         "path": str(target),
@@ -340,6 +338,26 @@ def inspect_video(path: str) -> dict:
         "text_subtitle_streams": len(media_info.text_subtitle_streams),
         "image_subtitle_streams": len(media_info.image_subtitle_streams),
     }
+
+
+def resolve_input_video_path(path_or_name: str) -> Path:
+    raw = str(path_or_name or "").strip()
+    if not raw:
+        raise FileNotFoundError("Input video path is empty.")
+
+    direct = Path(raw)
+    if direct.exists() and direct.is_file():
+        return direct
+
+    candidate = INPUT_DIR / Path(raw).name
+    if candidate.exists() and candidate.is_file():
+        return candidate
+
+    for item in INPUT_DIR.iterdir():
+        if item.is_file() and item.name == Path(raw).name:
+            return item
+
+    raise FileNotFoundError(f"Input video not found: {raw}")
 
 
 def test_proxy_connection() -> dict:
@@ -1113,6 +1131,11 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
     style_config.pop("en_max_words_per_line", None)
     style = BilingualSubtitleStyle(**style_config)
     try:
+        append_error_log(
+            f"[run_pipeline_job:start] video_path={video_path}\n"
+            f"config_summary={{src_lang={config.get('src_lang')}, dst_lang={config.get('dst_lang')}, "
+            f"model={config.get('model')}, device={config.get('device')}, compute_type={config.get('compute_type')}}}"
+        )
         with STATE_LOCK:
             STATE["running"] = True
             STATE["current_stage"] = "starting"
@@ -1149,6 +1172,11 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
             display_rewrite_max_ai_segments=int(config.get("display_rewrite_max_ai_segments", 12) or 12),
             bilingual_style=style,
             callback=append_history,
+        )
+        append_error_log(
+            f"[run_pipeline_job:complete] video_path={video_path}\n"
+            f"output_dir={manifest.get('output_dir')}\n"
+            f"files={len(manifest.get('files') or [])}"
         )
 
         with STATE_LOCK:
@@ -1502,7 +1530,8 @@ class UIServerHandler(SimpleHTTPRequestHandler):
 
             if parsed.path == "/api/run":
                 config = {**read_config(), **payload.get("config", {})}
-                thread = threading.Thread(target=run_pipeline_job, args=(payload["video_path"], config), daemon=True)
+                resolved_video_path = str(resolve_input_video_path(payload["video_path"]))
+                thread = threading.Thread(target=run_pipeline_job, args=(resolved_video_path, config), daemon=True)
                 thread.start()
                 self._json_response({"ok": True})
                 return
@@ -1527,10 +1556,11 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/video-inspect":
+                resolved_video_path = str(resolve_input_video_path(payload["video_path"]))
                 self._json_response(
                     {
                         "ok": True,
-                        "media": inspect_video(payload["video_path"]),
+                        "media": inspect_video(resolved_video_path),
                     }
                 )
                 return

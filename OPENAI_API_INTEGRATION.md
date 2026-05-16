@@ -3,13 +3,13 @@
 当前项目路径：
 
 ```text
-D:\桌面\autosub_zh
+D:\autosub_zh
 ```
 
 运行模块命令时，先进入父目录：
 
 ```powershell
-cd D:\桌面
+cd D:\
 ```
 
 ## SDK 是什么
@@ -23,7 +23,7 @@ cd D:\桌面
 安装：
 
 ```powershell
-cd D:\桌面
+cd D:\
 python -m pip install openai
 ```
 
@@ -62,7 +62,7 @@ $env:OPENAI_BASE_URL="https://www.gptcodeplan.com"
 ## 推荐验证顺序
 
 ```powershell
-cd D:\桌面
+cd D:\
 python -m autosub_zh.doctor
 python -m autosub_zh.cli --openai-dry-run
 python -m autosub_zh.cli input.mp4 --src-lang en --translate --output input.zh.srt
