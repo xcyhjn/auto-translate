@@ -213,6 +213,8 @@
                   <label class="toggle-row"><span>只输出到 ASS</span><input id="skip_burn" type="checkbox" /></label>
                   <label class="toggle-row"><span>启用难句 AI 修复</span><input id="repair_high_risk_spans" type="checkbox" /></label>
                   <label><span>最多修复 Span</span><input id="span_repair_max_spans" type="number" min="0" /></label>
+                  <label class="toggle-row"><span>启用 AI 风格重写</span><input id="enable_ai_display_rewrite" type="checkbox" /></label>
+                  <label><span>最多 AI 风格重写段数</span><input id="display_rewrite_max_ai_segments" type="number" min="0" /></label>
                 </div>
               </section>
 
@@ -248,6 +250,13 @@
                       <label><span>单行上限</span><input id="en_max_single_line_chars" type="number" min="30" /></label>
                       <label><span>最多拆段</span><input id="en_max_split_parts" type="number" min="1" /></label>
                       <label><span>最短拆段</span><input id="min_split_duration" type="number" min="0.2" step="0.1" /></label>
+                      <label><span>参考层模式</span>
+                        <select id="reference_mode">
+                          <option value="full">full</option>
+                          <option value="compact">compact</option>
+                          <option value="hide_when_overflow">hide_when_overflow</option>
+                        </select>
+                      </label>
                     </div>
                   </div>
                 </div>
@@ -266,7 +275,10 @@
                   <div class="preview-pane">
                     <div class="preview-head">
                       <h4 id="previewTitle">文件预览</h4>
-                      <button id="reburnFromAssBtn" class="mini-btn" type="button" disabled>按当前 ASS 重新烧录</button>
+                      <div class="topbar-actions">
+                        <button id="learnStyleBtn" class="mini-btn" type="button" disabled>学习风格</button>
+                        <button id="reburnFromAssBtn" class="mini-btn" type="button" disabled>按当前 ASS 重新烧录</button>
+                      </div>
                     </div>
                     <video id="videoPreview" class="video-preview hidden" controls></video>
                     <pre id="textPreview" class="text-preview"></pre>

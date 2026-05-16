@@ -89,6 +89,8 @@ class GlossaryTerm:
     zh: str = ""
     policy: str = "preserve"
     confidence: float = 0.5
+    priority: str = ""
+    short_name: str = ""
     sources: list[str] = field(default_factory=list)
 
 
@@ -147,6 +149,8 @@ def add_candidate(
     term_type: str = "term",
     confidence: float = 0.5,
     policy: str = "preserve",
+    priority: str = "",
+    short_name: str = "",
 ) -> None:
     canonical = clean_candidate(text)
     if not looks_like_term(canonical):
@@ -160,10 +164,16 @@ def add_candidate(
             zh=canonical,
             policy=policy,
             confidence=confidence,
+            priority=priority,
+            short_name=short_name,
             sources=[source],
         )
         return
     existing.confidence = max(existing.confidence, confidence)
+    if priority and not existing.priority:
+        existing.priority = priority
+    if short_name and not existing.short_name:
+        existing.short_name = short_name
     if source not in existing.sources:
         existing.sources.append(source)
 
@@ -224,9 +234,22 @@ def extract_mention_terms(text: str) -> list[tuple[str, str, float]]:
 def generate_youtube_glossary(meta: YouTubeMeta) -> dict:
     terms: dict[str, GlossaryTerm] = {}
     for candidate, source, confidence in extract_title_subject_terms(meta.title):
-        add_candidate(terms, candidate, source=source, confidence=confidence)
+        add_candidate(
+            terms,
+            candidate,
+            source=source,
+            confidence=confidence,
+            priority="hard",
+        )
     if meta.author:
-        add_candidate(terms, meta.author, source="youtube_author", term_type="channel", confidence=0.7)
+        add_candidate(
+            terms,
+            meta.author,
+            source="youtube_author",
+            term_type="channel",
+            confidence=0.7,
+            priority="hard",
+        )
     for candidate, source, confidence in extract_title_case_terms(
         meta.description,
         source="youtube_description",
@@ -325,6 +348,7 @@ def generate_asr_terms(segments: list[Segment], *, min_count: int = 2) -> dict:
             zh=canonical,
             policy="preserve",
             confidence=confidence,
+            short_name=canonical.split()[0] if " " in canonical else canonical,
             sources=[f"asr_count:{count}"],
         )
     return glossary_from_terms(terms, strategy="asr_term_discovery")
@@ -453,12 +477,18 @@ def merge_term_item(terms: dict[str, GlossaryTerm], item: dict) -> None:
             zh=str(item.get("zh") or canonical),
             policy=str(item.get("policy") or "preserve"),
             confidence=confidence,
+            priority=str(item.get("priority") or ""),
+            short_name=str(item.get("short_name") or ""),
             sources=sources,
         )
         return
     existing.confidence = max(existing.confidence, confidence)
     if not existing.zh and item.get("zh"):
         existing.zh = str(item.get("zh"))
+    if not existing.priority and item.get("priority"):
+        existing.priority = str(item.get("priority"))
+    if not existing.short_name and item.get("short_name"):
+        existing.short_name = str(item.get("short_name"))
     for alias in aliases:
         if alias not in existing.aliases:
             existing.aliases.append(alias)

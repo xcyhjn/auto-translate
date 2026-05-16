@@ -131,6 +131,7 @@ def qa_glossary_consistency(segments: list[Segment], glossary_path: str | Path |
             if not any(source.startswith(("youtube_", "user", "asr_fuzzy_alias")) for source in term_sources):
                 continue
             policy = str(item.get("policy") or "preserve").strip()
+            priority = str(item.get("priority") or "").strip().lower()
             bad_aliases = [str(value).strip() for value in item.get("bad_aliases") or [] if str(value).strip()]
             for bad_alias in bad_aliases:
                 if contains_term(source_text, bad_alias):
@@ -143,9 +144,13 @@ def qa_glossary_consistency(segments: list[Segment], glossary_path: str | Path |
                     )
             if policy == "preserve" and contains_term(source_text, canonical) and target_text:
                 if not contains_term(target_text, canonical):
-                    report.warnings.append(
-                        f"Segment {segment.id} may not preserve glossary term '{canonical}' in target text."
-                    )
+                    message = f"Segment {segment.id} may not preserve glossary term '{canonical}' in target text."
+                    if priority == "hard":
+                        report.errors.append(
+                            f"Segment {segment.id} hard glossary missing '{canonical}' in target text."
+                        )
+                    else:
+                        report.warnings.append(message)
     return report
 
 
@@ -242,9 +247,11 @@ def build_quality_metrics(
             "bad_alias_in_target_count": 0,
             "bad_alias_in_source_count": 0,
             "preserve_missing_count": 0,
+            "hard_preserve_missing_count": 0,
             "bad_alias_in_target_samples": [],
             "bad_alias_in_source_samples": [],
             "preserve_missing_samples": [],
+            "hard_preserve_missing_samples": [],
         },
     }
 
@@ -339,6 +346,7 @@ def build_quality_metrics(
             if not any(source.startswith(("youtube_", "user", "asr_fuzzy_alias")) for source in term_sources):
                 continue
             policy = str(item.get("policy") or "preserve").strip()
+            priority = str(item.get("priority") or "").strip().lower()
             bad_aliases = [str(value).strip() for value in item.get("bad_aliases") or [] if str(value).strip()]
             for bad_alias in bad_aliases:
                 if contains_term(target_text, bad_alias):
@@ -359,6 +367,12 @@ def build_quality_metrics(
                     metrics["glossary"]["preserve_missing_samples"],
                     {"segment_id": segment.id, "canonical": canonical},
                 )
+                if priority == "hard":
+                    metrics["glossary"]["hard_preserve_missing_count"] += 1
+                    append_sample(
+                        metrics["glossary"]["hard_preserve_missing_samples"],
+                        {"segment_id": segment.id, "canonical": canonical},
+                    )
 
     blocking_count = (
         metrics["translation"]["source_echo_count"]
@@ -369,6 +383,7 @@ def build_quality_metrics(
         + metrics["display"]["chinese_line_too_long_count"]
         + metrics["display"]["chinese_cps_too_high_count"]
         + metrics["glossary"]["bad_alias_in_target_count"]
+        + metrics["glossary"]["hard_preserve_missing_count"]
     )
     metrics["summary"] = {
         "blocking_issue_count": blocking_count,

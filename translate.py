@@ -584,6 +584,7 @@ def translate_segments(
     max_retries: int = 2,
     openai_base_url: str | None = None,
     context_window: int = 4,
+    locked_segment_ids: set[int] | None = None,
     progress_callback: TranslationProgressCallback | None = None,
 ) -> list[Segment]:
     if not enabled:
@@ -600,6 +601,7 @@ def translate_segments(
     glossary_text = load_glossary(glossary)
     preserve_term_map = extract_preserve_term_map(glossary_text)
     resolved_base_url = resolve_openai_base_url(openai_base_url)
+    locked_segment_ids = locked_segment_ids or set()
     chunks = chunk_segments_with_indexes(segments, chunk_size)
     for chunk_index, (start_index, end_index, chunk) in enumerate(chunks, start=1):
         direct_translations = {
@@ -607,6 +609,12 @@ def translate_segments(
             for segment in chunk
             if (preserve_only := resolve_preserve_only_translation(segment.source_text, preserve_term_map))
         }
+        locked_translations = {
+            segment.id: segment.target_text.strip()
+            for segment in chunk
+            if segment.id in locked_segment_ids and segment.target_text and segment.target_text.strip()
+        }
+        direct_translations.update(locked_translations)
         chunk_for_model = [segment for segment in chunk if segment.id not in direct_translations]
         context_window = max(0, int(context_window or 0))
         context_before = segments[max(0, start_index - context_window) : start_index]
@@ -619,6 +627,7 @@ def translate_segments(
                     "chunk_total": len(chunks),
                     "segment_count": len(chunk),
                     "direct_count": len(direct_translations),
+                    "locked_count": len(locked_translations),
                     "context_before": len(context_before),
                     "context_after": len(context_after),
                 },
@@ -660,6 +669,7 @@ def translate_segments(
                     "chunk_total": len(chunks),
                     "segment_count": len(chunk),
                     "direct_count": len(direct_translations),
+                    "locked_count": len(locked_translations),
                     "fallback_count": fallback_count,
                     "elapsed_seconds": round(time.time() - started_at, 2),
                     "context_before": len(context_before),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import Segment, Word
@@ -56,8 +57,38 @@ def segment_from_dict(payload: dict) -> Segment:
 
 
 def save_segments(segments: list[Segment], output_path: str | Path) -> None:
+    save_segments_payload(segments, output_path)
+
+
+def build_segments_payload(
+    segments: list[Segment],
+    *,
+    input_file: str = "",
+    summary: dict | None = None,
+) -> dict:
+    return {
+        "schema_version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "input_file": input_file,
+        "segment_count": len(segments),
+        "summary": summary or {},
+        "segments": [segment_to_dict(segment) for segment in segments],
+    }
+
+
+def save_segments_payload(
+    segments: list[Segment],
+    output_path: str | Path,
+    *,
+    input_file: str = "",
+    summary: dict | None = None,
+) -> None:
     ensure_parent(output_path)
-    payload = [segment_to_dict(segment) for segment in segments]
+    payload = build_segments_payload(
+        segments,
+        input_file=input_file,
+        summary=summary,
+    )
     Path(output_path).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -66,4 +97,8 @@ def save_segments(segments: list[Segment], output_path: str | Path) -> None:
 
 def load_segments(input_path: str | Path) -> list[Segment]:
     payload = json.loads(Path(input_path).read_text(encoding="utf-8"))
-    return [segment_from_dict(item) for item in payload]
+    if isinstance(payload, list):
+        return [segment_from_dict(item) for item in payload]
+    if isinstance(payload, dict) and isinstance(payload.get("segments"), list):
+        return [segment_from_dict(item) for item in payload["segments"]]
+    raise ValueError(f"Unsupported segments payload format: {input_path}")

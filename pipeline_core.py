@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 import tempfile
 
 from .asr import transcribe_audio
 from .difficult_spans import detect_difficult_spans
+from .display_rewrite import rewrite_display_segments
 from .glossary import (
     apply_glossary_alias_corrections,
     ensure_project_glossary,
@@ -18,9 +20,20 @@ from .glossary import (
 from .media import extract_audio, merge_video_with_audio, probe_media, run_ffmpeg_command, suggest_hwaccel_decoder
 from .models import BilingualSubtitleStyle, Segment
 from .qa import build_quality_metrics, qa_check, qa_difficult_spans, qa_display_cues, qa_glossary_consistency
-from .segment_io import load_segments, save_segments
+from .qa_outputs import (
+    build_blocker_report,
+    build_display_qa_rows,
+    build_editor_review_rows,
+    build_glossary_qa_rows,
+    write_tsv,
+)
+from .segment_io import load_segments, save_segments, save_segments_payload
+from .source_repair import repair_source_segments
+from .source_spans import detect_source_spans
 from .span_repair import repair_difficult_spans
+from .span_translate import translate_source_spans
 from .subtitle_io import prepare_bilingual_ass_segments, write_bilingual_ass, write_srt
+from .terminology import apply_terminology_short_circuit
 from .text_quality import find_text_pollution, format_pollution_issues
 from .timing import refine_timing
 from .translate import load_glossary, translate_segments
@@ -41,6 +54,64 @@ def write_json(path: Path, payload: object) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def build_stage_metadata(
+    *,
+    input_path: Path,
+    segment_count: int = 0,
+    summary: dict | None = None,
+) -> dict:
+    return {
+        "schema_version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "input_file": str(input_path),
+        "segment_count": int(segment_count),
+        "summary": summary or {},
+    }
+
+
+def write_stage_json(
+    path: Path,
+    payload: dict,
+    *,
+    input_path: Path,
+    segment_count: int = 0,
+) -> None:
+    wrapped = dict(payload)
+    wrapped.setdefault("schema_version", 1)
+    wrapped.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+    wrapped.setdefault("input_file", str(input_path))
+    wrapped.setdefault("segment_count", int(segment_count))
+    wrapped.setdefault("summary", {})
+    write_json(path, wrapped)
+
+
+def empty_terminology_report(segment_count: int) -> dict:
+    return {
+        "schema_version": 1,
+        "summary": {
+            "segment_count": segment_count,
+            "rule_count": 0,
+            "locked_segment_count": 0,
+            "action_count": 0,
+        },
+        "actions": [],
+    }
+
+
+def empty_span_translation_report() -> dict:
+    return {
+        "schema_version": 1,
+        "summary": {
+            "eligible_span_count": 0,
+            "attempted_count": 0,
+            "translated_span_count": 0,
+            "translated_segment_count": 0,
+            "failed_count": 0,
+        },
+        "results": [],
+    }
 
 
 def build_subtitle_filter_path(subtitle_path: Path) -> str:
@@ -212,6 +283,8 @@ def run_pipeline(
     skip_burn: bool = False,
     repair_high_risk_spans: bool = True,
     span_repair_max_spans: int = 12,
+    enable_ai_display_rewrite: bool = False,
+    display_rewrite_max_ai_segments: int = 12,
     bilingual_style: BilingualSubtitleStyle | None = None,
     callback: StageCallback | None = None,
 ) -> dict:
@@ -221,6 +294,7 @@ def run_pipeline(
     output_dir = resolve_output_dir(input_path, output_root)
     translated_json_path = output_dir / "05_translated_segments.json"
     timed_json_path = output_dir / "03_timed_source_segments.json"
+    style_prompt_path = output_dir / "06d_style_rewrite_prompt.txt"
     processing_video_path = input_path
     auto_glossary_path = ensure_project_glossary(output_dir)
     effective_style = bilingual_style if bilingual_style is not None else BilingualSubtitleStyle()
@@ -298,6 +372,44 @@ def run_pipeline(
 
     if load_existing_segments and translated_json_path.exists():
         translated_segments = load_segments(translated_json_path)
+        source_repair_report = repair_source_segments(translated_segments, get_glossary_json_path(output_dir))
+        save_segments_payload(
+            translated_segments,
+            output_dir / "03b_source_repaired_segments.json",
+            input_file=str(input_path),
+            summary=source_repair_report["summary"],
+        )
+        write_stage_json(
+            output_dir / "03b_source_repair_report.json",
+            source_repair_report,
+            input_path=input_path,
+            segment_count=len(translated_segments),
+        )
+        source_spans = detect_source_spans(translated_segments)
+        write_stage_json(
+            output_dir / "04a_source_spans.json",
+            source_spans,
+            input_path=input_path,
+            segment_count=len(translated_segments),
+        )
+        if source_repair_report["summary"]["replacement_count"]:
+            save_segments(translated_segments, translated_json_path)
+            write_srt(translated_segments, output_dir / "04_source_en.srt")
+        if not (output_dir / "05b_terminology_actions.json").exists():
+            write_json(output_dir / "05b_terminology_actions.json", empty_terminology_report(len(translated_segments)))
+        if not (output_dir / "05a_span_translation_report.json").exists():
+            save_segments_payload(
+                translated_segments,
+                output_dir / "05a_span_translated_segments.json",
+                input_file=str(input_path),
+                summary=empty_span_translation_report()["summary"],
+            )
+            write_stage_json(
+                output_dir / "05a_span_translation_report.json",
+                empty_span_translation_report(),
+                input_path=input_path,
+                segment_count=len(translated_segments),
+            )
         emit(
             callback,
             "load_existing_segments",
@@ -306,15 +418,42 @@ def run_pipeline(
                 "count": len(translated_segments),
                 "duration_seconds": probe.duration,
                 "note": "loaded translated display segments; rerun timing/translation if these were generated before display-level timing was introduced",
+                "source_repairs": source_repair_report["summary"],
+                "source_spans": source_spans["summary"],
             },
         )
     else:
         if load_existing_segments and timed_json_path.exists():
             timed_segments = load_segments(timed_json_path)
+            source_repair_report = repair_source_segments(timed_segments, get_glossary_json_path(output_dir))
             alias_stats = apply_glossary_alias_corrections(timed_segments, get_glossary_json_path(output_dir))
-            if alias_stats["total_replacements"]:
-                save_segments(timed_segments, timed_json_path)
+            save_segments_payload(
+                timed_segments,
+                output_dir / "03b_source_repaired_segments.json",
+                input_file=str(input_path),
+                summary=source_repair_report["summary"],
+            )
+            if source_repair_report["summary"]["replacement_count"] or alias_stats["total_replacements"]:
+                save_segments_payload(
+                    timed_segments,
+                    timed_json_path,
+                    input_file=str(input_path),
+                    summary={"stage": "timed_source"},
+                )
                 write_srt(timed_segments, output_dir / "04_source_en.srt")
+            write_stage_json(
+                output_dir / "03b_source_repair_report.json",
+                source_repair_report,
+                input_path=input_path,
+                segment_count=len(timed_segments),
+            )
+            source_spans = detect_source_spans(timed_segments)
+            write_stage_json(
+                output_dir / "04a_source_spans.json",
+                source_spans,
+                input_path=input_path,
+                segment_count=len(timed_segments),
+            )
             emit(
                 callback,
                 "timing_complete",
@@ -324,6 +463,8 @@ def run_pipeline(
                     "source_count": len(timed_segments),
                     "reused": True,
                     "alias_corrections": alias_stats,
+                    "source_repairs": source_repair_report["summary"],
+                    "source_spans": source_spans["summary"],
                 },
             )
         else:
@@ -395,7 +536,12 @@ def run_pipeline(
                     },
                 ),
             )
-            save_segments(raw_segments, output_dir / "02_asr_raw_segments.json")
+            save_segments_payload(
+                raw_segments,
+                output_dir / "02_asr_raw_segments.json",
+                input_file=str(input_path),
+                summary={"stage": "asr_raw"},
+            )
             asr_terms_path = write_asr_terms(output_dir, raw_segments)
             resolved_glossary_path = write_resolved_glossary(output_dir)
             if resolved_glossary_path:
@@ -420,8 +566,33 @@ def run_pipeline(
                 },
             )
             timed_segments = refine_timing(raw_segments, style=effective_style)
+            source_repair_report = repair_source_segments(timed_segments, get_glossary_json_path(output_dir))
             alias_stats = apply_glossary_alias_corrections(timed_segments, get_glossary_json_path(output_dir))
-            save_segments(timed_segments, timed_json_path)
+            save_segments_payload(
+                timed_segments,
+                timed_json_path,
+                input_file=str(input_path),
+                summary={"stage": "timed_source"},
+            )
+            save_segments_payload(
+                timed_segments,
+                output_dir / "03b_source_repaired_segments.json",
+                input_file=str(input_path),
+                summary=source_repair_report["summary"],
+            )
+            write_stage_json(
+                output_dir / "03b_source_repair_report.json",
+                source_repair_report,
+                input_path=input_path,
+                segment_count=len(timed_segments),
+            )
+            source_spans = detect_source_spans(timed_segments)
+            write_stage_json(
+                output_dir / "04a_source_spans.json",
+                source_spans,
+                input_path=input_path,
+                segment_count=len(timed_segments),
+            )
             write_srt(timed_segments, output_dir / "04_source_en.srt")
             emit(
                 callback,
@@ -432,6 +603,8 @@ def run_pipeline(
                     "source_count": len(raw_segments),
                     "timing_mode": "display_level",
                     "alias_corrections": alias_stats,
+                    "source_repairs": source_repair_report["summary"],
+                    "source_spans": source_spans["summary"],
                 },
             )
 
@@ -441,6 +614,65 @@ def run_pipeline(
             {
                 "segment_count": len(timed_segments),
                 "chunk_size": translation_chunk_size,
+            },
+        )
+        glossary_json_path = get_glossary_json_path(output_dir)
+        locked_translation_ids, terminology_report = apply_terminology_short_circuit(
+            timed_segments,
+            glossary_json_path,
+        )
+        write_stage_json(
+            output_dir / "05b_terminology_actions.json",
+            terminology_report,
+            input_path=input_path,
+            segment_count=len(timed_segments),
+        )
+        emit(
+            callback,
+            "terminology_short_circuit_complete",
+            {
+                "path": str(output_dir / "05b_terminology_actions.json"),
+                **terminology_report["summary"],
+            },
+        )
+        source_spans_path = output_dir / "04a_source_spans.json"
+        source_spans_for_translation = (
+            json.loads(source_spans_path.read_text(encoding="utf-8"))
+            if source_spans_path.exists()
+            else detect_source_spans(timed_segments)
+        )
+        span_translated_ids, span_translation_report = translate_source_spans(
+            timed_segments,
+            source_spans_for_translation,
+            src_lang=src_lang,
+            dst_lang=dst_lang,
+            glossary_text=load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
+            model=translation_model,
+            base_url=openai_base_url,
+            max_retries=translation_retries,
+            locked_ids=locked_translation_ids,
+            progress_callback=lambda stage, progress: emit(callback, stage, progress),
+        )
+        locked_translation_ids.update(span_translated_ids)
+        save_segments_payload(
+            timed_segments,
+            output_dir / "05a_span_translated_segments.json",
+            input_file=str(input_path),
+            summary=span_translation_report["summary"],
+        )
+        write_stage_json(
+            output_dir / "05a_span_translation_report.json",
+            span_translation_report,
+            input_path=input_path,
+            segment_count=len(timed_segments),
+        )
+        emit(
+            callback,
+            "span_translation_done",
+            {
+                "segments_path": str(output_dir / "05a_span_translated_segments.json"),
+                "report_path": str(output_dir / "05a_span_translation_report.json"),
+                **span_translation_report["summary"],
             },
         )
         translated_segments = translate_segments(
@@ -455,10 +687,16 @@ def run_pipeline(
             max_retries=translation_retries,
             openai_base_url=openai_base_url,
             context_window=4,
+            locked_segment_ids=locked_translation_ids,
             progress_callback=lambda stage, progress: emit(callback, stage, progress),
         )
         alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
-        save_segments(translated_segments, translated_json_path)
+        save_segments_payload(
+            translated_segments,
+            translated_json_path,
+            input_file=str(input_path),
+            summary={"stage": "translated_segments"},
+        )
         write_srt(translated_segments, output_dir / "06_translated_zh.srt")
         emit(
             callback,
@@ -472,7 +710,12 @@ def run_pipeline(
 
     alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
     if alias_stats["total_replacements"]:
-        save_segments(translated_segments, translated_json_path)
+        save_segments_payload(
+            translated_segments,
+            translated_json_path,
+            input_file=str(input_path),
+            summary={"stage": "translated_segments"},
+        )
         write_srt(translated_segments, output_dir / "06_translated_zh.srt")
         emit(
             callback,
@@ -483,12 +726,57 @@ def run_pipeline(
             },
         )
 
+    display_rewrite_report = rewrite_display_segments(
+        translated_segments,
+        effective_style,
+        style_prompt_path=style_prompt_path if style_prompt_path.exists() else None,
+        enable_ai_rewrite=enable_ai_display_rewrite,
+        ai_model=translation_model,
+        openai_base_url=openai_base_url,
+        max_retries=translation_retries,
+        max_ai_segments=display_rewrite_max_ai_segments,
+    )
+    save_segments_payload(
+        translated_segments,
+        output_dir / "06b_display_rewritten_segments.json",
+        input_file=str(input_path),
+        summary=display_rewrite_report["summary"],
+    )
+    write_stage_json(
+        output_dir / "06c_display_rewrite_report.json",
+        display_rewrite_report,
+        input_path=input_path,
+        segment_count=len(translated_segments),
+    )
+    if display_rewrite_report["summary"]["changed_count"]:
+        save_segments_payload(
+            translated_segments,
+            translated_json_path,
+            input_file=str(input_path),
+            summary={"stage": "translated_segments"},
+        )
+        write_srt(translated_segments, output_dir / "06_translated_zh.srt")
+    emit(
+        callback,
+        "display_rewrite_complete",
+        {
+            "segments_path": str(output_dir / "06b_display_rewritten_segments.json"),
+            "report_path": str(output_dir / "06c_display_rewrite_report.json"),
+            **display_rewrite_report["summary"],
+        },
+    )
+
     difficult_spans_initial = detect_difficult_spans(
         translated_segments,
         zh_max_cps=18.0,
         zh_max_chars=effective_style.zh_max_chars_per_line,
     )
-    write_json(output_dir / "07b_difficult_spans_initial.json", difficult_spans_initial)
+    write_stage_json(
+        output_dir / "07b_difficult_spans_initial.json",
+        difficult_spans_initial,
+        input_path=input_path,
+        segment_count=len(translated_segments),
+    )
     emit(
         callback,
         "difficult_spans_detected",
@@ -525,16 +813,31 @@ def run_pipeline(
         alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
         if alias_stats["total_replacements"]:
             span_repair_report["summary"]["post_repair_alias_corrections"] = alias_stats
-        save_segments(translated_segments, translated_json_path)
+        save_segments_payload(
+            translated_segments,
+            translated_json_path,
+            input_file=str(input_path),
+            summary={"stage": "translated_segments"},
+        )
         write_srt(translated_segments, output_dir / "06_translated_zh.srt")
-    write_json(output_dir / "07c_span_repair_report.json", span_repair_report)
+    write_stage_json(
+        output_dir / "07c_span_repair_report.json",
+        span_repair_report,
+        input_path=input_path,
+        segment_count=len(translated_segments),
+    )
 
     difficult_spans_final = detect_difficult_spans(
         translated_segments,
         zh_max_cps=18.0,
         zh_max_chars=effective_style.zh_max_chars_per_line,
     )
-    write_json(output_dir / "07b_difficult_spans.json", difficult_spans_final)
+    write_stage_json(
+        output_dir / "07b_difficult_spans.json",
+        difficult_spans_final,
+        input_path=input_path,
+        segment_count=len(translated_segments),
+    )
     emit(
         callback,
         "difficult_spans_final",
@@ -580,12 +883,62 @@ def run_pipeline(
     report.warnings.extend(display_report.warnings)
     report.warnings.extend(glossary_report.warnings)
     report.warnings.extend(difficult_span_report.warnings)
-    write_json(
+    write_stage_json(
         output_dir / "07_qa_report.json",
-        {"errors": report.errors, "warnings": report.warnings, "metrics_summary": quality_metrics["summary"]},
+        build_blocker_report(report.errors, quality_metrics["summary"]),
+        input_path=input_path,
+        segment_count=len(translated_segments),
     )
-    write_json(output_dir / "07a_quality_metrics.json", quality_metrics)
-    write_json(output_dir / "08a_bilingual_alignment_debug.json", alignment_debug)
+    write_stage_json(
+        output_dir / "07a_quality_metrics.json",
+        quality_metrics,
+        input_path=input_path,
+        segment_count=len(translated_segments),
+    )
+    write_tsv(
+        output_dir / "07d_editor_review.tsv",
+        ["segment_id", "severity", "risk_type", "risk_score", "source_text", "target_text", "note"],
+        build_editor_review_rows(translated_segments, difficult_spans_final, display_rewrite_report),
+    )
+    write_tsv(
+        output_dir / "07e_glossary_qa.tsv",
+        ["issue_type", "segment_id", "canonical", "bad_alias"],
+        build_glossary_qa_rows(quality_metrics),
+    )
+    write_tsv(
+        output_dir / "07f_display_qa.tsv",
+        [
+            "cue_index",
+            "source_segment_id",
+            "start",
+            "end",
+            "duration",
+            "zh_cps",
+            "zh_line_count",
+            "zh_max_line_length",
+            "issues",
+            "zh_text",
+            "rendered_zh",
+            "en_text",
+            "rewrite_action",
+        ],
+        build_display_qa_rows(
+            display_cues,
+            zh_max_line_chars=effective_style.zh_max_chars_per_line,
+            zh_wrap_trigger_chars=effective_style.zh_wrap_trigger_chars,
+            zh_max_lines=effective_style.zh_max_lines,
+        ),
+    )
+    write_stage_json(
+        output_dir / "08a_bilingual_alignment_debug.json",
+        build_stage_metadata(
+            input_path=input_path,
+            segment_count=len(translated_segments),
+            summary={"entry_count": len(alignment_debug)},
+        ) | {"entries": alignment_debug},
+        input_path=input_path,
+        segment_count=len(translated_segments),
+    )
     emit(
         callback,
         "qa_complete",
@@ -618,16 +971,27 @@ def run_pipeline(
                 "02_asr_raw_segments.json",
                 "02_terms_from_asr.json" if (output_dir / "02_terms_from_asr.json").exists() else None,
                 "03_timed_source_segments.json",
+                "03b_source_repaired_segments.json",
+                "03b_source_repair_report.json",
                 "03_glossary_resolved.json" if (output_dir / "03_glossary_resolved.json").exists() else None,
                 "03_glossary_resolved_prompt.txt" if (output_dir / "03_glossary_resolved_prompt.txt").exists() else None,
                 "04_source_en.srt",
+                "04a_source_spans.json",
+                "05a_span_translated_segments.json",
+                "05a_span_translation_report.json",
+                "05b_terminology_actions.json",
                 "05_translated_segments.json",
                 "06_translated_zh.srt",
+                "06b_display_rewritten_segments.json",
+                "06c_display_rewrite_report.json",
                 "07_qa_report.json",
                 "07a_quality_metrics.json",
                 "07b_difficult_spans_initial.json",
                 "07b_difficult_spans.json",
                 "07c_span_repair_report.json",
+                "07d_editor_review.tsv",
+                "07e_glossary_qa.tsv",
+                "07f_display_qa.tsv",
                 "08_bilingual_zh_en.ass",
                 "08a_bilingual_alignment_debug.json",
             ],
@@ -687,14 +1051,25 @@ def run_pipeline(
             "01_audio_16k.wav",
             "02_asr_raw_segments.json",
             "03_timed_source_segments.json",
+            "03b_source_repaired_segments.json",
+            "03b_source_repair_report.json",
             "04_source_en.srt",
+            "04a_source_spans.json",
+            "05a_span_translated_segments.json",
+            "05a_span_translation_report.json",
+            "05b_terminology_actions.json",
             "05_translated_segments.json",
             "06_translated_zh.srt",
+            "06b_display_rewritten_segments.json",
+            "06c_display_rewrite_report.json",
             "07_qa_report.json",
             "07a_quality_metrics.json",
             "07b_difficult_spans_initial.json",
             "07b_difficult_spans.json",
             "07c_span_repair_report.json",
+            "07d_editor_review.tsv",
+            "07e_glossary_qa.tsv",
+            "07f_display_qa.tsv",
             "08_bilingual_zh_en.ass",
             "08a_bilingual_alignment_debug.json",
             "08_bilingual_safe.ass",

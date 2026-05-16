@@ -19,6 +19,7 @@ from .models import BilingualSubtitleStyle
 from .media import probe_media
 from .pipeline_core import build_output_slug, burn_subtitle, create_safe_ass_copy, run_pipeline
 from .glossary import write_youtube_glossary
+from .style_learning import write_style_learning_artifacts
 from .youtube_meta import ensure_cover, ensure_padded_cover, fetch_youtube_info, fetch_youtube_meta, safe_project_slug, save_youtube_meta
 
 
@@ -50,6 +51,8 @@ DEFAULT_CONFIG = {
     "skip_burn": False,
     "repair_high_risk_spans": True,
     "span_repair_max_spans": 12,
+    "enable_ai_display_rewrite": False,
+    "display_rewrite_max_ai_segments": 12,
     "download_backend": "auto",
     "idm_exe_path": "",
     "idm_output_dir": str(INPUT_DIR),
@@ -1082,6 +1085,27 @@ def rebuild_padded_cover_job(project_path: str) -> dict:
     }
 
 
+def learn_style_job(project_path: str) -> dict:
+    project_dir = Path(project_path)
+    segments_path = project_dir / "05_translated_segments.json"
+    ass_path = project_dir / "08_bilingual_zh_en.ass"
+    if not project_dir.exists():
+        raise FileNotFoundError(f"Project folder not found: {project_dir}")
+    if not segments_path.exists():
+        raise FileNotFoundError(f"Segments file not found: {segments_path}")
+    if not ass_path.exists():
+        raise FileNotFoundError(f"ASS file not found: {ass_path}")
+    result = write_style_learning_artifacts(
+        segments_path=segments_path,
+        manual_ass_path=ass_path,
+        output_dir=project_dir,
+    )
+    return {
+        "project_path": str(project_dir),
+        **result,
+    }
+
+
 def run_pipeline_job(video_path: str, config: dict) -> None:
     style_config = dict(config.get("style") or {})
     if "en_max_words_per_line" in style_config and "en_max_single_line_chars" not in style_config:
@@ -1121,6 +1145,8 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
             skip_burn=bool(config.get("skip_burn", False)),
             repair_high_risk_spans=bool(config.get("repair_high_risk_spans", True)),
             span_repair_max_spans=int(config.get("span_repair_max_spans", 12) or 12),
+            enable_ai_display_rewrite=bool(config.get("enable_ai_display_rewrite", False)),
+            display_rewrite_max_ai_segments=int(config.get("display_rewrite_max_ai_segments", 12) or 12),
             bilingual_style=style,
             callback=append_history,
         )
@@ -1489,6 +1515,15 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 thread = threading.Thread(target=reburn_from_ass_job, args=(project_path,), daemon=True)
                 thread.start()
                 self._json_response({"ok": True})
+                return
+
+            if parsed.path == "/api/learn-style":
+                project_path = str(payload.get("project_path") or "").strip()
+                if not project_path:
+                    self._json_response({"ok": False, "error": "project_path required"}, status=400)
+                    return
+                manifest = learn_style_job(project_path)
+                self._json_response({"ok": True, **manifest})
                 return
 
             if parsed.path == "/api/video-inspect":

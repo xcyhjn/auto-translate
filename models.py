@@ -54,6 +54,7 @@ class BilingualSubtitleStyle:
     en_max_single_line_chars: int = 78
     en_max_split_parts: int = 3
     min_split_duration: float = 0.9
+    reference_mode: str = "compact"
 
 
 @dataclass(slots=True)

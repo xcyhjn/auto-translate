@@ -157,6 +157,8 @@ function readFormConfig() {
     skip_burn: el("skip_burn").checked,
     repair_high_risk_spans: el("repair_high_risk_spans").checked,
     span_repair_max_spans: Number(el("span_repair_max_spans").value || 12),
+    enable_ai_display_rewrite: el("enable_ai_display_rewrite").checked,
+    display_rewrite_max_ai_segments: Number(el("display_rewrite_max_ai_segments").value || 12),
     download_backend: el("download_backend").value,
     idm_exe_path: el("idm_exe_path").value,
     idm_output_dir: el("idm_output_dir").value,
@@ -181,6 +183,7 @@ function readFormConfig() {
       en_max_single_line_chars: Number(el("en_max_single_line_chars").value || 78),
       en_max_split_parts: Number(el("en_max_split_parts").value || 3),
       min_split_duration: Number(el("min_split_duration").value || 0.9),
+      reference_mode: el("reference_mode").value || "compact",
     },
   };
 }
@@ -203,6 +206,8 @@ function fillForm(config) {
   el("skip_burn").checked = Boolean(config.skip_burn);
   el("repair_high_risk_spans").checked = config.repair_high_risk_spans !== false;
   el("span_repair_max_spans").value = config.span_repair_max_spans ?? 12;
+  el("enable_ai_display_rewrite").checked = Boolean(config.enable_ai_display_rewrite);
+  el("display_rewrite_max_ai_segments").value = config.display_rewrite_max_ai_segments ?? 12;
   el("download_backend").value = config.download_backend || "auto";
   el("idm_exe_path").value = config.idm_exe_path || "";
   el("idm_output_dir").value = config.idm_output_dir || "";
@@ -225,6 +230,7 @@ function fillForm(config) {
   el("en_max_single_line_chars").value = style.en_max_single_line_chars ?? Math.max(50, (style.en_max_words_per_line ?? 13) * 6);
   el("en_max_split_parts").value = style.en_max_split_parts ?? 3;
   el("min_split_duration").value = style.min_split_duration ?? 0.9;
+  el("reference_mode").value = style.reference_mode || "compact";
 
   setLinkedAudioLabel(config.audio_override_path || "");
 }
@@ -482,8 +488,10 @@ function openFile(path, name) {
   const video = el("videoPreview");
   const text = el("textPreview");
   const reburnBtn = el("reburnFromAssBtn");
+  const learnStyleBtn = el("learnStyleBtn");
   const isAss = /\.ass$/i.test(path);
   reburnBtn.disabled = !isAss;
+  learnStyleBtn.disabled = !isAss;
 
   if (/\.(mp4|wav)$/i.test(path)) {
     const relative = path.split("output\\").pop().replaceAll("\\", "/");
@@ -510,6 +518,7 @@ function syncSelectedProject(projects) {
       el("videoPreview").classList.add("hidden");
       el("videoPreview").src = "";
       el("reburnFromAssBtn").disabled = true;
+      el("learnStyleBtn").disabled = true;
     }
     return;
   }
@@ -970,6 +979,21 @@ function bindActions() {
   });
   el("openOutputBtn").addEventListener("click", openOutput);
   el("openOutputInlineBtn").addEventListener("click", openOutput);
+  el("learnStyleBtn").addEventListener("click", () => {
+    const projectPath = state.selectedProject?.path || null;
+    if (!projectPath) return;
+    fetch("/api/learn-style", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_path: projectPath }),
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload.ok) return;
+        renderProjects(state.projects);
+        showToast(payload.message || "风格样例已生成");
+      });
+  });
   el("reburnFromAssBtn").addEventListener("click", () => {
     const projectPath = state.selectedProject?.path || null;
     if (!projectPath || !state.selectedFilePath || !/\.ass$/i.test(state.selectedFilePath)) return;

@@ -9,6 +9,7 @@ from .asr import transcribe_audio
 from .media import extract_audio, probe_media
 from .qa import qa_check
 from .segment_io import load_segments, save_segments
+from .style_learning import write_style_learning_artifacts
 from .subtitle_io import write_srt
 from .timing import refine_timing
 from .translate import dry_run_openai_translation, translate_segments
@@ -123,6 +124,22 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="读取中间字幕片段 JSON，跳过媒体探测、音频抽取和 ASR。",
     )
+    parser.add_argument(
+        "--learn-style-project",
+        default=None,
+        help="从指定项目目录里的 05_translated_segments.json 和 08_bilingual_zh_en.ass 抽取风格样例。",
+    )
+    parser.add_argument(
+        "--enable-ai-display-rewrite",
+        action="store_true",
+        help="启用高风险中文字幕 AI 风格重写。",
+    )
+    parser.add_argument(
+        "--display-rewrite-max-ai-segments",
+        type=int,
+        default=12,
+        help="最多调用 AI 风格重写的字幕段数。",
+    )
     return parser.parse_args()
 
 
@@ -149,6 +166,16 @@ def main() -> None:
             base_url=args.openai_base_url,
         )
         print(f"OpenAI dry run ok: {result}")
+        return
+
+    if args.learn_style_project:
+        project_dir = Path(args.learn_style_project)
+        manifest = write_style_learning_artifacts(
+            segments_path=project_dir / "05_translated_segments.json",
+            manual_ass_path=project_dir / "08_bilingual_zh_en.ass",
+            output_dir=project_dir,
+        )
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
         return
 
     if not args.input:

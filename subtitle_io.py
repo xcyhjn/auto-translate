@@ -51,6 +51,7 @@ class DisplayCue:
     source_segment_id: int | None = None
     group_index: int = 1
     group_total: int = 1
+    rewrite_action: str = "none"
 
 
 def contains_chinese(text: str) -> bool:
@@ -81,6 +82,60 @@ def normalize_inline_text(text: str) -> str:
 
 def visible_text_length(text: str) -> int:
     return len(re.sub(r"\s+", "", text or ""))
+
+
+def visible_text_cps(text: str, duration: float) -> float:
+    return visible_text_length(text) / max(0.001, float(duration))
+
+
+def compact_reference_text(text: str, max_chars: int) -> str:
+    normalized = normalize_inline_text(text)
+    max_chars = max(8, int(max_chars or 78))
+    if len(normalized) <= max_chars:
+        return normalized
+
+    words = normalized.split()
+    if len(words) <= 1:
+        return normalized[: max(1, max_chars - 1)].rstrip() + "…"
+
+    pieces: list[str] = []
+    current_length = 0
+    for word in words:
+        next_length = current_length + (1 if pieces else 0) + len(word)
+        if next_length + 1 > max_chars:
+            break
+        pieces.append(word)
+        current_length = next_length
+
+    if not pieces:
+        return normalized[: max(1, max_chars - 1)].rstrip() + "…"
+
+    return " ".join(pieces) + "…"
+
+
+def apply_reference_mode_to_cue(cue: DisplayCue, style: BilingualSubtitleStyle) -> None:
+    mode = normalize_inline_text(style.reference_mode or "compact").lower()
+    if mode == "full":
+        return
+
+    max_chars = int(style.en_max_single_line_chars or 78)
+    zh_limit = max(1, int(style.zh_max_chars_per_line or 28) * max(1, int(style.zh_max_lines or 2)))
+    duration = max(0.001, float(cue.end) - float(cue.start))
+    zh_text = cue.zh_text or ""
+    zh_overflow = visible_text_length(zh_text) > zh_limit or visible_text_cps(zh_text, duration) > 18.0
+    en_overflow = len(normalize_inline_text(cue.en_text)) > max_chars
+
+    if mode == "hide_when_overflow":
+        if zh_overflow or en_overflow:
+            cue.en_text = ""
+            cue.rewrite_action = "reference_hidden"
+        return
+
+    if mode == "compact" and en_overflow:
+        compacted = compact_reference_text(cue.en_text, max_chars)
+        if compacted != cue.en_text:
+            cue.en_text = compacted
+            cue.rewrite_action = "reference_compact"
 
 
 def tokenize_mixed_text(text: str) -> list[str]:
@@ -549,9 +604,12 @@ def split_segment_for_bilingual_ass(
                 source_segment_id=segment.id,
                 group_index=1,
                 group_total=1,
+                rewrite_action="reference_full",
             )
         ]
-        return cues, build_alignment_debug(segment, [source_text], [target_text or ""], cues, merged=False)
+        for cue in cues:
+            apply_reference_mode_to_cue(cue, style)
+        return cues, build_alignment_debug(segment, [source_text], [target_text or ""], cues, merged=False, style=style)
 
     text_parts = split_english_text(source_text, max_chars, max_parts=max_parts)
     merged = False
@@ -591,7 +649,9 @@ def split_segment_for_bilingual_ass(
                 group_total=1,
             )
         ]
-        return cues, build_alignment_debug(segment, [source_text], [target_text or ""], cues, merged=merged)
+        for cue in cues:
+            apply_reference_mode_to_cue(cue, style)
+        return cues, build_alignment_debug(segment, [source_text], [target_text or ""], cues, merged=merged, style=style)
 
     text_parts = chosen_english_parts
     zh_parts = chosen_zh_parts
@@ -621,11 +681,14 @@ def split_segment_for_bilingual_ass(
                 source_segment_id=segment.id,
                 group_index=index + 1,
                 group_total=len(text_parts),
+                rewrite_action="reference_split" if len(text_parts) > 1 else "reference_full",
             )
         )
 
     cues = enforce_minimum_split_durations(split_segments, segment, style.min_split_duration)
-    return cues, build_alignment_debug(segment, text_parts, zh_parts, cues, merged=merged)
+    for cue in cues:
+        apply_reference_mode_to_cue(cue, style)
+    return cues, build_alignment_debug(segment, text_parts, zh_parts, cues, merged=merged, style=style)
 
 
 def enforce_minimum_split_durations(
@@ -680,11 +743,35 @@ def build_alignment_debug(
     cues: list[DisplayCue],
     *,
     merged: bool,
+    style: BilingualSubtitleStyle,
 ) -> dict:
+    duration = max(0.001, float(segment.end) - float(segment.start))
+    zh_joined = normalize_inline_text(" ".join(part for part in chinese_groups if part))
+    rendered_lines = [
+        wrap_chinese_text(
+            cue.zh_text or "",
+            trigger_chars=style.zh_wrap_trigger_chars,
+            max_chars=style.zh_max_chars_per_line,
+            max_lines=style.zh_max_lines,
+        )
+        for cue in cues
+        if cue.zh_text
+    ]
+    line_counts = [len(rendered.splitlines() or [rendered]) for rendered in rendered_lines if rendered]
+    cue_actions = sorted({cue.rewrite_action for cue in cues if cue.rewrite_action and cue.rewrite_action != "none"})
+    rewrite_action: str | list[str]
+    if not cue_actions:
+        rewrite_action = "none"
+    elif len(cue_actions) == 1:
+        rewrite_action = cue_actions[0]
+    else:
+        rewrite_action = cue_actions
     return {
         "segment_id": segment.id,
+        "source_segment_id": segment.id,
         "start": segment.start,
         "end": segment.end,
+        "duration": round(duration, 3),
         "source_text": segment.source_text,
         "target_text": segment.target_text or "",
         "english_groups": english_groups,
@@ -692,6 +779,10 @@ def build_alignment_debug(
         "english_group_count": len(english_groups),
         "chinese_group_count": len(chinese_groups),
         "english_merged_for_alignment": merged,
+        "reference_mode": normalize_inline_text(style.reference_mode or "compact").lower(),
+        "zh_cps": round(visible_text_cps(zh_joined, duration), 2) if zh_joined else 0.0,
+        "zh_line_count": max(line_counts) if line_counts else 0,
+        "rewrite_action": rewrite_action,
         "cues": [
             {
                 "group_index": cue.group_index,
@@ -700,6 +791,7 @@ def build_alignment_debug(
                 "end": cue.end,
                 "en_text": cue.en_text,
                 "zh_text": cue.zh_text or "",
+                "rewrite_action": cue.rewrite_action,
             }
             for cue in cues
         ],
@@ -708,6 +800,7 @@ def build_alignment_debug(
                 "index": cue.group_index,
                 "english": english_groups[cue.group_index - 1] if cue.group_index - 1 < len(english_groups) else "",
                 "chinese": chinese_groups[cue.group_index - 1] if cue.group_index - 1 < len(chinese_groups) else "",
+                "rewrite_action": cue.rewrite_action,
             }
             for cue in cues
         ],
