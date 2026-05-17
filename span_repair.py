@@ -8,6 +8,7 @@ from typing import Callable
 
 from .difficult_spans import evaluate_segment
 from .models import Segment
+from .style_rules import build_style_guidance
 from .text_quality import find_text_pollution
 from .translate import (
     TranslationValidationError,
@@ -17,6 +18,7 @@ from .translate import (
     parse_json_payload,
     resolve_openai_base_url,
     short_error_message,
+    style_glossary_hints,
 )
 
 SpanRepairProgressCallback = Callable[[str, dict], None]
@@ -69,6 +71,7 @@ def build_span_repair_prompt(
     glossary_text: str,
     context_before: list[Segment],
     context_after: list[Segment],
+    style_prompt_text: str = "",
 ) -> str:
     span_payload = [
         {
@@ -100,6 +103,8 @@ def build_span_repair_prompt(
         "- If the ASR source has an obvious typo, infer the intended phrase from context, but keep the repair concise.\n"
         "- Preserve names, numbers, album titles, and technical terms according to the glossary.\n"
         "- Do not include Devanagari, Cyrillic, Arabic, Korean, Japanese, replacement characters, mojibake, markdown, or manual line breaks.\n\n"
+        f"Style guidance:\n{build_style_guidance(style_prompt_text)}\n\n"
+        f"{style_glossary_hints(glossary_text)}\n"
         f"Glossary:\n{glossary_text or 'No glossary provided.'}\n\n"
         "Previous context JSON (read-only):\n"
         f"{json.dumps(before_payload, ensure_ascii=False)}\n\n"
@@ -302,6 +307,7 @@ def repair_span_with_openai(
     dst_lang: str,
     glossary_text: str,
     model: str,
+    style_prompt_text: str = "",
     base_url: str | None = None,
     max_retries: int = 2,
     context_window: int = 4,
@@ -335,6 +341,7 @@ def repair_span_with_openai(
         src_lang=src_lang,
         dst_lang=dst_lang,
         glossary_text=glossary_text,
+        style_prompt_text=style_prompt_text,
         context_before=context_before,
         context_after=context_after,
     )
@@ -428,6 +435,7 @@ def repair_difficult_spans(
     dst_lang: str,
     glossary_text: str,
     model: str,
+    style_prompt_text: str = "",
     base_url: str | None = None,
     max_retries: int = 2,
     max_spans: int = 12,
@@ -464,6 +472,7 @@ def repair_difficult_spans(
             src_lang=src_lang,
             dst_lang=dst_lang,
             glossary_text=glossary_text,
+            style_prompt_text=style_prompt_text,
             model=model,
             base_url=resolved_base_url,
             max_retries=max_retries,

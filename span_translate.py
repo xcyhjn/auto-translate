@@ -6,6 +6,7 @@ import time
 from typing import Callable
 
 from .models import Segment
+from .style_rules import build_style_guidance
 from .text_quality import find_text_pollution
 from .translate import (
     TranslationValidationError,
@@ -15,6 +16,7 @@ from .translate import (
     parse_json_payload,
     resolve_openai_base_url,
     short_error_message,
+    style_glossary_hints,
 )
 
 
@@ -57,6 +59,7 @@ def build_span_translation_prompt(
     src_lang: str | None,
     dst_lang: str,
     glossary_text: str,
+    style_prompt_text: str = "",
 ) -> str:
     input_payload = [
         {
@@ -89,6 +92,8 @@ def build_span_translation_prompt(
         "- Do not move all meaning into a neighboring ID; every ID must carry useful meaning.\n"
         "- Preserve names, album titles, numbers, and technical terms according to the glossary.\n"
         "- Do not add manual line breaks, markdown, bullets, numbering, or polluted scripts.\n\n"
+        f"Style guidance:\n{build_style_guidance(style_prompt_text)}\n\n"
+        f"{style_glossary_hints(glossary_text)}\n"
         f"Source span metadata:\n{json.dumps(span, ensure_ascii=False)}\n\n"
         f"Glossary:\n{glossary_text or 'No glossary provided.'}\n\n"
         "Previous context JSON (read-only):\n"
@@ -168,6 +173,7 @@ def translate_source_span_with_openai(
     dst_lang: str,
     glossary_text: str,
     model: str,
+    style_prompt_text: str = "",
     base_url: str | None = None,
     max_retries: int = 2,
     context_window: int = 4,
@@ -201,6 +207,7 @@ def translate_source_span_with_openai(
         src_lang=src_lang,
         dst_lang=dst_lang,
         glossary_text=glossary_text,
+        style_prompt_text=style_prompt_text,
     )
 
     client_kwargs = {"timeout": 600.0}
@@ -279,6 +286,7 @@ def translate_source_spans(
     dst_lang: str,
     glossary_text: str,
     model: str,
+    style_prompt_text: str = "",
     base_url: str | None = None,
     max_retries: int = 2,
     locked_ids: set[int] | None = None,
@@ -322,6 +330,7 @@ def translate_source_spans(
             src_lang=src_lang,
             dst_lang=dst_lang,
             glossary_text=glossary_text,
+            style_prompt_text=style_prompt_text,
             model=model,
             base_url=resolved_base_url,
             max_retries=max_retries,

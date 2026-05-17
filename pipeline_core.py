@@ -19,7 +19,7 @@ from .glossary import (
 )
 from .media import extract_audio, merge_video_with_audio, probe_media, run_ffmpeg_command, suggest_hwaccel_decoder
 from .models import BilingualSubtitleStyle, Segment
-from .qa import build_quality_metrics, qa_check, qa_difficult_spans, qa_display_cues, qa_glossary_consistency
+from .qa import build_quality_metrics, qa_check, qa_difficult_spans, qa_display_cues, qa_final_ass_file, qa_glossary_consistency
 from .qa_outputs import (
     build_blocker_report,
     build_display_qa_rows,
@@ -37,6 +37,7 @@ from .terminology import apply_terminology_short_circuit
 from .text_quality import find_text_pollution, format_pollution_issues
 from .timing import refine_timing
 from .translate import load_glossary, translate_segments
+from .style_rules import load_style_prompt_text
 
 
 StageCallback = Callable[[str, dict], None]
@@ -295,6 +296,7 @@ def run_pipeline(
     translated_json_path = output_dir / "05_translated_segments.json"
     timed_json_path = output_dir / "03_timed_source_segments.json"
     style_prompt_path = output_dir / "06d_style_rewrite_prompt.txt"
+    style_prompt_for_translation = load_style_prompt_text(style_prompt_path)
     processing_video_path = input_path
     auto_glossary_path = ensure_project_glossary(output_dir)
     effective_style = bilingual_style if bilingual_style is not None else BilingualSubtitleStyle()
@@ -648,6 +650,7 @@ def run_pipeline(
             dst_lang=dst_lang,
             glossary_text=load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
             model=translation_model,
+            style_prompt_text=style_prompt_for_translation,
             base_url=openai_base_url,
             max_retries=translation_retries,
             locked_ids=locked_translation_ids,
@@ -688,6 +691,7 @@ def run_pipeline(
             openai_base_url=openai_base_url,
             context_window=4,
             locked_segment_ids=locked_translation_ids,
+            style_prompt_path=str(style_prompt_path) if style_prompt_path.exists() else None,
             progress_callback=lambda stage, progress: emit(callback, stage, progress),
         )
         alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
@@ -804,6 +808,7 @@ def run_pipeline(
             dst_lang=dst_lang,
             glossary_text=load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
             model=translation_model,
+            style_prompt_text=style_prompt_for_translation,
             base_url=openai_base_url,
             max_retries=translation_retries,
             max_spans=span_repair_max_spans,
@@ -861,6 +866,10 @@ def run_pipeline(
         zh_wrap_trigger_chars=effective_style.zh_wrap_trigger_chars,
         zh_max_lines=effective_style.zh_max_lines,
     )
+    final_ass_report = qa_final_ass_file(
+        ass_path,
+        dst_lang=dst_lang,
+    )
     glossary_json_path = get_glossary_json_path(output_dir)
     glossary_report = qa_glossary_consistency(
         translated_segments,
@@ -878,14 +887,16 @@ def run_pipeline(
         zh_max_lines=effective_style.zh_max_lines,
     )
     report.errors.extend(display_report.errors)
+    report.errors.extend(final_ass_report.errors)
     report.errors.extend(glossary_report.errors)
     report.errors.extend(difficult_span_report.errors)
     report.warnings.extend(display_report.warnings)
+    report.warnings.extend(final_ass_report.warnings)
     report.warnings.extend(glossary_report.warnings)
     report.warnings.extend(difficult_span_report.warnings)
     write_stage_json(
         output_dir / "07_qa_report.json",
-        build_blocker_report(report.errors, quality_metrics["summary"]),
+        build_blocker_report(report.errors, quality_metrics["summary"], report.warnings),
         input_path=input_path,
         segment_count=len(translated_segments),
     )
@@ -898,7 +909,7 @@ def run_pipeline(
     write_tsv(
         output_dir / "07d_editor_review.tsv",
         ["segment_id", "severity", "risk_type", "risk_score", "source_text", "target_text", "note"],
-        build_editor_review_rows(translated_segments, difficult_spans_final, display_rewrite_report),
+        build_editor_review_rows(translated_segments, difficult_spans_final, display_rewrite_report, quality_metrics),
     )
     write_tsv(
         output_dir / "07e_glossary_qa.tsv",
@@ -930,6 +941,12 @@ def run_pipeline(
         ),
     )
     write_stage_json(
+        output_dir / "07g_final_ass_qa.json",
+        build_blocker_report(final_ass_report.errors, {}, final_ass_report.warnings),
+        input_path=input_path,
+        segment_count=len(translated_segments),
+    )
+    write_stage_json(
         output_dir / "08a_bilingual_alignment_debug.json",
         build_stage_metadata(
             input_path=input_path,
@@ -949,20 +966,30 @@ def run_pipeline(
             "metrics_summary": quality_metrics["summary"],
         },
     )
+    qa_summary = {
+        "pass": not report.has_blocking_errors,
+        "errors": len(report.errors),
+        "warnings": len(report.warnings),
+        "metrics_summary": quality_metrics["summary"],
+    }
     if report.has_blocking_errors and not skip_burn:
-        raise RuntimeError("QA failed. See 07_qa_report.json")
+        emit(
+            callback,
+            "qa_blocking_bypassed",
+            {
+                "path": str(output_dir / "07_qa_report.json"),
+                "errors": len(report.errors),
+                "warnings": len(report.warnings),
+                "note": "QA reported blocking issues, but output generation will continue.",
+            },
+        )
 
     if skip_burn:
         manifest = {
             "input_video": str(input_path),
             "output_root": str(output_root),
             "output_dir": str(output_dir),
-            "qa": {
-                "pass": not report.has_blocking_errors,
-                "errors": len(report.errors),
-                "warnings": len(report.warnings),
-                "metrics_summary": quality_metrics["summary"],
-            },
+            "qa": qa_summary,
             "burn_plan": {"skipped": True, "reason": "skip_burn"},
             "files": [
                 "00_media_probe.json",
@@ -992,6 +1019,7 @@ def run_pipeline(
                 "07d_editor_review.tsv",
                 "07e_glossary_qa.tsv",
                 "07f_display_qa.tsv",
+                "07g_final_ass_qa.json",
                 "08_bilingual_zh_en.ass",
                 "08a_bilingual_alignment_debug.json",
             ],
@@ -1044,6 +1072,7 @@ def run_pipeline(
         "input_video": str(input_path),
         "output_root": str(output_root),
         "output_dir": str(output_dir),
+        "qa": qa_summary,
         "burn_plan": burn_plan,
         "files": [
             "00_media_probe.json",
@@ -1070,6 +1099,7 @@ def run_pipeline(
             "07d_editor_review.tsv",
             "07e_glossary_qa.tsv",
             "07f_display_qa.tsv",
+            "07g_final_ass_qa.json",
             "08_bilingual_zh_en.ass",
             "08a_bilingual_alignment_debug.json",
             "08_bilingual_safe.ass",

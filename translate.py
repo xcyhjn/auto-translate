@@ -9,6 +9,7 @@ from typing import Any
 from typing import Callable
 
 from .models import Segment
+from .style_rules import build_style_guidance, load_style_prompt_text
 from .text_quality import find_text_pollution
 
 TranslationProgressCallback = Callable[[str, dict], None]
@@ -120,6 +121,23 @@ def render_structured_glossary(payload: object) -> str:
             line += f" | correct_bad_aliases={'; '.join(bad_aliases)} -> {canonical}"
         lines.append(line)
     return "\n".join(lines)
+
+
+def style_glossary_hints(glossary_text: str) -> str:
+    if not glossary_text.strip():
+        return (
+            "Glossary handling:\n"
+            "- Use established Simplified Chinese names for famous places, companies, products, and infrastructure when known.\n"
+            "- Keep channel names, sponsor names, software/library names, and terms marked preserve in English.\n"
+        )
+    return (
+        "Glossary handling:\n"
+        "- Follow every glossary line as the source of truth.\n"
+        "- If zh differs from the canonical term, use zh in the Chinese subtitle.\n"
+        "- If policy=preserve, keep the canonical English term exactly.\n"
+        "- Correct aliases and ASR-looking name variants to the canonical term before translating.\n"
+        "- For unlisted but well-known names, prefer the established Simplified Chinese name unless the context is a channel, sponsor, UI label, code term, or product name that should stay English.\n"
+    )
 
 
 def chunk_segments(segments: list[Segment], chunk_size: int) -> list[list[Segment]]:
@@ -318,6 +336,7 @@ def build_translation_prompt(
     src_lang: str | None,
     dst_lang: str,
     glossary_text: str,
+    style_prompt_text: str = "",
     context_before: list[Segment] | None = None,
     context_after: list[Segment] | None = None,
 ) -> str:
@@ -346,6 +365,7 @@ def build_translation_prompt(
     ]
 
     glossary_block = glossary_text or "No glossary provided."
+    style_guidance = build_style_guidance(style_prompt_text)
     return (
         "You are a professional subtitle translator.\n"
         f"Translate subtitles from {src_lang or 'auto-detected source language'} "
@@ -362,6 +382,8 @@ def build_translation_prompt(
         "- Treat every word/token in the source as atomic; never break a word into pieces for layout.\n\n"
         "- Use the surrounding context only to resolve pronouns, terminology, and continuity.\n"
         "- Return translations only for Input JSON items; never return context item IDs.\n\n"
+        f"Style guidance:\n{style_guidance}\n\n"
+        f"{style_glossary_hints(glossary_text)}\n"
         f"Glossary:\n{glossary_block}\n\n"
         "Previous context JSON (read-only, do not translate in output):\n"
         f"{json.dumps(before_payload, ensure_ascii=False)}\n\n"
@@ -407,6 +429,7 @@ def translate_chunk_with_openai(
     dst_lang: str,
     glossary_text: str,
     model: str,
+    style_prompt_text: str = "",
     base_url: str | None = None,
     max_retries: int = 2,
     retry_invalid_individually: bool = True,
@@ -437,6 +460,7 @@ def translate_chunk_with_openai(
         src_lang=src_lang,
         dst_lang=dst_lang,
         glossary_text=glossary_text,
+        style_prompt_text=style_prompt_text,
         context_before=context_before,
         context_after=context_after,
     )
@@ -521,6 +545,7 @@ def translate_chunk_with_openai(
                 src_lang=src_lang,
                 dst_lang=dst_lang,
                 glossary_text=glossary_text,
+                style_prompt_text=style_prompt_text,
                 model=model,
                 base_url=base_url,
                 max_retries=max_retries,
@@ -585,6 +610,7 @@ def translate_segments(
     openai_base_url: str | None = None,
     context_window: int = 4,
     locked_segment_ids: set[int] | None = None,
+    style_prompt_path: str | None = None,
     progress_callback: TranslationProgressCallback | None = None,
 ) -> list[Segment]:
     if not enabled:
@@ -599,6 +625,7 @@ def translate_segments(
         raise ValueError("dst_lang is required when translation is enabled.")
 
     glossary_text = load_glossary(glossary)
+    style_prompt_text = load_style_prompt_text(style_prompt_path)
     preserve_term_map = extract_preserve_term_map(glossary_text)
     resolved_base_url = resolve_openai_base_url(openai_base_url)
     locked_segment_ids = locked_segment_ids or set()
@@ -642,6 +669,7 @@ def translate_segments(
                     src_lang=src_lang,
                     dst_lang=dst_lang,
                     glossary_text=glossary_text,
+                    style_prompt_text=style_prompt_text,
                     model=model,
                     base_url=resolved_base_url,
                     max_retries=max_retries,

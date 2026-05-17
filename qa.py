@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from .models import Segment, SubtitleRules
-from .subtitle_io import DisplayCue, wrap_chinese_text
+from .subtitle_io import DisplayCue, wrap_chinese_text, normalize_inline_text
 from .text_quality import find_text_pollution, format_pollution_issues
 
 DEFAULT_MAX_CHARS = 42
@@ -15,6 +15,11 @@ DEFAULT_ZH_MAX_LINE_CHARS = 28
 DEFAULT_EN_MAX_LINE_CHARS = 78
 DEFAULT_ZH_MAX_CPS = 18.0
 DEFAULT_EN_MAX_CPS = 24.0
+DEFAULT_ZH_SOFT_MAX_LINE_CHARS = 33
+DEFAULT_ZH_HARD_MAX_LINE_CHARS = 36
+DEFAULT_ZH_SOFT_MAX_CPS = 18.0
+DEFAULT_ZH_HARD_MAX_CPS = 22.0
+FIRST_PERSON_I_RE = re.compile(r"(?<![A-Za-z])i(?=(?:['’](?:m|d|ll|ve|re)\b)|\b)")
 TRANSLATABLE_FUNCTION_WORDS = {
     "am",
     "are",
@@ -100,6 +105,57 @@ def contains_term(text: str, term: str) -> bool:
     return bool(pattern.search(text))
 
 
+def visible_length(text: str) -> int:
+    return len(re.sub(r"\s+", "", text or ""))
+
+
+def line_length_severity(line_length: int, *, soft_limit: int, hard_limit: int) -> str | None:
+    if line_length > hard_limit:
+        return "error"
+    if line_length > soft_limit:
+        return "warning"
+    return None
+
+
+def cps_severity(cps: float, *, soft_limit: float, hard_limit: float) -> str | None:
+    if cps > hard_limit:
+        return "error"
+    if cps > soft_limit:
+        return "warning"
+    return None
+
+
+def ass_timestamp_to_seconds(value: str) -> float:
+    hours, minutes, rest = value.strip().split(":")
+    seconds, centis = rest.split(".")
+    return int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(centis) / 100.0
+
+
+def strip_ass_override_tags(text: str) -> str:
+    return re.sub(r"\{[^}]*\}", "", text or "").replace(r"\N", "\n").replace(r"\n", "\n").strip()
+
+
+def parse_ass_dialogue_line(raw_line: str) -> dict | None:
+    if not raw_line.startswith("Dialogue:"):
+        return None
+    payload = raw_line[len("Dialogue:") :].lstrip()
+    parts = payload.split(",", 9)
+    if len(parts) < 10:
+        return None
+    try:
+        start = ass_timestamp_to_seconds(parts[1])
+        end = ass_timestamp_to_seconds(parts[2])
+    except Exception:
+        return None
+    return {
+        "layer": parts[0].strip(),
+        "start": start,
+        "end": end,
+        "style": parts[3].strip(),
+        "text": strip_ass_override_tags(parts[9]),
+    }
+
+
 def load_glossary_terms(glossary_path: str | Path | None) -> list[dict]:
     if not glossary_path:
         return []
@@ -151,6 +207,12 @@ def qa_glossary_consistency(segments: list[Segment], glossary_path: str | Path |
                         )
                     else:
                         report.warnings.append(message)
+            if policy != "preserve" and contains_term(source_text, canonical) and target_text:
+                zh = str(item.get("zh") or "").strip()
+                if zh and zh != canonical and contains_term(target_text, canonical) and not contains_term(target_text, zh):
+                    report.warnings.append(
+                        f"Segment {segment.id} keeps glossary term '{canonical}' but expected zh '{zh}'."
+                    )
     return report
 
 
@@ -161,7 +223,7 @@ def is_blocking_difficult_span(span: dict) -> bool:
 
     reason_counts = span.get("reason_counts") if isinstance(span.get("reason_counts"), dict) else {}
     reason_codes = {str(key) for key in reason_counts}
-    if reason_codes & {"target_text_pollution", "source_suspicious_asr_word"}:
+    if "target_text_pollution" in reason_codes:
         return True
 
     open_target_count = int(reason_counts.get("target_open_ending") or 0)
@@ -170,7 +232,7 @@ def is_blocking_difficult_span(span: dict) -> bool:
     open_clause_count = int(reason_counts.get("source_open_clause") or 0)
     if "target_too_short" in reason_codes and (open_target_count >= 1 or continuation_count + open_word_count >= 1):
         return True
-    if "number_mismatch" in reason_codes and open_target_count >= 3 and open_clause_count >= 5:
+    if "number_mismatch" in reason_codes and open_target_count >= 4 and open_clause_count >= 6:
         return True
     return False
 
@@ -213,6 +275,10 @@ def build_quality_metrics(
     en_max_line_chars: int = DEFAULT_EN_MAX_LINE_CHARS,
     zh_max_cps: float = DEFAULT_ZH_MAX_CPS,
     en_max_cps: float = DEFAULT_EN_MAX_CPS,
+    zh_soft_max_line_chars: int = DEFAULT_ZH_SOFT_MAX_LINE_CHARS,
+    zh_hard_max_line_chars: int = DEFAULT_ZH_HARD_MAX_LINE_CHARS,
+    zh_soft_max_cps: float = DEFAULT_ZH_SOFT_MAX_CPS,
+    zh_hard_max_cps: float = DEFAULT_ZH_HARD_MAX_CPS,
     zh_wrap_trigger_chars: int = 32,
     zh_max_lines: int = 2,
     sample_limit: int = 20,
@@ -234,13 +300,21 @@ def build_quality_metrics(
         "display": {
             "empty_chinese_cue_count": 0,
             "chinese_line_too_long_count": 0,
+            "chinese_line_soft_over_count": 0,
+            "chinese_line_hard_over_count": 0,
             "english_line_too_long_count": 0,
             "chinese_cps_too_high_count": 0,
+            "chinese_cps_soft_over_count": 0,
+            "chinese_cps_hard_over_count": 0,
             "english_cps_too_high_count": 0,
             "empty_chinese_cue_indexes": [],
             "chinese_line_too_long_samples": [],
+            "chinese_line_soft_over_samples": [],
+            "chinese_line_hard_over_samples": [],
             "english_line_too_long_samples": [],
             "chinese_cps_too_high_samples": [],
+            "chinese_cps_soft_over_samples": [],
+            "chinese_cps_hard_over_samples": [],
             "english_cps_too_high_samples": [],
         },
         "glossary": {
@@ -304,20 +378,46 @@ def build_quality_metrics(
                 max_lines=zh_max_lines,
             )
             for line_number, line in enumerate(rendered_zh.splitlines() or [rendered_zh], start=1):
-                line_length = len(re.sub(r"\s+", "", line))
-                if line_length > zh_max_line_chars:
+                line_length = visible_length(line)
+                severity = line_length_severity(
+                    line_length,
+                    soft_limit=max(zh_max_line_chars, zh_soft_max_line_chars),
+                    hard_limit=max(zh_hard_max_line_chars, zh_max_line_chars),
+                )
+                if severity:
                     metrics["display"]["chinese_line_too_long_count"] += 1
+                    if severity == "error":
+                        metrics["display"]["chinese_line_hard_over_count"] += 1
+                        sample_key = "chinese_line_hard_over_samples"
+                    else:
+                        metrics["display"]["chinese_line_soft_over_count"] += 1
+                        sample_key = "chinese_line_soft_over_samples"
+                    sample = {"cue_index": cue_index, "line": line_number, "length": line_length, "text": line}
                     append_sample(
                         metrics["display"]["chinese_line_too_long_samples"],
-                        {"cue_index": cue_index, "line": line_number, "length": line_length, "text": line},
+                        sample,
                     )
-            zh_cps_value = len(re.sub(r"\s+", "", zh_text)) / duration
-            if zh_cps_value > zh_max_cps:
+                    append_sample(metrics["display"][sample_key], sample)
+            zh_cps_value = visible_length(zh_text) / duration
+            severity = cps_severity(
+                zh_cps_value,
+                soft_limit=max(zh_max_cps, zh_soft_max_cps),
+                hard_limit=max(zh_hard_max_cps, zh_max_cps),
+            )
+            if severity:
                 metrics["display"]["chinese_cps_too_high_count"] += 1
+                if severity == "error":
+                    metrics["display"]["chinese_cps_hard_over_count"] += 1
+                    sample_key = "chinese_cps_hard_over_samples"
+                else:
+                    metrics["display"]["chinese_cps_soft_over_count"] += 1
+                    sample_key = "chinese_cps_soft_over_samples"
+                sample = {"cue_index": cue_index, "cps": round(zh_cps_value, 2), "text": zh_text}
                 append_sample(
                     metrics["display"]["chinese_cps_too_high_samples"],
-                    {"cue_index": cue_index, "cps": round(zh_cps_value, 2), "text": zh_text},
+                    sample,
                 )
+                append_sample(metrics["display"][sample_key], sample)
 
         if en_text:
             if len(en_text) > en_max_line_chars:
@@ -373,6 +473,14 @@ def build_quality_metrics(
                         metrics["glossary"]["hard_preserve_missing_samples"],
                         {"segment_id": segment.id, "canonical": canonical},
                     )
+            if policy != "preserve" and contains_term(source_text, canonical) and target_text:
+                zh = str(item.get("zh") or "").strip()
+                if zh and zh != canonical and contains_term(target_text, canonical) and not contains_term(target_text, zh):
+                    metrics["glossary"]["preserve_missing_count"] += 1
+                    append_sample(
+                        metrics["glossary"]["preserve_missing_samples"],
+                        {"segment_id": segment.id, "canonical": canonical, "expected_zh": zh},
+                    )
 
     blocking_count = (
         metrics["translation"]["source_echo_count"]
@@ -380,8 +488,8 @@ def build_quality_metrics(
         + metrics["translation"]["target_without_chinese_count"]
         + metrics["translation"]["text_pollution_count"]
         + metrics["display"]["empty_chinese_cue_count"]
-        + metrics["display"]["chinese_line_too_long_count"]
-        + metrics["display"]["chinese_cps_too_high_count"]
+        + metrics["display"]["chinese_line_hard_over_count"]
+        + metrics["display"]["chinese_cps_hard_over_count"]
         + metrics["glossary"]["bad_alias_in_target_count"]
         + metrics["glossary"]["hard_preserve_missing_count"]
     )
@@ -390,6 +498,8 @@ def build_quality_metrics(
         "warning_issue_count": (
             metrics["glossary"]["bad_alias_in_source_count"]
             + metrics["glossary"]["preserve_missing_count"]
+            + metrics["display"]["chinese_line_soft_over_count"]
+            + metrics["display"]["chinese_cps_soft_over_count"]
             + metrics["display"]["english_line_too_long_count"]
             + metrics["display"]["english_cps_too_high_count"]
         ),
@@ -488,6 +598,10 @@ def qa_display_cues(
     en_max_line_chars: int = DEFAULT_EN_MAX_LINE_CHARS,
     zh_max_cps: float = DEFAULT_ZH_MAX_CPS,
     en_max_cps: float = DEFAULT_EN_MAX_CPS,
+    zh_soft_max_line_chars: int = DEFAULT_ZH_SOFT_MAX_LINE_CHARS,
+    zh_hard_max_line_chars: int = DEFAULT_ZH_HARD_MAX_LINE_CHARS,
+    zh_soft_max_cps: float = DEFAULT_ZH_SOFT_MAX_CPS,
+    zh_hard_max_cps: float = DEFAULT_ZH_HARD_MAX_CPS,
     zh_wrap_trigger_chars: int = 32,
     zh_max_lines: int = 2,
 ) -> QaReport:
@@ -523,19 +637,37 @@ def qa_display_cues(
             )
             zh_lines = rendered_zh.splitlines() or [rendered_zh]
             for line_number, line in enumerate(zh_lines, start=1):
-                line_length = len(re.sub(r"\s+", "", line))
-                if line_length > zh_max_line_chars:
+                line_length = visible_length(line)
+                severity = line_length_severity(
+                    line_length,
+                    soft_limit=max(zh_max_line_chars, zh_soft_max_line_chars),
+                    hard_limit=max(zh_hard_max_line_chars, zh_max_line_chars),
+                )
+                if severity == "error":
                     report.errors.append(
-                        f"Display cue {index} Chinese line {line_number} is too long: {line_length} chars > {zh_max_line_chars}."
+                        f"Display cue {index} Chinese line {line_number} is too long: {line_length} chars > {max(zh_hard_max_line_chars, zh_max_line_chars)}."
+                    )
+                elif severity == "warning":
+                    report.warnings.append(
+                        f"Display cue {index} Chinese line {line_number} is slightly long but reviewable: {line_length} chars."
                     )
             if len(zh_lines) > zh_max_lines:
                 report.errors.append(
                     f"Display cue {index} has too many Chinese lines: {len(zh_lines)} > {zh_max_lines}."
                 )
-            zh_cps = len(re.sub(r"\s+", "", zh_text)) / duration
-            if zh_cps > zh_max_cps:
+            zh_cps = visible_length(zh_text) / duration
+            severity = cps_severity(
+                zh_cps,
+                soft_limit=max(zh_max_cps, zh_soft_max_cps),
+                hard_limit=max(zh_hard_max_cps, zh_max_cps),
+            )
+            if severity == "error":
                 report.errors.append(
-                    f"Display cue {index} Chinese text is too fast: {zh_cps:.1f} chars/sec > {zh_max_cps:.1f}."
+                    f"Display cue {index} Chinese text is too fast: {zh_cps:.1f} chars/sec > {max(zh_hard_max_cps, zh_max_cps):.1f}."
+                )
+            elif severity == "warning":
+                report.warnings.append(
+                    f"Display cue {index} Chinese text is fast but reviewable: {zh_cps:.1f} chars/sec."
                 )
 
         if en_text:
@@ -581,6 +713,91 @@ def qa_display_cues(
             if len(unique_texts) == 1:
                 report.warnings.append(
                     f"Source segment {segment_id} maps to the same Chinese cue text across multiple display cues."
+                )
+
+    return report
+
+
+def qa_final_ass_file(
+    ass_path: str | Path,
+    *,
+    dst_lang: str | None = None,
+    zh_soft_max_line_chars: int = DEFAULT_ZH_SOFT_MAX_LINE_CHARS,
+    zh_hard_max_line_chars: int = DEFAULT_ZH_HARD_MAX_LINE_CHARS,
+    zh_soft_max_cps: float = DEFAULT_ZH_SOFT_MAX_CPS,
+    zh_hard_max_cps: float = DEFAULT_ZH_HARD_MAX_CPS,
+) -> QaReport:
+    report = QaReport()
+    path = Path(ass_path)
+    if not path.exists():
+        report.errors.append(f"Final ASS file not found: {path}")
+        return report
+
+    require_chinese = is_chinese_target_language(dst_lang)
+    rows: list[dict] = []
+    try:
+        raw_lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+    except Exception as exc:
+        report.errors.append(f"Final ASS file cannot be read: {exc}")
+        return report
+
+    for raw_line in raw_lines:
+        parsed = parse_ass_dialogue_line(raw_line)
+        if parsed:
+            rows.append(parsed)
+
+    if not rows:
+        report.errors.append("Final ASS file contains no Dialogue lines.")
+        return report
+
+    zh_rows = [row for row in rows if row["style"] == "Default"]
+    en_rows = [row for row in rows if row["style"] == "EnglishSmall"]
+    if require_chinese and en_rows and not zh_rows:
+        report.errors.append("Final ASS file has English reference lines but no Chinese subtitle lines.")
+
+    for index, row in enumerate(rows, start=1):
+        text = str(row.get("text") or "")
+        normalized_text = normalize_inline_text(text.replace("\n", " "))
+        duration = max(float(row["end"]) - float(row["start"]), 0.001)
+        style = row["style"]
+        if style == "Default":
+            if require_chinese and not contains_chinese(text):
+                report.errors.append(f"Final ASS dialogue {index} has Chinese style but no Chinese characters.")
+            pollution_issues = find_text_pollution(text, dst_lang=dst_lang)
+            if pollution_issues:
+                report.errors.append(
+                    f"Final ASS dialogue {index} Chinese text contains suspicious polluted text: "
+                    f"{format_pollution_issues(pollution_issues)}."
+                )
+            for line_number, line in enumerate(text.splitlines() or [text], start=1):
+                line_length = visible_length(line)
+                severity = line_length_severity(
+                    line_length,
+                    soft_limit=zh_soft_max_line_chars,
+                    hard_limit=zh_hard_max_line_chars,
+                )
+                if severity == "error":
+                    report.errors.append(
+                        f"Final ASS dialogue {index} Chinese line {line_number} is too long: {line_length} chars > {zh_hard_max_line_chars}."
+                    )
+                elif severity == "warning":
+                    report.warnings.append(
+                        f"Final ASS dialogue {index} Chinese line {line_number} is slightly long but reviewable: {line_length} chars."
+                    )
+            cps = visible_length(text) / duration
+            severity = cps_severity(cps, soft_limit=zh_soft_max_cps, hard_limit=zh_hard_max_cps)
+            if severity == "error":
+                report.errors.append(
+                    f"Final ASS dialogue {index} Chinese text is too fast: {cps:.1f} chars/sec > {zh_hard_max_cps:.1f}."
+                )
+            elif severity == "warning":
+                report.warnings.append(
+                    f"Final ASS dialogue {index} Chinese text is fast but reviewable: {cps:.1f} chars/sec."
+                )
+        elif style == "EnglishSmall":
+            if FIRST_PERSON_I_RE.search(normalized_text):
+                report.errors.append(
+                    f"Final ASS dialogue {index} English reference contains lowercase first-person i."
                 )
 
     return report

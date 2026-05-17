@@ -355,7 +355,14 @@ def summarize_style_profile(examples: list[dict], *, source_segments_path: str, 
         2,
     ) if examples else 0.0
 
-    guidelines: list[str] = []
+    guidelines: list[str] = [
+        "Use natural Simplified Chinese finished-video subtitles rather than literal word-by-word translations.",
+        "Keep the Chinese primary subtitle concise, expressive, and self-contained; preserve the source tone when it is casual or humorous.",
+        "Use established Chinese names for well-known places, infrastructure, car brands, and public figures when the source term is unambiguous.",
+        "Keep channel names, sponsors, software/library names, and glossary preserve terms in English.",
+        "A readable 29-33 visible-character Chinese line can be acceptable when timing is comfortable; fix awkwardness before chasing a strict 28-character target.",
+        "The English reference layer is auxiliary; standalone first-person English I must be uppercase.",
+    ]
     if compressed_count:
         guidelines.append("优先压缩冗余表达，让中文字幕更像成片字幕而不是逐词翻译。")
     if english_preserve_count:

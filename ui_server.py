@@ -17,7 +17,9 @@ import httpx
 from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, check_idm
 from .models import BilingualSubtitleStyle
 from .media import probe_media
-from .pipeline_core import build_output_slug, burn_subtitle, create_safe_ass_copy, run_pipeline
+from .pipeline_core import build_output_slug, burn_subtitle, create_safe_ass_copy, run_pipeline, write_json
+from .qa import qa_final_ass_file
+from .qa_outputs import build_blocker_report
 from .glossary import write_youtube_glossary
 from .style_learning import write_style_learning_artifacts
 from .youtube_meta import ensure_cover, ensure_padded_cover, fetch_youtube_info, fetch_youtube_meta, safe_project_slug, save_youtube_meta
@@ -90,6 +92,7 @@ STAGE_META = {
     "span_repair_complete": {"title": "难句修复", "description": "AI 局部修复已返回结果。", "overall_progress": 90},
     "difficult_spans_final": {"title": "难句复查", "description": "正在输出最终难句 span 报告。", "overall_progress": 91},
     "qa_complete": {"title": "QA 检查", "description": "正在整理风险和警告。", "overall_progress": 91},
+    "qa_blocking_bypassed": {"title": "QA 检查", "description": "QA 有风险项，已记录并继续输出。", "overall_progress": 92},
     "burn_start": {"title": "烧录中", "description": "正在写入双语字幕视频。", "overall_progress": 94},
     "burn_progress": {"title": "烧录中", "description": "正在写入双语字幕视频。", "overall_progress": 96},
     "burn_complete": {"title": "完成", "description": "烧录产物已经生成。", "overall_progress": 100},
@@ -1225,6 +1228,27 @@ def reburn_from_ass_job(project_path: str) -> dict:
     input_video = Path(str(manifest.get("input_video") or ""))
     if not input_video.exists():
         raise FileNotFoundError(f"Input video not found: {input_video}")
+
+    ass_report = qa_final_ass_file(ass_path, dst_lang="zh-Hans")
+    ass_qa_payload = build_blocker_report(
+        ass_report.errors,
+        {
+            "blocking_issue_count": len(ass_report.errors),
+            "warning_issue_count": len(ass_report.warnings),
+            "pass": not ass_report.errors,
+        },
+        ass_report.warnings,
+    )
+    write_json(project_dir / "07g_final_ass_qa.json", ass_qa_payload)
+    manifest["final_ass_qa"] = {
+        "path": str(project_dir / "07g_final_ass_qa.json"),
+        "pass": not ass_report.errors,
+        "errors": len(ass_report.errors),
+        "warnings": len(ass_report.warnings),
+    }
+    if "07g_final_ass_qa.json" not in (manifest.get("files") or []):
+        manifest["files"] = [*(manifest.get("files") or []), "07g_final_ass_qa.json"]
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     probe = probe_media(input_video)
     with STATE_LOCK:

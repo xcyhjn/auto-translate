@@ -80,6 +80,15 @@ def normalize_inline_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
 
 
+def capitalize_first_person_i(text: str) -> str:
+    """Capitalize standalone first-person English i in subtitle text."""
+    return re.sub(r"(?<![A-Za-z])i(?=(?:['’](?:m|d|ll|ve|re)\b)|\b)", "I", text or "", flags=re.IGNORECASE)
+
+
+def normalize_english_reference_text(text: str) -> str:
+    return capitalize_first_person_i(normalize_inline_text(text))
+
+
 def visible_text_length(text: str) -> int:
     return len(re.sub(r"\s+", "", text or ""))
 
@@ -588,7 +597,7 @@ def split_segment_for_bilingual_ass(
     *,
     split_long_source: bool = False,
 ) -> tuple[list[DisplayCue], dict]:
-    source_text = normalize_inline_text(segment.source_text)
+    source_text = normalize_english_reference_text(segment.source_text)
     target_text = normalize_inline_text(segment.target_text or "")
     max_chars = int(style.en_max_single_line_chars or 78)
     max_parts = int(style.en_max_split_parts or 3)
@@ -813,6 +822,8 @@ def write_srt(segments: list[Segment], output_path: str | Path) -> None:
 
     for idx, segment in enumerate(segments, start=1):
         text = segment.target_text or segment.source_text
+        if segment.target_text is None:
+            text = capitalize_first_person_i(text)
         lines.extend(
             [
                 str(idx),
@@ -870,7 +881,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             )
             lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{zh_text}")
 
-        en_text = escape_ass_text(normalize_inline_text(cue.en_text))
+        en_text = escape_ass_text(normalize_english_reference_text(cue.en_text))
         if en_text:
             lines.append(f"Dialogue: 1,{start},{end},EnglishSmall,,0,0,0,,{en_text}")
 

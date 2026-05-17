@@ -801,3 +801,15 @@ config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cud
 [run_pipeline_job:start] video_path=D:\autosub_zh\input\The PhantomCamera In Godot is AMAZING (complete tutorial).mp4
 config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
 
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\Dubai Has a Sewage Problem.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1165, in run_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 953, in run_pipeline
+    raise RuntimeError("QA failed. See 07_qa_report.json")
+RuntimeError: QA failed. See 07_qa_report.json
+
+

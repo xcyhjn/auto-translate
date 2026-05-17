@@ -23,22 +23,31 @@ def write_tsv(path: str | Path, fieldnames: list[str], rows: list[dict]) -> None
             writer.writerow(row)
 
 
-def build_blocker_report(errors: list[str], metrics_summary: dict) -> dict:
+def build_blocker_report(errors: list[str], metrics_summary: dict, warnings: list[str] | None = None) -> dict:
+    warnings = warnings or []
     return {
         "schema_version": 1,
         "summary": {
             **(metrics_summary or {}),
             "blocker_count": len(errors),
+            "warning_count": len(warnings),
             "pass": not errors,
         },
         "errors": errors,
-        "warnings": [],
+        "warnings": warnings,
         "blockers": [
             {
                 "index": index,
                 "message": message,
             }
             for index, message in enumerate(errors, start=1)
+        ],
+        "warning_items": [
+            {
+                "index": index,
+                "message": message,
+            }
+            for index, message in enumerate(warnings, start=1)
         ],
     }
 
@@ -47,6 +56,7 @@ def build_editor_review_rows(
     segments: list[Segment],
     difficult_spans: dict | None,
     display_rewrite_report: dict | None,
+    quality_metrics: dict | None = None,
 ) -> list[dict]:
     rows: list[dict] = []
     seen: set[tuple[str, int]] = set()
@@ -118,11 +128,49 @@ def build_editor_review_rows(
             note=", ".join(actions),
         )
 
+    display_metrics = (quality_metrics or {}).get("display") if isinstance(quality_metrics, dict) else {}
+    if isinstance(display_metrics, dict):
+        for key, severity, risk_score, sample_suffix in (
+            ("chinese_line_hard_over_samples", "high", 9, "_samples"),
+            ("chinese_cps_hard_over_samples", "high", 9, "_samples"),
+            ("chinese_line_soft_over_samples", "medium", 4, "_samples"),
+            ("chinese_cps_soft_over_samples", "medium", 4, "_samples"),
+            ("empty_chinese_cue_indexes", "high", 10, "_indexes"),
+        ):
+            for sample in display_metrics.get(key) or []:
+                if isinstance(sample, dict):
+                    cue_label = sample.get("cue_index", "")
+                    text = str(sample.get("text") or "")
+                    note = f"{key.removesuffix('_samples')}; cue={cue_label}"
+                else:
+                    cue_label = sample
+                    text = ""
+                    note = f"{key}; cue={cue_label}"
+                add_row(
+                    segment_id=-int(cue_label or 0),
+                    risk_type="display_qa",
+                    severity=severity,
+                    risk_score=risk_score,
+                    source_text="",
+                    target_text=text,
+                    note=note.replace(sample_suffix, ""),
+                )
+
     rows.sort(key=lambda row: (-int(row["risk_score"]), row["severity"], int(row["segment_id"])))
     return rows
 
 
-def build_display_qa_rows(cues: list[DisplayCue], *, zh_max_line_chars: int, zh_wrap_trigger_chars: int, zh_max_lines: int) -> list[dict]:
+def build_display_qa_rows(
+    cues: list[DisplayCue],
+    *,
+    zh_max_line_chars: int,
+    zh_wrap_trigger_chars: int,
+    zh_max_lines: int,
+    zh_soft_max_line_chars: int = 33,
+    zh_hard_max_line_chars: int = 36,
+    zh_soft_max_cps: float = 18.0,
+    zh_hard_max_cps: float = 22.0,
+) -> list[dict]:
     rows: list[dict] = []
     for index, cue in enumerate(cues, start=1):
         zh_text = cue.zh_text or ""
@@ -141,10 +189,14 @@ def build_display_qa_rows(cues: list[DisplayCue], *, zh_max_line_chars: int, zh_
         issues: list[str] = []
         if len(lines) > zh_max_lines:
             issues.append("too_many_lines")
-        if max_line_len > zh_max_line_chars:
-            issues.append("line_too_long")
-        if cps > 18.0:
-            issues.append("cps_high")
+        if max_line_len > max(zh_hard_max_line_chars, zh_max_line_chars):
+            issues.append("line_too_long_hard")
+        elif max_line_len > max(zh_soft_max_line_chars, zh_max_line_chars):
+            issues.append("line_too_long_soft")
+        if cps > max(zh_hard_max_cps, zh_soft_max_cps):
+            issues.append("cps_high_hard")
+        elif cps > zh_soft_max_cps:
+            issues.append("cps_high_soft")
         if not issues:
             continue
         rows.append(
@@ -183,7 +235,7 @@ def build_glossary_qa_rows(quality_metrics: dict) -> list[dict]:
                     "issue_type": key.removesuffix("_samples"),
                     "segment_id": sample.get("segment_id", ""),
                     "canonical": sample.get("canonical", ""),
-                    "bad_alias": sample.get("bad_alias", ""),
+                    "bad_alias": sample.get("bad_alias", "") or sample.get("expected_zh", ""),
                 }
             )
     return rows
