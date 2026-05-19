@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import errno
 import json
+import math
 import re
+import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +20,14 @@ from .glossary import (
     write_asr_terms,
     write_resolved_glossary,
 )
-from .media import extract_audio, merge_video_with_audio, probe_media, run_ffmpeg_command, suggest_hwaccel_decoder
+from .media import (
+    enhance_audio_for_asr,
+    extract_audio,
+    merge_video_with_audio,
+    probe_media,
+    run_ffmpeg_command,
+    suggest_hwaccel_decoder,
+)
 from .models import BilingualSubtitleStyle, Segment
 from .qa import build_quality_metrics, qa_check, qa_difficult_spans, qa_display_cues, qa_final_ass_file, qa_glossary_consistency
 from .qa_outputs import (
@@ -51,10 +61,12 @@ TARGET_MAX_HEIGHT = 1080
 
 def write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temp_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    temp_path.replace(path)
 
 
 def build_stage_metadata(
@@ -138,6 +150,9 @@ def burn_subtitle(
     total_duration: float | None = None,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_output_path = output_path.with_name(
+        f".{output_path.stem}.{uuid.uuid4().hex}.tmp{output_path.suffix}"
+    )
     subtitle_filter_path = build_subtitle_filter_path(subtitle_path)
     filter_chain: list[str] = []
     subtitle_filter = f"ass='{subtitle_filter_path}'"
@@ -167,31 +182,35 @@ def burn_subtitle(
             VIDEO_QUALITY,
             "-pix_fmt",
             "yuv420p",
-            "-c:a",
-            "copy",
-            str(output_path),
-        ]
+                "-c:a",
+                "copy",
+                str(temp_output_path),
+            ]
     )
     def emit_progress(progress_payload: dict) -> None:
         if progress_callback is None:
             return
         payload = dict(progress_payload)
-        if total_duration:
-            processed_seconds = float(payload.get("out_time_seconds", 0.0))
-            progress_ratio = max(0.0, min(1.0, processed_seconds / total_duration))
-            payload["duration_seconds"] = total_duration
+        duration = safe_duration_seconds(total_duration)
+        if duration > 0:
+            processed_seconds = max(0.0, finite_float(payload.get("out_time_seconds"), 0.0))
+            progress_ratio = max(0.0, min(1.0, processed_seconds / duration))
+            payload["out_time_seconds"] = processed_seconds
+            payload["duration_seconds"] = duration
             payload["progress"] = round(progress_ratio * 100, 2)
-            payload["remaining_seconds"] = max(0.0, total_duration - processed_seconds)
-            size_bytes = int(payload.get("size_bytes", 0) or 0)
+            payload["remaining_seconds"] = max(0.0, duration - processed_seconds)
+            size_bytes = max(0, int(finite_float(payload.get("size_bytes"), 0.0)))
             if progress_ratio > 0.02 and size_bytes > 0:
                 payload["estimated_final_size"] = int(size_bytes / progress_ratio)
+        else:
+            payload["duration_seconds"] = 0.0
         emit(progress_callback, "burn_progress", payload)
 
     try:
         run_ffmpeg_command(args, progress_callback=emit_progress if progress_callback else None)
     except RuntimeError:
-        if output_path.exists():
-            output_path.unlink()
+        if temp_output_path.exists():
+            temp_output_path.unlink()
         fallback_args = list(args)
         if "-hwaccel" in fallback_args and decoder:
             hwaccel_index = fallback_args.index("-hwaccel")
@@ -203,7 +222,30 @@ def burn_subtitle(
         cq_index = fallback_args.index("-cq")
         fallback_args[cq_index : cq_index + 2] = ["-crf", "25"]
         run_ffmpeg_command(fallback_args, progress_callback=emit_progress if progress_callback else None)
-    return {"hwaccel": hwaccel or "", "decoder": decoder or "default"}
+    final_output_path = output_path
+    if temp_output_path.exists():
+        try:
+            temp_output_path.replace(output_path)
+        except PermissionError as exc:
+            fallback_output_path = output_path.with_name(
+                f"{output_path.stem}.reburned.{uuid.uuid4().hex[:8]}{output_path.suffix}"
+            )
+            temp_output_path.replace(fallback_output_path)
+            final_output_path = fallback_output_path
+            raise PermissionError(
+                errno.EACCES,
+                (
+                    "Target output video is currently in use and could not be replaced. "
+                    f"A new burned video was saved as: {fallback_output_path}"
+                ),
+                str(output_path),
+            ) from exc
+    return {
+        "hwaccel": hwaccel or "",
+        "decoder": decoder or "default",
+        "output_path": str(final_output_path),
+        "replaced_primary_output": final_output_path == output_path,
+    }
 
 
 def create_safe_ass_copy(subtitle_path: Path) -> Path:
@@ -241,12 +283,68 @@ def emit(callback: StageCallback | None, stage: str, payload: dict) -> None:
         callback(stage, payload)
 
 
+def finite_float(value: object, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(parsed):
+        return default
+    return parsed
+
+
+def safe_duration_seconds(value: object) -> float:
+    return max(0.0, finite_float(value, 0.0))
+
+
 def seconds_to_virtual_chunks(processed_seconds: float, total_seconds: float, chunk_span: int = 30) -> tuple[int, int]:
+    processed_seconds = max(0.0, finite_float(processed_seconds, 0.0))
+    total_seconds = safe_duration_seconds(total_seconds)
+    chunk_span = max(1, int(finite_float(chunk_span, 30.0)))
     if total_seconds <= 0:
         return (0, 0)
     total_chunks = max(1, int((total_seconds + chunk_span - 1) // chunk_span))
     current_chunk = max(0, min(total_chunks, int(processed_seconds // chunk_span) + (1 if processed_seconds > 0 else 0)))
     return current_chunk, total_chunks
+
+
+def build_asr_progress_payload(progress: dict, duration_seconds: object) -> dict:
+    processed_seconds = max(0.0, finite_float(progress.get("processed_seconds"), 0.0))
+    progress_percent = max(0.0, min(100.0, finite_float(progress.get("progress"), 0.0)))
+    duration = safe_duration_seconds(duration_seconds)
+    if progress_percent == 0 and duration > 0:
+        progress_percent = round(max(0.0, min(1.0, processed_seconds / duration)) * 100, 2)
+    current_chunk, total_chunks = seconds_to_virtual_chunks(processed_seconds, duration)
+    return {
+        **progress,
+        "progress": progress_percent,
+        "processed_seconds": processed_seconds,
+        "duration_seconds": duration,
+        "virtual_chunk_current": current_chunk,
+        "virtual_chunk_total": total_chunks,
+    }
+
+
+def build_asr_state_stage(progress: dict) -> tuple[str, dict]:
+    event = str(progress.get("event") or "").strip().lower()
+    if event == "attempt_start":
+        return "asr_attempt_start", {
+            "device": progress.get("device"),
+            "compute_type": progress.get("compute_type"),
+            "beam_size": progress.get("beam_size"),
+            "reason": progress.get("reason"),
+        }
+    if event == "fallback":
+        return "asr_fallback", {
+            "message": progress.get("message"),
+            "failed_device": progress.get("failed_device"),
+            "failed_compute_type": progress.get("failed_compute_type"),
+            "device": progress.get("device"),
+            "compute_type": progress.get("compute_type"),
+            "beam_size": progress.get("beam_size"),
+            "reason": progress.get("reason"),
+        }
+    return "asr_progress", build_asr_progress_payload(progress, progress.get("duration_seconds"))
 
 
 def assert_no_target_text_pollution(segments: list[Segment], *, dst_lang: str | None) -> None:
@@ -274,12 +372,17 @@ def run_pipeline(
     device: str = "cpu",
     compute_type: str = "int8",
     beam_size: int = 5,
-    translation_model: str = "gpt-5.4-mini",
+    asr_audio_mode: str = "off",
+    asr_audio_gain_db: float = 6.0,
+    asr_vad_mode: str = "auto",
+    translation_model: str = "gpt-5.4",
+    translation_prompt: str = "",
     translation_chunk_size: int = 40,
     translation_retries: int = 2,
     openai_base_url: str | None = None,
     audio_override_path: str | Path | None = None,
     load_existing_segments: bool = False,
+    force_retranslate_existing_segments: bool = False,
     preview_seconds: int | None = None,
     skip_burn: bool = False,
     repair_high_risk_spans: bool = True,
@@ -296,7 +399,11 @@ def run_pipeline(
     translated_json_path = output_dir / "05_translated_segments.json"
     timed_json_path = output_dir / "03_timed_source_segments.json"
     style_prompt_path = output_dir / "06d_style_rewrite_prompt.txt"
-    style_prompt_for_translation = load_style_prompt_text(style_prompt_path)
+    learned_style_prompt = load_style_prompt_text(style_prompt_path)
+    translation_prompt = str(translation_prompt or "").strip()
+    style_prompt_for_translation = "\n\n".join(
+        item for item in [translation_prompt, learned_style_prompt] if item.strip()
+    )
     processing_video_path = input_path
     auto_glossary_path = ensure_project_glossary(output_dir)
     effective_style = bilingual_style if bilingual_style is not None else BilingualSubtitleStyle()
@@ -313,6 +420,7 @@ def run_pipeline(
     )
 
     input_probe = probe_media(input_path)
+    input_duration = safe_duration_seconds(input_probe.duration)
     if audio_override_path:
         merged_video_path = output_dir / "00a_merged_with_external_audio.mp4"
         emit(
@@ -322,16 +430,18 @@ def run_pipeline(
                 "video_path": str(input_path),
                 "audio_path": str(audio_override_path),
                 "merged_path": str(merged_video_path),
-                "duration_seconds": input_probe.duration,
+                "duration_seconds": input_duration,
             },
         )
 
         def on_merge_progress(progress_payload: dict) -> None:
             payload = dict(progress_payload)
-            if input_probe.duration:
-                processed_seconds = float(payload.get("out_time_seconds", 0.0))
-                payload["duration_seconds"] = input_probe.duration
-                payload["progress"] = round(max(0.0, min(1.0, processed_seconds / input_probe.duration)) * 100, 2)
+            duration = input_duration
+            if duration:
+                processed_seconds = max(0.0, finite_float(payload.get("out_time_seconds"), 0.0))
+                payload["out_time_seconds"] = processed_seconds
+                payload["duration_seconds"] = duration
+                payload["progress"] = round(max(0.0, min(1.0, processed_seconds / duration)) * 100, 2)
             emit(callback, "merge_audio_progress", payload)
 
         merge_video_with_audio(
@@ -353,13 +463,14 @@ def run_pipeline(
         )
 
     probe = probe_media(processing_video_path)
+    probe_duration = safe_duration_seconds(probe.duration)
     write_json(output_dir / "00_media_probe.json", asdict(probe))
     emit(
         callback,
         "probe_media",
         {
             "path": str(output_dir / "00_media_probe.json"),
-            "duration_seconds": probe.duration,
+            "duration_seconds": probe_duration,
             "has_audio": probe.has_audio,
             "subtitle_streams": len(probe.text_subtitle_streams) + len(probe.image_subtitle_streams),
         },
@@ -372,7 +483,7 @@ def run_pipeline(
             "请先为该视频附加外部 MP3，再启动流程。"
         )
 
-    if load_existing_segments and translated_json_path.exists():
+    if load_existing_segments and not force_retranslate_existing_segments and translated_json_path.exists():
         translated_segments = load_segments(translated_json_path)
         source_repair_report = repair_source_segments(translated_segments, get_glossary_json_path(output_dir))
         save_segments_payload(
@@ -418,14 +529,14 @@ def run_pipeline(
             {
                 "path": str(translated_json_path),
                 "count": len(translated_segments),
-                "duration_seconds": probe.duration,
+                "duration_seconds": probe_duration,
                 "note": "loaded translated display segments; rerun timing/translation if these were generated before display-level timing was introduced",
                 "source_repairs": source_repair_report["summary"],
                 "source_spans": source_spans["summary"],
             },
         )
     else:
-        if load_existing_segments and timed_json_path.exists():
+        if (load_existing_segments or force_retranslate_existing_segments) and timed_json_path.exists():
             timed_segments = load_segments(timed_json_path)
             source_repair_report = repair_source_segments(timed_segments, get_glossary_json_path(output_dir))
             alias_stats = apply_glossary_alias_corrections(timed_segments, get_glossary_json_path(output_dir))
@@ -464,6 +575,7 @@ def run_pipeline(
                     "count": len(timed_segments),
                     "source_count": len(timed_segments),
                     "reused": True,
+                    "force_retranslate": bool(force_retranslate_existing_segments),
                     "alias_corrections": alias_stats,
                     "source_repairs": source_repair_report["summary"],
                     "source_spans": source_spans["summary"],
@@ -472,10 +584,12 @@ def run_pipeline(
         else:
             def on_extract_progress(progress_payload: dict) -> None:
                 payload = dict(progress_payload)
-                if probe.duration:
-                    processed_seconds = float(payload.get("out_time_seconds", 0.0))
-                    payload["duration_seconds"] = probe.duration
-                    payload["progress"] = round(max(0.0, min(1.0, processed_seconds / probe.duration)) * 100, 2)
+                duration = probe_duration
+                if duration:
+                    processed_seconds = max(0.0, finite_float(payload.get("out_time_seconds"), 0.0))
+                    payload["out_time_seconds"] = processed_seconds
+                    payload["duration_seconds"] = duration
+                    payload["progress"] = round(max(0.0, min(1.0, processed_seconds / duration)) * 100, 2)
                 emit(callback, "extract_audio_progress", payload)
 
             emit(
@@ -483,7 +597,7 @@ def run_pipeline(
                 "extract_audio_start",
                 {
                     "input_path": str(processing_video_path),
-                    "duration_seconds": probe.duration,
+                    "duration_seconds": probe_duration,
                 },
             )
             audio_path = extract_audio(
@@ -501,41 +615,91 @@ def run_pipeline(
                 {
                     "path": str(audio_path),
                     "size_bytes": audio_path.stat().st_size,
-                    "duration_seconds": probe.duration,
+                    "duration_seconds": probe_duration,
                 },
             )
+
+            asr_input_path = audio_path
+            asr_audio_mode_normalized = str(asr_audio_mode or "off").strip().lower().replace("-", "_")
+            asr_vad_mode_normalized = str(asr_vad_mode or "auto").strip().lower().replace("-", "_")
+            if asr_audio_mode_normalized not in {"off", "whisper", "strong_whisper"}:
+                asr_audio_mode_normalized = "off"
+            if asr_vad_mode_normalized == "on":
+                asr_vad_filter = True
+            elif asr_vad_mode_normalized == "off":
+                asr_vad_filter = False
+            else:
+                asr_vad_filter = asr_audio_mode_normalized == "off"
+            if asr_audio_mode_normalized != "off":
+                enhanced_audio_path = output_dir / "01b_audio_asr_enhanced.wav"
+
+                def on_enhance_progress(progress_payload: dict) -> None:
+                    payload = dict(progress_payload)
+                    duration = probe_duration
+                    if duration:
+                        processed_seconds = max(0.0, finite_float(payload.get("out_time_seconds"), 0.0))
+                        payload["out_time_seconds"] = processed_seconds
+                        payload["duration_seconds"] = duration
+                        payload["progress"] = round(max(0.0, min(1.0, processed_seconds / duration)) * 100, 2)
+                    payload["enhancement_mode"] = asr_audio_mode_normalized
+                    payload["gain_db"] = float(asr_audio_gain_db or 0.0)
+                    emit(callback, "enhance_audio_progress", payload)
+
+                emit(
+                    callback,
+                    "enhance_audio_start",
+                    {
+                        "path": str(enhanced_audio_path),
+                        "source_path": str(audio_path),
+                        "duration_seconds": probe_duration,
+                        "enhancement_mode": asr_audio_mode_normalized,
+                        "gain_db": float(asr_audio_gain_db or 0.0),
+                    },
+                )
+                asr_input_path = enhance_audio_for_asr(
+                    audio_path,
+                    enhanced_audio_path,
+                    mode=asr_audio_mode_normalized,
+                    gain_db=float(asr_audio_gain_db or 0.0),
+                    progress_callback=on_enhance_progress,
+                )
+                emit(
+                    callback,
+                    "enhance_audio_complete",
+                    {
+                        "path": str(asr_input_path),
+                        "source_path": str(audio_path),
+                        "size_bytes": asr_input_path.stat().st_size,
+                        "duration_seconds": probe_duration,
+                        "enhancement_mode": asr_audio_mode_normalized,
+                        "gain_db": float(asr_audio_gain_db or 0.0),
+                    },
+                )
 
             emit(
                 callback,
                 "asr_start",
                 {
-                    "audio_path": str(audio_path),
-                    "duration_seconds": probe.duration,
+                    "audio_path": str(asr_input_path),
+                    "source_audio_path": str(audio_path),
+                    "enhanced_audio_path": str(asr_input_path) if asr_input_path != audio_path else "",
+                    "duration_seconds": probe_duration,
+                    "audio_mode": asr_audio_mode_normalized,
+                    "vad_mode": asr_vad_mode_normalized,
+                    "vad_filter": asr_vad_filter,
                 },
             )
             raw_segments = transcribe_audio(
-                audio_path,
+                asr_input_path,
                 model_name=model,
                 language=src_lang,
                 device=device,
                 compute_type=compute_type,
                 beam_size=beam_size,
-                vad_filter=True,
+                vad_filter=asr_vad_filter,
                 progress_callback=lambda progress: emit(
                     callback,
-                    "asr_progress",
-                    {
-                        **progress,
-                        "duration_seconds": probe.duration,
-                        "virtual_chunk_current": seconds_to_virtual_chunks(
-                            float(progress.get("processed_seconds", 0.0)),
-                            float(probe.duration or 0.0),
-                        )[0],
-                        "virtual_chunk_total": seconds_to_virtual_chunks(
-                            float(progress.get("processed_seconds", 0.0)),
-                            float(probe.duration or 0.0),
-                        )[1],
-                    },
+                    *build_asr_state_stage({**progress, "duration_seconds": probe_duration}),
                 ),
             )
             save_segments_payload(
@@ -554,7 +718,7 @@ def run_pipeline(
                 {
                     "path": str(output_dir / "02_asr_raw_segments.json"),
                     "count": len(raw_segments),
-                    "duration_seconds": probe.duration,
+                    "duration_seconds": probe_duration,
                     "terms_path": str(asr_terms_path),
                     "glossary_path": str(auto_glossary_path) if auto_glossary_path else "",
                 },
@@ -691,7 +855,7 @@ def run_pipeline(
             openai_base_url=openai_base_url,
             context_window=4,
             locked_segment_ids=locked_translation_ids,
-            style_prompt_path=str(style_prompt_path) if style_prompt_path.exists() else None,
+            style_prompt_text=style_prompt_for_translation,
             progress_callback=lambda stage, progress: emit(callback, stage, progress),
         )
         alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
@@ -995,6 +1159,7 @@ def run_pipeline(
                 "00_media_probe.json",
                 "00a_merged_with_external_audio.mp4" if audio_override_path else None,
                 "01_audio_16k.wav",
+                "01b_audio_asr_enhanced.wav" if (output_dir / "01b_audio_asr_enhanced.wav").exists() else None,
                 "02_asr_raw_segments.json",
                 "02_terms_from_asr.json" if (output_dir / "02_terms_from_asr.json").exists() else None,
                 "03_timed_source_segments.json",
@@ -1036,7 +1201,11 @@ def run_pipeline(
         else "09_burned_bilingual_video.mp4"
     )
     output_video_path = output_dir / output_video_name
-    burn_duration = float(preview_seconds) if preview_seconds is not None else probe.duration
+    burn_duration = (
+        safe_duration_seconds(preview_seconds)
+        if preview_seconds is not None
+        else probe_duration
+    )
     emit(
         callback,
         "burn_start",
@@ -1058,12 +1227,20 @@ def run_pipeline(
         progress_callback=callback,
         total_duration=burn_duration,
     )
+    burn_size_bytes = output_video_path.stat().st_size if output_video_path.exists() else 0
+    burn_plan = {
+        **burn_plan,
+        "skipped": False,
+        "output_path": str(output_video_path),
+        "size_bytes": burn_size_bytes,
+        "duration_seconds": burn_duration,
+    }
     emit(
         callback,
         "burn_complete",
         {
             "path": str(output_video_path),
-            "size_bytes": output_video_path.stat().st_size if output_video_path.exists() else 0,
+            "size_bytes": burn_size_bytes,
             "duration_seconds": burn_duration,
         },
     )
@@ -1078,6 +1255,7 @@ def run_pipeline(
             "00_media_probe.json",
             "00a_merged_with_external_audio.mp4" if audio_override_path else None,
             "01_audio_16k.wav",
+            "01b_audio_asr_enhanced.wav" if (output_dir / "01b_audio_asr_enhanced.wav").exists() else None,
             "02_asr_raw_segments.json",
             "03_timed_source_segments.json",
             "03b_source_repaired_segments.json",

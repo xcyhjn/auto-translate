@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import tempfile
 import threading
@@ -27,6 +28,91 @@ IMAGE_SUBTITLE_CODECS = {
 }
 
 ProgressCallback = Callable[[dict], None]
+
+VALID_ASR_AUDIO_MODES = {"off", "whisper", "strong_whisper"}
+VALID_ASR_VAD_MODES = {"auto", "on", "off"}
+DEFAULT_ASR_AUDIO_GAIN_DB = 6.0
+
+ASR_AUDIO_PROFILES: dict[str, dict[str, float]] = {
+    "whisper": {
+        "highpass_hz": 70.0,
+        "lowpass_hz": 9000.0,
+        "noise_floor_db": -28.0,
+        "threshold_db": -28.0,
+        "ratio": 3.0,
+        "attack_ms": 8.0,
+        "release_ms": 120.0,
+        "makeup_db": 8.0,
+        "loudnorm_i": -18.0,
+        "loudnorm_tp": -1.5,
+        "loudnorm_lra": 8.0,
+    },
+    "strong_whisper": {
+        "highpass_hz": 60.0,
+        "lowpass_hz": 8500.0,
+        "noise_floor_db": -32.0,
+        "threshold_db": -32.0,
+        "ratio": 4.0,
+        "attack_ms": 6.0,
+        "release_ms": 160.0,
+        "makeup_db": 10.0,
+        "loudnorm_i": -16.0,
+        "loudnorm_tp": -1.5,
+        "loudnorm_lra": 7.0,
+    },
+}
+
+
+def normalize_asr_audio_mode(mode: str) -> str:
+    normalized = (mode or "off").strip().lower().replace("-", "_")
+    if normalized not in VALID_ASR_AUDIO_MODES:
+        raise ValueError(
+            f"Unsupported ASR audio mode: {mode!r}. Expected one of: {sorted(VALID_ASR_AUDIO_MODES)}."
+        )
+    return normalized
+
+
+def normalize_asr_vad_mode(mode: str) -> str:
+    normalized = (mode or "auto").strip().lower().replace("-", "_")
+    if normalized not in VALID_ASR_VAD_MODES:
+        raise ValueError(
+            f"Unsupported ASR VAD mode: {mode!r}. Expected one of: {sorted(VALID_ASR_VAD_MODES)}."
+        )
+    return normalized
+
+
+def build_asr_audio_filter(mode: str, gain_db: float = DEFAULT_ASR_AUDIO_GAIN_DB) -> str:
+    normalized_mode = normalize_asr_audio_mode(mode)
+    if normalized_mode == "off":
+        return ""
+
+    profile = ASR_AUDIO_PROFILES[normalized_mode]
+    filters = [
+        f"highpass=f={profile['highpass_hz']:g}",
+        f"lowpass=f={profile['lowpass_hz']:g}",
+        f"afftdn=nf={profile['noise_floor_db']:g}",
+    ]
+    if gain_db:
+        filters.append(f"volume={gain_db:g}dB")
+    filters.extend(
+        [
+            (
+                "acompressor="
+                f"threshold={profile['threshold_db']:g}dB:"
+                f"ratio={profile['ratio']:g}:"
+                f"attack={profile['attack_ms']:g}:"
+                f"release={profile['release_ms']:g}:"
+                f"makeup={profile['makeup_db']:g}dB"
+            ),
+            (
+                "loudnorm="
+                f"I={profile['loudnorm_i']:g}:"
+                f"TP={profile['loudnorm_tp']:g}:"
+                f"LRA={profile['loudnorm_lra']:g}"
+            ),
+        ]
+    )
+    return ",".join(filters)
 
 
 def run_command(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -56,9 +142,12 @@ def _parse_float(value: str | None) -> float | None:
     if value in {None, "", "N/A"}:
         return None
     try:
-        return float(value)
+        parsed = float(value)
     except ValueError:
         return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
 
 
 def _parse_int(value: str | None) -> int | None:
@@ -218,9 +307,7 @@ def probe_media(input_path: str | Path) -> MediaInfo:
     streams = payload.get("streams", [])
     fmt = payload.get("format", {})
 
-    duration = None
-    if fmt.get("duration"):
-        duration = float(fmt["duration"])
+    duration = _parse_float(str(fmt.get("duration") or ""))
 
     has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
     video_stream = next((stream for stream in streams if stream.get("codec_type") == "video"), {})
@@ -300,6 +387,46 @@ def extract_audio(
             "1",
             "-ar",
             "16000",
+            str(output_path),
+        ],
+        progress_callback=progress_callback,
+    )
+    return output_path
+
+
+def enhance_audio_for_asr(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    mode: str = "whisper",
+    gain_db: float = DEFAULT_ASR_AUDIO_GAIN_DB,
+    progress_callback: ProgressCallback | None = None,
+) -> Path:
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    normalized_mode = normalize_asr_audio_mode(mode)
+    if normalized_mode == "off":
+        output_path.write_bytes(input_path.read_bytes())
+        return output_path
+
+    filter_chain = build_asr_audio_filter(normalized_mode, gain_db=gain_db)
+    run_ffmpeg_command(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(input_path),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+            "-af",
+            filter_chain,
             str(output_path),
         ],
         progress_callback=progress_callback,

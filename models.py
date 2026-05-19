@@ -38,8 +38,16 @@ class SubtitleRules:
 
 @dataclass(slots=True)
 class BilingualSubtitleStyle:
-    zh_font_name: str = "Microsoft YaHei"
+    zh_font_name: str = "Maple Mono NF CN"
     zh_font_size: int = 64
+    zh_primary_color: str = "#FFFFFF"
+    zh_primary_opacity: int = 100
+    zh_outline_color: str = "#141414"
+    zh_outline_opacity: int = 100
+    zh_shadow_color: str = "#000000"
+    zh_shadow_opacity: int = 60
+    zh_outline_width: float = 2.2
+    zh_shadow_depth: float = 0.6
     zh_margin_l: int = 90
     zh_margin_r: int = 90
     zh_margin_v: int = 94

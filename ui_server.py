@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import copy
 import json
+import math
 import os
 import re
 import shutil
+import time
 import threading
 import traceback
+import uuid
 from datetime import datetime, timezone
 from dataclasses import asdict
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -16,12 +20,14 @@ import httpx
 
 from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, check_idm
 from .models import BilingualSubtitleStyle
-from .media import probe_media
+from .media import normalize_asr_audio_mode, normalize_asr_vad_mode, probe_media
 from .pipeline_core import build_output_slug, burn_subtitle, create_safe_ass_copy, run_pipeline, write_json
 from .qa import qa_final_ass_file
 from .qa_outputs import build_blocker_report
 from .glossary import write_youtube_glossary
+from .segment_io import load_segments
 from .style_learning import write_style_learning_artifacts
+from .subtitle_io import write_bilingual_ass
 from .youtube_meta import ensure_cover, ensure_padded_cover, fetch_youtube_info, fetch_youtube_meta, safe_project_slug, save_youtube_meta
 
 
@@ -32,9 +38,12 @@ ATTACHMENTS_DIR = BASE_DIR / "attachments"
 WEB_DIR = BASE_DIR / "web"
 CONFIG_PATH = BASE_DIR / "ui_config.json"
 ERROR_LOG_PATH = BASE_DIR / "ui_server_error_trace.log"
-SERVER_VERSION = "20260514-idm-download-v1"
+STATE_SNAPSHOT_PATH = BASE_DIR / "ui_server_state.json"
+SERVER_VERSION = "20260519-stability1"
 SERVER_PORT = int(os.environ.get("AUTOSUB_UI_PORT", "8777"))
 DEFAULT_HTTP_PROXY = "http://127.0.0.1:7890"
+STATE_SNAPSHOT_VERSION = 1
+STATE_STALE_TIMEOUT_SECONDS = 30 * 60
 
 DEFAULT_CONFIG = {
     "src_lang": "en",
@@ -43,12 +52,22 @@ DEFAULT_CONFIG = {
     "device": "cuda",
     "compute_type": "float16",
     "beam_size": 5,
-    "translation_model": "gpt-5.4-mini",
+    "asr_audio_mode": "off",
+    "asr_audio_gain_db": 6.0,
+    "asr_vad_mode": "auto",
+    "translation_model": "gpt-5.4",
+    "translation_prompt": (
+        "Prioritize faithful meaning over literal wording. Preserve casual spoken tone, "
+        "hesitation, intimacy, jokes, sarcasm, and implied meaning when present. Translate "
+        "spoken English into natural Simplified Chinese subtitles, not formal written Chinese. "
+        "Keep the line concise and subtitle-friendly; do not add explanations."
+    ),
     "translation_chunk_size": 24,
     "translation_retries": 4,
     "openai_base_url": "",
     "audio_override_path": "",
     "load_existing_segments": False,
+    "force_retranslate_existing_segments": False,
     "preview_seconds": None,
     "skip_burn": False,
     "repair_high_risk_spans": True,
@@ -65,6 +84,9 @@ DEFAULT_CONFIG = {
     "style": asdict(BilingualSubtitleStyle()),
 }
 
+
+STYLE_DEFAULTS = asdict(BilingualSubtitleStyle())
+
 STAGE_META = {
     "idle": {"title": "等待中", "description": "等待开始新的任务。", "overall_progress": 0},
     "download_start": {"title": "下载视频", "description": "正在拉取视频资源。", "overall_progress": 4},
@@ -77,7 +99,12 @@ STAGE_META = {
     "extract_audio_start": {"title": "音频提取", "description": "正在抽取 16k 单声道音频。", "overall_progress": 22},
     "extract_audio_progress": {"title": "音频提取", "description": "正在抽取 16k 单声道音频。", "overall_progress": 24},
     "extract_audio_complete": {"title": "音频提取", "description": "音频提取完成。", "overall_progress": 30},
+    "enhance_audio_start": {"title": "识别音频增强", "description": "正在为 ASR 单独增强低语音轨。", "overall_progress": 31},
+    "enhance_audio_progress": {"title": "识别音频增强", "description": "正在为 ASR 单独增强低语音轨。", "overall_progress": 33},
+    "enhance_audio_complete": {"title": "识别音频增强", "description": "识别音频增强完成。", "overall_progress": 34},
     "asr_start": {"title": "识别中", "description": "正在执行语音识别。", "overall_progress": 36},
+    "asr_attempt_start": {"title": "识别中", "description": "正在尝试更省显存的识别配置。", "overall_progress": 36},
+    "asr_fallback": {"title": "识别降级", "description": "显存不足，正在切换到更低内存路径。", "overall_progress": 36},
     "asr_progress": {"title": "识别中", "description": "正在执行语音识别。", "overall_progress": 46},
     "asr_complete": {"title": "识别中", "description": "语音识别已完成。", "overall_progress": 58},
     "timing_start": {"title": "时间轴优化", "description": "正在优化字幕切分和时间轴。", "overall_progress": 61},
@@ -98,6 +125,8 @@ STAGE_META = {
     "burn_complete": {"title": "完成", "description": "烧录产物已经生成。", "overall_progress": 100},
     "complete": {"title": "完成", "description": "全部阶段已完成。", "overall_progress": 100},
     "error": {"title": "错误", "description": "任务执行失败。", "overall_progress": 100},
+    "recovered_state": {"title": "已恢复", "description": "检测到上次任务中断，已释放卡住的状态。", "overall_progress": 0},
+    "stale_task_detected": {"title": "任务超时", "description": "长时间没有收到心跳，已释放任务锁。", "overall_progress": 0},
 }
 
 
@@ -129,6 +158,9 @@ def default_phase_status() -> dict:
             "duration_seconds": 0,
             "processed_seconds": 0,
             "size_bytes": 0,
+            "enhancement_mode": "off",
+            "gain_db": 0,
+            "enhanced_audio_path": "",
         },
         "asr": {
             "status": "idle",
@@ -139,6 +171,11 @@ def default_phase_status() -> dict:
             "duration_seconds": 0,
             "segment_count": 0,
             "label": "等待中",
+            "audio_mode": "off",
+            "vad_mode": "auto",
+            "vad_filter": False,
+            "source_audio_path": "",
+            "enhanced_audio_path": "",
         },
         "translation": {
             "status": "idle",
@@ -188,25 +225,295 @@ STATE = {
     "last_error": None,
     "queue": [],
     "phase_status": default_phase_status(),
+    "task_id": "",
+    "task_started_at": "",
+    "task_updated_at": "",
+    "last_heartbeat_at": "",
+    "stale_task": False,
+    "stale_reason": "",
+    "recovery": None,
+    "restored_from_snapshot": False,
 }
-STATE_LOCK = threading.Lock()
+STATE_LOCK = threading.RLock()
+STATE_SNAPSHOT_LOCK = threading.Lock()
+LAST_STATE_SNAPSHOT_AT = 0.0
 INITIAL_INPUT_SNAPSHOT: set[str] = set()
+
+
+def utc_now_iso(ts: float | None = None) -> str:
+    return datetime.fromtimestamp(ts if ts is not None else time.time(), tz=timezone.utc).isoformat()
+
+
+def read_state_timestamp(value: object) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = 0.0
+    if parsed > 0:
+        return parsed
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except Exception:
+        return 0.0
+
+
+def capture_state_snapshot() -> dict:
+    with STATE_LOCK:
+        return copy.deepcopy(STATE)
+
+
+def build_state_snapshot_payload() -> dict:
+    now_ts = time.time()
+    return {
+        "snapshot_version": STATE_SNAPSHOT_VERSION,
+        "server_version": SERVER_VERSION,
+        "saved_at": utc_now_iso(now_ts),
+        "saved_at_ts": now_ts,
+        "state": capture_state_snapshot(),
+    }
+
+
+def persist_state_snapshot(*, force: bool = False) -> None:
+    global LAST_STATE_SNAPSHOT_AT
+    now_ts = time.time()
+    with STATE_SNAPSHOT_LOCK:
+        if not force and now_ts - LAST_STATE_SNAPSHOT_AT < 1.0:
+            return
+        payload = build_state_snapshot_payload()
+        temp_path = STATE_SNAPSHOT_PATH.with_name(
+            f".{STATE_SNAPSHOT_PATH.name}.{uuid.uuid4().hex}.tmp"
+        )
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.replace(STATE_SNAPSHOT_PATH)
+        LAST_STATE_SNAPSHOT_AT = now_ts
+
+
+def load_state_snapshot_payload() -> dict | None:
+    if not STATE_SNAPSHOT_PATH.exists():
+        return None
+    try:
+        payload = json.loads(STATE_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("snapshot_version") != STATE_SNAPSHOT_VERSION:
+        return None
+    state = payload.get("state")
+    if not isinstance(state, dict):
+        return None
+    return payload
+
+
+def task_activity_timestamp_locked(state: dict | None = None) -> float:
+    target = state or STATE
+    return max(
+        read_state_timestamp(target.get("task_updated_at_ts")),
+        read_state_timestamp(target.get("last_heartbeat_at_ts")),
+        read_state_timestamp(target.get("task_started_at_ts")),
+    )
+
+
+def touch_task_activity_locked(*, now_ts: float | None = None) -> None:
+    timestamp = now_ts if now_ts is not None else time.time()
+    now_iso = utc_now_iso(timestamp)
+    STATE["task_updated_at"] = now_iso
+    STATE["task_updated_at_ts"] = timestamp
+    STATE["last_heartbeat_at"] = now_iso
+    STATE["last_heartbeat_at_ts"] = timestamp
+
+
+def current_task_id() -> str:
+    with STATE_LOCK:
+        return str(STATE.get("task_id") or "")
+
+
+def task_token_matches(task_id: str | None) -> bool:
+    if not task_id:
+        return True
+    with STATE_LOCK:
+        return str(STATE.get("task_id") or "") == str(task_id)
+
+
+def set_recovered_state_locked(reason: str, *, source: str) -> None:
+    now_ts = time.time()
+    previous_stage = str(STATE.get("current_stage") or "idle")
+    previous_task_id = str(STATE.get("task_id") or "")
+    previous_runtime = copy.deepcopy(STATE.get("runtime") or {})
+
+    STATE["running"] = False
+    STATE["current_stage"] = "recovered_state"
+    STATE["task_id"] = ""
+    STATE["task_started_at"] = ""
+    STATE["task_started_at_ts"] = 0.0
+    touch_task_activity_locked(now_ts=now_ts)
+    STATE["stale_task"] = True
+    STATE["stale_reason"] = reason
+    STATE["last_error"] = None
+    STATE["recovery"] = {
+        "message": reason,
+        "source": source,
+        "previous_stage": previous_stage,
+        "previous_task_id": previous_task_id,
+        "previous_runtime": previous_runtime,
+    }
+    STATE["runtime"] = {
+        "stage_key": "recovered_state",
+        "title": STAGE_META["recovered_state"]["title"],
+        "description": reason,
+        "overall_progress": 0,
+        "recovery": copy.deepcopy(STATE["recovery"]),
+    }
+    STATE["history"].append(
+        {
+            "stage": "recovered_state",
+            "title": STAGE_META["recovered_state"]["title"],
+            "description": reason,
+            "summary": {
+                "source": source,
+                "previous_stage": previous_stage,
+            },
+        }
+    )
+    STATE["history"] = STATE["history"][-120:]
+    persist_state_snapshot(force=True)
+
+
+def reconcile_runtime_state() -> bool:
+    with STATE_LOCK:
+        if not STATE["running"]:
+            return False
+        current_stage = str(STATE.get("current_stage") or "")
+        if current_stage in {"idle", "complete", "error", "recovered_state"}:
+            return False
+        last_activity_ts = task_activity_timestamp_locked(STATE)
+        if last_activity_ts <= 0:
+            return False
+        if time.time() - last_activity_ts < STATE_STALE_TIMEOUT_SECONDS:
+            return False
+        set_recovered_state_locked(
+            "Previous task stopped updating and was released so the UI can continue.",
+            source="stale_timeout",
+        )
+        persist_state_snapshot(force=True)
+        return True
+
+
+def restore_state_from_snapshot() -> None:
+    payload = load_state_snapshot_payload()
+    if not payload:
+        return
+    snapshot_state = payload.get("state")
+    if not isinstance(snapshot_state, dict):
+        return
+    with STATE_LOCK:
+        STATE.update(
+            {
+                "running": bool(snapshot_state.get("running", False)),
+                "current_stage": str(snapshot_state.get("current_stage") or "idle"),
+                "runtime": snapshot_state.get("runtime") if isinstance(snapshot_state.get("runtime"), dict) else default_runtime_meta(),
+                "history": snapshot_state.get("history") if isinstance(snapshot_state.get("history"), list) else [],
+                "last_manifest": snapshot_state.get("last_manifest"),
+                "last_error": snapshot_state.get("last_error") if isinstance(snapshot_state.get("last_error"), dict) else None,
+                "queue": snapshot_state.get("queue") if isinstance(snapshot_state.get("queue"), list) else [],
+                "phase_status": snapshot_state.get("phase_status") if isinstance(snapshot_state.get("phase_status"), dict) else default_phase_status(),
+                "task_id": str(snapshot_state.get("task_id") or ""),
+                "task_started_at": str(snapshot_state.get("task_started_at") or ""),
+                "task_started_at_ts": read_state_timestamp(snapshot_state.get("task_started_at_ts") or snapshot_state.get("task_started_at")),
+                "task_updated_at": str(snapshot_state.get("task_updated_at") or ""),
+                "task_updated_at_ts": read_state_timestamp(snapshot_state.get("task_updated_at_ts") or snapshot_state.get("task_updated_at")),
+                "last_heartbeat_at": str(snapshot_state.get("last_heartbeat_at") or ""),
+                "last_heartbeat_at_ts": read_state_timestamp(snapshot_state.get("last_heartbeat_at_ts") or snapshot_state.get("last_heartbeat_at")),
+                "stale_task": bool(snapshot_state.get("stale_task", False)),
+                "stale_reason": str(snapshot_state.get("stale_reason") or ""),
+                "recovery": snapshot_state.get("recovery") if isinstance(snapshot_state.get("recovery"), dict) else None,
+                "restored_from_snapshot": True,
+            }
+        )
+        if STATE["running"]:
+            set_recovered_state_locked(
+                "Server restarted while a task was running. The old task was released; start a new run or reburn from the latest artifacts.",
+                source="startup_snapshot",
+            )
+        else:
+            STATE["running"] = False
+        persist_state_snapshot(force=True)
+
+
+def normalize_config(config: dict) -> dict:
+    normalized = {**DEFAULT_CONFIG, **(config or {})}
+    style = normalized.get("style") if isinstance(normalized.get("style"), dict) else {}
+    normalized["style"] = {
+        key: style.get(key, default_value)
+        for key, default_value in STYLE_DEFAULTS.items()
+    }
+    normalized["device"] = str(normalized.get("device") or DEFAULT_CONFIG["device"]).strip().lower()
+    if normalized["device"] not in {"auto", "cpu", "cuda"}:
+        normalized["device"] = DEFAULT_CONFIG["device"]
+    normalized["compute_type"] = str(normalized.get("compute_type") or DEFAULT_CONFIG["compute_type"]).strip().lower()
+    if normalized["compute_type"] not in {"default", "float16", "int8_float16", "int8"}:
+        normalized["compute_type"] = DEFAULT_CONFIG["compute_type"]
+    try:
+        normalized["asr_audio_mode"] = normalize_asr_audio_mode(normalized.get("asr_audio_mode"))
+    except ValueError:
+        normalized["asr_audio_mode"] = DEFAULT_CONFIG["asr_audio_mode"]
+    try:
+        normalized["asr_vad_mode"] = normalize_asr_vad_mode(normalized.get("asr_vad_mode"))
+    except ValueError:
+        normalized["asr_vad_mode"] = DEFAULT_CONFIG["asr_vad_mode"]
+    try:
+        normalized["asr_audio_gain_db"] = float(
+            normalized.get("asr_audio_gain_db", DEFAULT_CONFIG["asr_audio_gain_db"])
+        )
+    except (TypeError, ValueError):
+        normalized["asr_audio_gain_db"] = DEFAULT_CONFIG["asr_audio_gain_db"]
+    normalized["force_retranslate_existing_segments"] = bool(
+        normalized.get("force_retranslate_existing_segments", False)
+    )
+    normalized["load_existing_segments"] = bool(normalized.get("load_existing_segments", False))
+    return normalized
 
 
 def read_config() -> dict:
     if CONFIG_PATH.exists():
-        return {**DEFAULT_CONFIG, **json.loads(CONFIG_PATH.read_text(encoding="utf-8"))}
-    return DEFAULT_CONFIG.copy()
+        return normalize_config(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+    return normalize_config(DEFAULT_CONFIG)
 
 
 def write_config(config: dict) -> None:
-    CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    normalized = normalize_config(config)
+    temp_path = CONFIG_PATH.with_name(f".{CONFIG_PATH.name}.{uuid.uuid4().hex}.tmp")
+    temp_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(CONFIG_PATH)
+
+
+def resolve_manifest_input_video(manifest: dict) -> Path:
+    raw_path = str(manifest.get("input_video") or "").strip()
+    if not raw_path:
+        raise FileNotFoundError("Manifest input video path is empty.")
+    try:
+        return resolve_input_video_path(raw_path)
+    except FileNotFoundError:
+        fallback_name = Path(raw_path).name
+        if fallback_name:
+            return resolve_input_video_path(fallback_name)
+        raise
 
 
 def append_error_log(message: str) -> None:
     with ERROR_LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(message)
         handle.write("\n\n")
+
+
+def is_client_disconnect_error(exc: BaseException) -> bool:
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+        return True
+    winerror = getattr(exc, "winerror", None)
+    if winerror in {32, 10053, 10054}:
+        return True
+    errno_value = getattr(exc, "errno", None)
+    return errno_value in {32, 10053, 10054}
 
 
 def strip_ansi_codes(text: str) -> str:
@@ -241,6 +548,17 @@ def build_user_facing_error_message(exc: Exception) -> str:
     if "unable to download api page" in lowered or "unable to download webpage" in lowered:
         return "无法访问视频页面。请检查代理、网络连通性或目标链接是否仍可访问。"
 
+    if (
+        ("cuda" in lowered and "out of memory" in lowered)
+        or "cublas" in lowered
+        or "cudnn" in lowered
+    ):
+        return (
+            "GPU 识别后端不可用或显存不足，识别阶段已经自动降级重试。"
+            "如果仍然失败，请把识别设备改成 `cpu`、计算类型改成 `int8`，"
+            "或检查 CUDA 运行库后再重试。"
+        )
+
     return raw_message or "任务执行失败。"
 
 
@@ -248,6 +566,16 @@ def set_state_error(message: str, traceback_text: str) -> None:
     with STATE_LOCK:
         STATE["running"] = False
         STATE["current_stage"] = "error"
+        STATE["task_id"] = ""
+        STATE["task_started_at"] = ""
+        STATE["task_started_at_ts"] = 0.0
+        STATE["task_updated_at"] = utc_now_iso()
+        STATE["task_updated_at_ts"] = time.time()
+        STATE["last_heartbeat_at"] = STATE["task_updated_at"]
+        STATE["last_heartbeat_at_ts"] = STATE["task_updated_at_ts"]
+        STATE["stale_task"] = False
+        STATE["stale_reason"] = ""
+        STATE["recovery"] = None
         STATE["last_error"] = {
             "message": message,
             "traceback": traceback_text,
@@ -262,6 +590,7 @@ def set_state_error(message: str, traceback_text: str) -> None:
             }
         )
         STATE["history"] = STATE["history"][-120:]
+        persist_state_snapshot(force=True)
 
 
 def cleanup_partial_downloads(before_paths: set[Path]) -> None:
@@ -417,23 +746,50 @@ def read_output_tree() -> list[dict]:
         if not folder.is_dir():
             continue
         files = []
+        file_index: dict[str, dict] = {}
+        manifest_payload: dict = {}
         for item in sorted(folder.iterdir()):
             if item.is_file():
-                files.append(
-                    {
-                        "name": item.name,
-                        "path": str(item),
-                        "size": item.stat().st_size,
-                    }
-                )
-        projects.append({"name": folder.name, "path": str(folder), "files": files})
+                stat = item.stat()
+                entry = {
+                    "name": item.name,
+                    "path": str(item),
+                    "size": stat.st_size,
+                    "mtime_ts": stat.st_mtime,
+                }
+                files.append(entry)
+                file_index[item.name] = entry
+        manifest_file = file_index.get("10_manifest_bilingual.json")
+        if manifest_file:
+            try:
+                manifest_payload = json.loads(Path(manifest_file["path"]).read_text(encoding="utf-8"))
+            except Exception:
+                manifest_payload = {}
+        ass_file = file_index.get("08_bilingual_zh_en.ass")
+        burned_file = file_index.get("09_burned_bilingual_video.mp4")
+        input_video = str(manifest_payload.get("input_video") or "").strip()
+        projects.append(
+            {
+                "name": folder.name,
+                "path": str(folder),
+                "files": files,
+                "ass_path": ass_file.get("path") if ass_file else "",
+                "ass_mtime_ts": ass_file.get("mtime_ts") if ass_file else 0,
+                "burned_video_path": burned_file.get("path") if burned_file else "",
+                "burned_video_mtime_ts": burned_file.get("mtime_ts") if burned_file else 0,
+                "manifest_path": manifest_file.get("path") if manifest_file else "",
+                "input_video": input_video,
+                "input_video_name": Path(input_video).name if input_video else "",
+            }
+        )
     return projects
 
 
 def build_bootstrap_payload(*, include_collections: bool) -> dict:
+    reconcile_runtime_state()
     payload = {
         "server_version": SERVER_VERSION,
-        "state": STATE,
+        "state": capture_state_snapshot(),
     }
     if include_collections:
         payload["videos"] = list_input_videos()
@@ -477,6 +833,48 @@ def enqueue_video(video: dict) -> None:
     with STATE_LOCK:
         if all(item["path"] != video["path"] for item in STATE["queue"]):
             STATE["queue"].append(video)
+            persist_state_snapshot()
+
+
+def is_busy() -> bool:
+    reconcile_runtime_state()
+    with STATE_LOCK:
+        return bool(STATE["running"])
+
+
+def fail_if_busy() -> None:
+    if is_busy():
+        raise RuntimeError("A task is already running. Please wait for it to finish before starting another one.")
+
+
+def try_begin_task(stage_key: str, title: str, description: str, *, overall_progress: int = 0) -> bool:
+    with STATE_LOCK:
+        reconcile_runtime_state()
+        if STATE["running"]:
+            return False
+        now_ts = time.time()
+        STATE["running"] = True
+        STATE["current_stage"] = stage_key
+        STATE["history"] = []
+        STATE["last_error"] = None
+        STATE["last_manifest"] = None
+        STATE["phase_status"] = default_phase_status()
+        STATE["stale_task"] = False
+        STATE["stale_reason"] = ""
+        STATE["recovery"] = None
+        STATE["task_id"] = uuid.uuid4().hex
+        STATE["task_started_at"] = utc_now_iso(now_ts)
+        STATE["task_started_at_ts"] = now_ts
+        touch_task_activity_locked(now_ts=now_ts)
+        STATE["runtime"] = {
+            "stage_key": stage_key,
+            "title": title,
+            "description": description,
+            "overall_progress": overall_progress,
+            "task_id": STATE["task_id"],
+        }
+        persist_state_snapshot(force=True)
+        return True
 
 
 def reset_runtime_state() -> None:
@@ -487,6 +885,18 @@ def reset_runtime_state() -> None:
     STATE["last_manifest"] = None
     STATE["last_error"] = None
     STATE["phase_status"] = default_phase_status()
+    STATE["task_id"] = ""
+    STATE["task_started_at"] = ""
+    STATE["task_started_at_ts"] = 0.0
+    STATE["task_updated_at"] = ""
+    STATE["task_updated_at_ts"] = 0.0
+    STATE["last_heartbeat_at"] = ""
+    STATE["last_heartbeat_at_ts"] = 0.0
+    STATE["stale_task"] = False
+    STATE["stale_reason"] = ""
+    STATE["recovery"] = None
+    STATE["restored_from_snapshot"] = False
+    persist_state_snapshot(force=True)
 
 
 def summarize_payload(payload: dict) -> dict:
@@ -521,6 +931,7 @@ def summarize_payload(payload: dict) -> dict:
         "virtual_chunk_current",
         "virtual_chunk_total",
         "speed",
+        "gain_db",
     }
     for key, value in payload.items():
         if value in (None, "", [], {}):
@@ -528,12 +939,34 @@ def summarize_payload(payload: dict) -> dict:
         if key.endswith("path") or key.endswith("dir") or key == "url":
             summary[key] = str(value)
         elif key in numeric_keys:
-            summary[key] = value
+            summary[key] = finite_float(value)
+        elif key in {"audio_mode", "enhancement_mode", "vad_mode"}:
+            summary[key] = str(value)
+        elif key == "vad_filter":
+            summary[key] = bool(value)
     if not summary:
         for key, value in list(payload.items())[:4]:
             if value not in (None, "", [], {}):
                 summary[key] = value
     return summary
+
+
+def finite_float(value: object, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(parsed):
+        return default
+    return parsed
+
+
+def finite_int(value: object, default: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return parsed
 
 
 def update_runtime_meta(stage: str, payload: dict) -> None:
@@ -547,7 +980,7 @@ def update_runtime_meta(stage: str, payload: dict) -> None:
     if stage == "burn_progress":
         runtime["overall_progress"] = min(
             99,
-            94 + int(round(float(payload.get("progress", 0)) * 0.05)),
+            94 + int(round(finite_float(payload.get("progress")) * 0.05)),
         )
     elif stage == "translation_chunk_complete":
         chunk_total = int(payload.get("chunk_total", 0) or 0)
@@ -556,8 +989,8 @@ def update_runtime_meta(stage: str, payload: dict) -> None:
             ratio = max(0.0, min(1.0, chunk_index / chunk_total))
             runtime["overall_progress"] = 72 + int(round(ratio * 16))
     elif stage == "asr_progress":
-        duration_seconds = float(payload.get("duration_seconds", 0) or 0)
-        processed_seconds = float(payload.get("processed_seconds", 0) or 0)
+        duration_seconds = finite_float(payload.get("duration_seconds"))
+        processed_seconds = finite_float(payload.get("processed_seconds"))
         if duration_seconds > 0:
             ratio = max(0.0, min(1.0, processed_seconds / duration_seconds))
             runtime["overall_progress"] = 36 + int(round(ratio * 22))
@@ -570,7 +1003,7 @@ def update_runtime_meta(stage: str, payload: dict) -> None:
 
 def update_phase_status(stage: str, payload: dict) -> None:
     phase = STATE["phase_status"]
-    audio_progress = float(phase["audio_extract"].get("progress", 0) or 0)
+    audio_progress = finite_float(phase["audio_extract"].get("progress"))
 
     if stage in {"download_start", "download_complete"}:
         phase["audio_extract"]["label"] = "等待下载完成" if stage == "download_start" else "下载完成，等待处理"
@@ -582,7 +1015,7 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "status": "running",
                 "progress": max(audio_progress, 5),
                 "label": "正在合并外部音频",
-                "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
             }
         )
         return
@@ -591,10 +1024,10 @@ def update_phase_status(stage: str, payload: dict) -> None:
         phase["audio_extract"].update(
             {
                 "status": "running",
-                "progress": max(audio_progress, float(payload.get("progress", 0) or 0) * 0.4),
+                "progress": max(audio_progress, finite_float(payload.get("progress")) * 0.4),
                 "label": "正在合并外部音频",
-                "processed_seconds": float(payload.get("out_time_seconds", 0) or 0),
-                "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
+                "processed_seconds": finite_float(payload.get("out_time_seconds")),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
             }
         )
         return
@@ -616,7 +1049,7 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "status": "running",
                 "progress": max(audio_progress, 10),
                 "label": "媒体探测完成",
-                "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
             }
         )
         return
@@ -627,7 +1060,7 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "status": "running",
                 "progress": max(audio_progress, 45 if audio_progress >= 40 else 15),
                 "label": "正在提取音频",
-                "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
             }
         )
         return
@@ -636,10 +1069,10 @@ def update_phase_status(stage: str, payload: dict) -> None:
         phase["audio_extract"].update(
             {
                 "status": "running",
-                "progress": max(audio_progress, 45 + float(payload.get("progress", 0) or 0) * 0.55 if audio_progress >= 40 else float(payload.get("progress", 0) or 0)),
+                "progress": max(audio_progress, 45 + finite_float(payload.get("progress")) * 0.55 if audio_progress >= 40 else finite_float(payload.get("progress"))),
                 "label": "正在提取音频",
-                "processed_seconds": float(payload.get("out_time_seconds", 0) or 0),
-                "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
+                "processed_seconds": finite_float(payload.get("out_time_seconds")),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
                 "size_bytes": int(payload.get("size_bytes", 0) or 0),
             }
         )
@@ -651,8 +1084,52 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "status": "complete",
                 "progress": 100,
                 "label": "音频提取完成",
-                "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
                 "size_bytes": int(payload.get("size_bytes", 0) or 0),
+            }
+        )
+        return
+
+    if stage == "enhance_audio_start":
+        phase["audio_extract"].update(
+            {
+                "status": "running",
+                "progress": max(audio_progress, 65),
+                "label": "正在增强识别音频",
+                "enhancement_mode": str(payload.get("enhancement_mode") or "off"),
+                "gain_db": finite_float(payload.get("gain_db")),
+                "enhanced_audio_path": str(payload.get("path") or ""),
+            }
+        )
+        return
+
+    if stage == "enhance_audio_progress":
+        phase["audio_extract"].update(
+            {
+                "status": "running",
+                "progress": max(audio_progress, 65 + finite_float(payload.get("progress")) * 0.35),
+                "label": "正在增强识别音频",
+                "processed_seconds": finite_float(payload.get("out_time_seconds")),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
+                "size_bytes": int(payload.get("size_bytes", 0) or 0),
+                "enhancement_mode": str(payload.get("enhancement_mode") or "off"),
+                "gain_db": finite_float(payload.get("gain_db")),
+                "enhanced_audio_path": str(payload.get("path") or ""),
+            }
+        )
+        return
+
+    if stage == "enhance_audio_complete":
+        phase["audio_extract"].update(
+            {
+                "status": "complete",
+                "progress": 100,
+                "label": "识别音频增强完成",
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
+                "size_bytes": int(payload.get("size_bytes", 0) or 0),
+                "enhancement_mode": str(payload.get("enhancement_mode") or "off"),
+                "gain_db": finite_float(payload.get("gain_db")),
+                "enhanced_audio_path": str(payload.get("path") or ""),
             }
         )
         return
@@ -663,21 +1140,46 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "status": "running",
                 "progress": 0,
                 "label": "正在识别音频",
-                "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
+                "current": 0,
+                "total": 0,
+                "audio_mode": str(payload.get("audio_mode") or "off"),
+                "vad_mode": str(payload.get("vad_mode") or "auto"),
+                "vad_filter": bool(payload.get("vad_filter", False)),
+                "source_audio_path": str(payload.get("source_audio_path") or ""),
+                "enhanced_audio_path": str(payload.get("enhanced_audio_path") or ""),
+            }
+        )
+        return
+
+    if stage == "asr_attempt_start":
+        phase["asr"].update(
+            {
+                "status": "running",
+                "label": f"姝ｅ湪鍠峰姞 {payload.get('device', '')}/{payload.get('compute_type', '')}",
                 "current": 0,
                 "total": 0,
             }
         )
         return
 
+    if stage == "asr_fallback":
+        phase["asr"].update(
+            {
+                "status": "running",
+                "label": str(payload.get("message") or "ASR 显存不足，正在降级重试"),
+            }
+        )
+        return
+
     if stage == "asr_progress":
-        duration_seconds = float(payload.get("duration_seconds", 0) or 0)
-        processed_seconds = float(payload.get("processed_seconds", 0) or 0)
-        progress = float(payload.get("progress", 0) or 0)
+        duration_seconds = finite_float(payload.get("duration_seconds"))
+        processed_seconds = finite_float(payload.get("processed_seconds"))
+        progress = finite_float(payload.get("progress"))
         if duration_seconds > 0 and progress == 0:
             progress = round(max(0.0, min(1.0, processed_seconds / duration_seconds)) * 100, 2)
-        current = int(payload.get("virtual_chunk_current", 0) or 0)
-        total = int(payload.get("virtual_chunk_total", 0) or 0)
+        current = finite_int(payload.get("virtual_chunk_current"))
+        total = finite_int(payload.get("virtual_chunk_total"))
         phase["asr"].update(
             {
                 "status": "running",
@@ -778,7 +1280,7 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "status": "fallback" if fallback_count else "done",
                 "segment_count": int(payload.get("segment_count", 0) or 0),
                 "fallback_count": fallback_count,
-                "elapsed_seconds": float(payload.get("elapsed_seconds", 0) or 0),
+                "elapsed_seconds": finite_float(payload.get("elapsed_seconds")),
             }
         phase["translation"].update(
             {
@@ -787,7 +1289,7 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "total": chunk_total,
                 "progress": round(chunk_index / chunk_total * 100, 2) if chunk_total else 0,
                 "fallback_count": fallback_count,
-                "elapsed_seconds": float(payload.get("elapsed_seconds", 0) or 0),
+                "elapsed_seconds": finite_float(payload.get("elapsed_seconds")),
                 "label": f"Chunk {chunk_index}/{chunk_total} 已完成",
             }
         )
@@ -903,7 +1405,7 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "status": "running",
                 "progress": 0,
                 "label": "正在烧录双语视频",
-                "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
                 "encoder": str(payload.get("encoder", "h264_nvenc")),
                 "quality": int(payload.get("quality", payload.get("crf", 25)) or 25),
                 "preset": str(payload.get("preset", "p4")),
@@ -917,13 +1419,13 @@ def update_phase_status(stage: str, payload: dict) -> None:
         phase["burn"].update(
             {
                 "status": "running",
-                "progress": float(payload.get("progress", 0) or 0),
-                "processed_seconds": float(payload.get("out_time_seconds", 0) or 0),
-                "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
-                "remaining_seconds": float(payload.get("remaining_seconds", 0) or 0),
+                "progress": finite_float(payload.get("progress")),
+                "processed_seconds": finite_float(payload.get("out_time_seconds")),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
+                "remaining_seconds": finite_float(payload.get("remaining_seconds")),
                 "size_bytes": int(payload.get("size_bytes", 0) or 0),
                 "estimated_final_size": int(payload.get("estimated_final_size", 0) or 0),
-                "speed": float(payload.get("speed", 0) or 0),
+                "speed": finite_float(payload.get("speed")),
                 "label": "正在烧录双语视频",
             }
         )
@@ -935,7 +1437,7 @@ def update_phase_status(stage: str, payload: dict) -> None:
                 "status": "complete",
                 "progress": 100,
                 "size_bytes": int(payload.get("size_bytes", 0) or 0),
-                "duration_seconds": float(payload.get("duration_seconds", 0) or 0),
+                "duration_seconds": finite_float(payload.get("duration_seconds")),
                 "label": "烧录完成",
             }
         )
@@ -944,8 +1446,15 @@ def update_phase_status(stage: str, payload: dict) -> None:
 
 def append_history(stage: str, payload: dict) -> None:
     with STATE_LOCK:
+        current_task = str(STATE.get("task_id") or "")
+        payload_task = str(payload.get("task_id") or current_task)
+        if payload_task != current_task:
+            return
         STATE["current_stage"] = stage
         update_runtime_meta(stage, payload)
+        touch_task_activity_locked()
+        if current_task:
+            STATE["runtime"]["task_id"] = current_task
         STATE["history"].append(
             {
                 "stage": stage,
@@ -958,6 +1467,14 @@ def append_history(stage: str, payload: dict) -> None:
         update_phase_status(stage, payload)
         if stage == "complete":
             STATE["current_stage"] = "complete"
+            STATE["running"] = False
+            STATE["task_id"] = ""
+            STATE["task_started_at"] = ""
+            STATE["task_started_at_ts"] = 0.0
+            STATE["stale_task"] = False
+            STATE["stale_reason"] = ""
+            STATE["recovery"] = None
+        persist_state_snapshot()
 
 
 def remove_output_for_video(video_path: Path) -> None:
@@ -1140,11 +1657,16 @@ def learn_style_job(project_path: str) -> dict:
     }
 
 
-def run_pipeline_job(video_path: str, config: dict) -> None:
+def execute_pipeline_job(video_path: str, config: dict, task_id: str | None = None) -> None:
+    task_id = task_id or current_task_id()
     style_config = dict(config.get("style") or {})
     if "en_max_words_per_line" in style_config and "en_max_single_line_chars" not in style_config:
         style_config["en_max_single_line_chars"] = max(50, int(style_config.pop("en_max_words_per_line") or 12) * 6)
     style_config.pop("en_max_words_per_line", None)
+    style_config = {
+        key: style_config.get(key, default_value)
+        for key, default_value in STYLE_DEFAULTS.items()
+    }
     style = BilingualSubtitleStyle(**style_config)
     try:
         append_error_log(
@@ -1152,19 +1674,6 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
             f"config_summary={{src_lang={config.get('src_lang')}, dst_lang={config.get('dst_lang')}, "
             f"model={config.get('model')}, device={config.get('device')}, compute_type={config.get('compute_type')}}}"
         )
-        with STATE_LOCK:
-            STATE["running"] = True
-            STATE["current_stage"] = "starting"
-            STATE["history"] = []
-            STATE["last_error"] = None
-            STATE["phase_status"] = default_phase_status()
-            STATE["runtime"] = {
-                "stage_key": "starting",
-                "title": "准备中",
-                "description": "正在初始化任务。",
-                "overall_progress": 1,
-            }
-
         manifest = run_pipeline(
             input_path=video_path,
             output_root=OUTPUT_DIR,
@@ -1174,12 +1683,17 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
             device=config["device"],
             compute_type=config["compute_type"],
             beam_size=int(config["beam_size"]),
+            asr_audio_mode=config.get("asr_audio_mode", "off"),
+            asr_audio_gain_db=float(config.get("asr_audio_gain_db", 6.0) or 6.0),
+            asr_vad_mode=config.get("asr_vad_mode", "auto"),
             translation_model=config["translation_model"],
+            translation_prompt=config.get("translation_prompt", ""),
             translation_chunk_size=int(config["translation_chunk_size"]),
             translation_retries=int(config["translation_retries"]),
             openai_base_url=config["openai_base_url"] or None,
             audio_override_path=config.get("audio_override_path") or None,
             load_existing_segments=bool(config["load_existing_segments"]),
+            force_retranslate_existing_segments=bool(config.get("force_retranslate_existing_segments", False)),
             preview_seconds=int(config["preview_seconds"]) if config["preview_seconds"] else None,
             skip_burn=bool(config.get("skip_burn", False)),
             repair_high_risk_spans=bool(config.get("repair_high_risk_spans", True)),
@@ -1187,7 +1701,7 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
             enable_ai_display_rewrite=bool(config.get("enable_ai_display_rewrite", False)),
             display_rewrite_max_ai_segments=int(config.get("display_rewrite_max_ai_segments", 12) or 12),
             bilingual_style=style,
-            callback=append_history,
+            callback=lambda stage, payload: append_history(stage, {**payload, "task_id": task_id}),
         )
         append_error_log(
             f"[run_pipeline_job:complete] video_path={video_path}\n"
@@ -1196,26 +1710,46 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
         )
 
         with STATE_LOCK:
+            if task_id and STATE.get("task_id") and STATE["task_id"] != task_id:
+                return
             STATE["running"] = False
             STATE["current_stage"] = "complete"
             STATE["last_manifest"] = manifest
+            STATE["task_id"] = ""
+            STATE["task_started_at"] = ""
+            STATE["task_started_at_ts"] = 0.0
+            touch_task_activity_locked()
+            STATE["stale_task"] = False
+            STATE["stale_reason"] = ""
+            STATE["recovery"] = None
             STATE["runtime"] = {
                 "stage_key": "complete",
                 "title": "完成",
                 "description": "全部阶段已完成。",
                 "overall_progress": 100,
             }
+            persist_state_snapshot(force=True)
     except Exception as exc:
         traceback_text = traceback.format_exc()
         user_message = build_user_facing_error_message(exc)
-        set_state_error(user_message, traceback_text)
+        if task_token_matches(task_id):
+            set_state_error(user_message, traceback_text)
         append_error_log(traceback_text)
 
 
-def reburn_from_ass_job(project_path: str) -> dict:
+def run_pipeline_job(video_path: str, config: dict) -> None:
+    if not try_begin_task("starting", "准备中", "正在初始化任务。", overall_progress=1):
+        append_error_log("[run_pipeline_job] task already running; skipping duplicate start request")
+        return
+    execute_pipeline_job(video_path, config, current_task_id())
+
+
+def reburn_from_ass_job(project_path: str, task_id: str | None = None) -> dict:
+    task_id = task_id or current_task_id()
     project_dir = Path(project_path)
     manifest_path = project_dir / "10_manifest_bilingual.json"
     ass_path = project_dir / "08_bilingual_zh_en.ass"
+    translated_segments_path = project_dir / "05_translated_segments.json"
     output_path = project_dir / "09_burned_bilingual_video.mp4"
     if not project_dir.exists():
         raise FileNotFoundError(f"Project folder not found: {project_dir}")
@@ -1223,53 +1757,44 @@ def reburn_from_ass_job(project_path: str) -> dict:
         raise FileNotFoundError(f"Manifest not found: {manifest_path}")
     if not ass_path.exists():
         raise FileNotFoundError(f"ASS file not found: {ass_path}")
+    if not translated_segments_path.exists():
+        raise FileNotFoundError(f"Translated segments not found: {translated_segments_path}")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    input_video = Path(str(manifest.get("input_video") or ""))
-    if not input_video.exists():
-        raise FileNotFoundError(f"Input video not found: {input_video}")
+    input_video = resolve_manifest_input_video(manifest)
+    manifest["input_video"] = str(input_video)
+    manifest["output_dir"] = str(project_dir)
+    manifest["output_root"] = str(OUTPUT_DIR)
+    translated_segments = load_segments(translated_segments_path)
 
-    ass_report = qa_final_ass_file(ass_path, dst_lang="zh-Hans")
-    ass_qa_payload = build_blocker_report(
-        ass_report.errors,
+    write_json(
+        project_dir / "07g_final_ass_qa.json",
         {
-            "blocking_issue_count": len(ass_report.errors),
-            "warning_issue_count": len(ass_report.warnings),
-            "pass": not ass_report.errors,
+            "skipped": True,
+            "reason": "manual_ass_reburn_prefers_editor_translation",
+            "message": "Manual ASS reburn skipped final ASS QA and burned directly from the editor-approved subtitle file.",
         },
-        ass_report.warnings,
     )
-    write_json(project_dir / "07g_final_ass_qa.json", ass_qa_payload)
     manifest["final_ass_qa"] = {
         "path": str(project_dir / "07g_final_ass_qa.json"),
-        "pass": not ass_report.errors,
-        "errors": len(ass_report.errors),
-        "warnings": len(ass_report.warnings),
+        "skipped": True,
+        "reason": "manual_ass_reburn_prefers_editor_translation",
     }
     if "07g_final_ass_qa.json" not in (manifest.get("files") or []):
         manifest["files"] = [*(manifest.get("files") or []), "07g_final_ass_qa.json"]
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     probe = probe_media(input_video)
-    with STATE_LOCK:
-        STATE["running"] = True
-        STATE["current_stage"] = "burn_start"
-        STATE["last_error"] = None
-        STATE["runtime"] = {
-            "stage_key": "burn_start",
-            "title": "烧录中",
-            "description": "正在按当前 ASS 重新烧录。",
-            "overall_progress": 94,
-        }
-
+    burn_duration = finite_float(probe.duration)
     append_history(
         "burn_start",
         {
             "path": str(output_path),
-            "duration_seconds": probe.duration or 0,
+            "duration_seconds": burn_duration,
             "encoder": "h264_nvenc",
             "quality": 25,
             "preset": "p4",
+            "task_id": task_id,
         },
     )
     safe_ass_path = create_safe_ass_copy(ass_path)
@@ -1277,33 +1802,69 @@ def reburn_from_ass_job(project_path: str) -> dict:
         input_video,
         safe_ass_path,
         output_path,
-        progress_callback=append_history,
-        total_duration=probe.duration or 0,
+        progress_callback=lambda stage, payload: append_history(stage, {**payload, "task_id": task_id}),
+        total_duration=burn_duration,
     )
+    style_learning_result = write_style_learning_artifacts(
+        segments_path=translated_segments_path,
+        manual_ass_path=ass_path,
+        output_dir=project_dir,
+    )
+    manifest["style_learning"] = style_learning_result
     append_history(
         "burn_complete",
         {
             "path": str(output_path),
             "size_bytes": output_path.stat().st_size if output_path.exists() else 0,
-            "duration_seconds": probe.duration or 0,
+            "duration_seconds": burn_duration,
+            "style_learning_examples": int(style_learning_result.get("example_count") or 0),
+            "task_id": task_id,
         },
     )
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     with STATE_LOCK:
+        if task_id and STATE.get("task_id") and STATE["task_id"] != task_id:
+            return {
+                "project_path": str(project_dir),
+                "ass_path": str(ass_path),
+                "output_path": str(output_path),
+                "input_video": str(input_video),
+            }
         STATE["running"] = False
         STATE["current_stage"] = "complete"
         STATE["last_manifest"] = manifest
+        STATE["task_id"] = ""
+        STATE["task_started_at"] = ""
+        STATE["task_started_at_ts"] = 0.0
+        touch_task_activity_locked()
+        STATE["stale_task"] = False
+        STATE["stale_reason"] = ""
+        STATE["recovery"] = None
         STATE["runtime"] = {
             "stage_key": "complete",
             "title": "完成",
             "description": "按当前 ASS 重新烧录完成。",
             "overall_progress": 100,
         }
+        persist_state_snapshot(force=True)
     return {
         "project_path": str(project_dir),
         "ass_path": str(ass_path),
         "output_path": str(output_path),
         "input_video": str(input_video),
     }
+
+
+def safe_reburn_from_ass_job(project_path: str) -> None:
+    task_id = current_task_id()
+    try:
+        reburn_from_ass_job(project_path, task_id)
+    except Exception as exc:
+        traceback_text = traceback.format_exc()
+        user_message = build_user_facing_error_message(exc)
+        if task_token_matches(task_id):
+            set_state_error(user_message, traceback_text)
+        append_error_log(traceback_text)
 
 
 def build_download_config(config: dict) -> DownloadConfig:
@@ -1314,25 +1875,22 @@ def build_download_config(config: dict) -> DownloadConfig:
     )
 
 
-def download_video_from_url(url: str, config: dict) -> dict:
+def download_video_from_url(url: str, config: dict, task_id: str | None = None) -> dict:
     download_config = build_download_config(config)
-    manager = DownloadManager(download_config, callback=append_history)
+    manager = DownloadManager(
+        download_config,
+        callback=lambda stage, payload: append_history(stage, {**payload, "task_id": task_id}),
+    )
     result = manager.download(url)
     return result.as_video_dict()
 
 
 def download_and_optionally_run_job(url: str, config: dict, run_after_download: bool) -> None:
+    task_id = current_task_id()
     try:
-        with STATE_LOCK:
-            STATE["running"] = True
-            STATE["current_stage"] = "downloading"
-            STATE["last_error"] = None
-            STATE["history"] = []
-            STATE["phase_status"] = default_phase_status()
-            update_runtime_meta("downloading", {})
-        append_history("download_start", {"url": url})
+        append_history("download_start", {"url": url, "task_id": task_id})
 
-        video = download_video_from_url(url, config)
+        video = download_video_from_url(url, config, task_id)
         enqueue_video(video)
         append_history(
             "download_complete",
@@ -1341,25 +1899,37 @@ def download_and_optionally_run_job(url: str, config: dict, run_after_download: 
                 "name": video["name"],
                 "size": video["size"],
                 "method": video.get("download_method", ""),
+                "task_id": task_id,
             },
         )
 
-        with STATE_LOCK:
-            STATE["running"] = False
-            STATE["current_stage"] = "idle"
-            STATE["runtime"] = {
-                "stage_key": "idle",
-                "title": "等待中",
-                "description": "下载已完成，等待后续操作。",
-                "overall_progress": 0,
-            }
-
         if run_after_download:
-            run_pipeline_job(video["path"], config)
+            execute_pipeline_job(video["path"], config, task_id)
+        else:
+            with STATE_LOCK:
+                if task_id and STATE.get("task_id") and STATE["task_id"] != task_id:
+                    return
+                STATE["running"] = False
+                STATE["current_stage"] = "idle"
+                STATE["task_id"] = ""
+                STATE["task_started_at"] = ""
+                STATE["task_started_at_ts"] = 0.0
+                touch_task_activity_locked()
+                STATE["stale_task"] = False
+                STATE["stale_reason"] = ""
+                STATE["recovery"] = None
+                STATE["runtime"] = {
+                    "stage_key": "idle",
+                    "title": "等待中",
+                    "description": "下载已完成，等待后续操作。",
+                    "overall_progress": 0,
+                }
+                persist_state_snapshot(force=True)
     except Exception as exc:
         traceback_text = traceback.format_exc()
         user_message = build_user_facing_error_message(exc)
-        set_state_error(user_message, traceback_text)
+        if task_token_matches(task_id):
+            set_state_error(user_message, traceback_text)
         append_error_log(traceback_text)
 
 
@@ -1379,18 +1949,31 @@ class UIServerHandler(SimpleHTTPRequestHandler):
 
     def _json_response(self, payload: dict, status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except OSError as exc:
+            if is_client_disconnect_error(exc):
+                return
+            raise
 
     def _error_response(self, exc: Exception) -> None:
+        if is_client_disconnect_error(exc):
+            return
         append_error_log(traceback.format_exc())
-        self._json_response({"error": str(exc), "traceback": traceback.format_exc()}, status=500)
+        try:
+            self._json_response({"error": str(exc), "traceback": traceback.format_exc()}, status=500)
+        except OSError as response_exc:
+            if is_client_disconnect_error(response_exc):
+                return
+            raise
 
     def do_GET(self) -> None:
         try:
+            reconcile_runtime_state()
             parsed = urlparse(self.path)
             if parsed.path == "/api/bootstrap":
                 self._json_response(build_bootstrap_payload(include_collections=True))
@@ -1439,23 +2022,28 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 return
 
             return super().do_GET()
+        except OSError as exc:
+            if is_client_disconnect_error(exc):
+                return
+            self._error_response(exc)
         except Exception as exc:
             self._error_response(exc)
 
     def do_POST(self) -> None:
         try:
+            reconcile_runtime_state()
             parsed = urlparse(self.path)
             content_length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(content_length) if content_length else b"{}"
 
-            if parsed.path == "/api/upload-video":
+            if parsed.path in {"/api/upload-video", "/api/pick-input"}:
                 filename = unquote(self.headers.get("X-Filename", "upload.mp4"))
                 video = save_uploaded_file(INPUT_DIR, filename, raw)
                 enqueue_video(video)
                 self._json_response({"ok": True, "video": video, "videos": list_input_videos(), "state": STATE})
                 return
 
-            if parsed.path == "/api/upload-audio":
+            if parsed.path in {"/api/upload-audio", "/api/pick-audio"}:
                 filename = unquote(self.headers.get("X-Filename", "upload.mp3"))
                 audio = save_uploaded_file(ATTACHMENTS_DIR, filename, raw)
                 self._json_response({"ok": True, "audio": audio, "audios": list_audio_files(), "state": STATE})
@@ -1539,6 +2127,9 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 config = {**read_config(), **payload.get("config", {})}
                 url = payload["url"]
                 run_after_download = bool(payload.get("run_after_download"))
+                if not try_begin_task("downloading", "下载视频", "正在拉取视频资源。", overall_progress=4):
+                    self._json_response({"ok": False, "error": "task already running"}, status=409)
+                    return
                 thread = threading.Thread(
                     target=download_and_optionally_run_job,
                     args=(url, config, run_after_download),
@@ -1551,7 +2142,14 @@ class UIServerHandler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/run":
                 config = {**read_config(), **payload.get("config", {})}
                 resolved_video_path = str(resolve_input_video_path(payload["video_path"]))
-                thread = threading.Thread(target=run_pipeline_job, args=(resolved_video_path, config), daemon=True)
+                if not try_begin_task("starting", "准备中", "正在初始化任务。", overall_progress=1):
+                    self._json_response({"ok": False, "error": "task already running"}, status=409)
+                    return
+                thread = threading.Thread(
+                    target=execute_pipeline_job,
+                    args=(resolved_video_path, config, current_task_id()),
+                    daemon=True,
+                )
                 thread.start()
                 self._json_response({"ok": True})
                 return
@@ -1561,7 +2159,10 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 if not project_path:
                     self._json_response({"ok": False, "error": "project_path required"}, status=400)
                     return
-                thread = threading.Thread(target=reburn_from_ass_job, args=(project_path,), daemon=True)
+                if not try_begin_task("burn_start", "烧录中", "正在按当前 ASS 重新烧录。", overall_progress=94):
+                    self._json_response({"ok": False, "error": "task already running"}, status=409)
+                    return
+                thread = threading.Thread(target=safe_reburn_from_ass_job, args=(project_path,), daemon=True)
                 thread.start()
                 self._json_response({"ok": True})
                 return
@@ -1586,6 +2187,10 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 return
 
             self._json_response({"error": "not found"}, status=404)
+        except OSError as exc:
+            if is_client_disconnect_error(exc):
+                return
+            self._error_response(exc)
         except Exception as exc:
             self._error_response(exc)
 
@@ -1601,6 +2206,7 @@ def main() -> None:
     WEB_DIR.mkdir(parents=True, exist_ok=True)
     global INITIAL_INPUT_SNAPSHOT
     INITIAL_INPUT_SNAPSHOT = {str(item.resolve()) for item in INPUT_DIR.iterdir() if item.is_file()}
+    restore_state_from_snapshot()
     ensure_proxy_environment()
     server = ReusableThreadingHTTPServer(("127.0.0.1", SERVER_PORT), UIServerHandler)
     print(f"UI server running at http://127.0.0.1:{SERVER_PORT}")

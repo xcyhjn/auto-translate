@@ -21,7 +21,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cpu", help="ASR 设备。")
     parser.add_argument("--compute-type", default="int8", help="ASR 计算类型。")
     parser.add_argument("--beam-size", type=int, default=5, help="ASR beam size。")
-    parser.add_argument("--translation-model", default="gpt-5.4-mini", help="翻译使用的 OpenAI 兼容模型名。")
+    parser.add_argument("--asr-audio-mode", default="off", choices=["off", "whisper", "strong_whisper"], help="ASR 前增强音频模式。")
+    parser.add_argument("--asr-audio-gain-db", type=float, default=6.0, help="增强音频额外增益。")
+    parser.add_argument("--asr-vad", default="auto", choices=["auto", "on", "off"], help="ASR VAD 策略。")
+    parser.add_argument("--translation-model", default="gpt-5.4", help="翻译使用的 OpenAI 兼容模型名。")
     parser.add_argument("--translation-chunk-size", type=int, default=40, help="每次翻译的字幕行数。")
     parser.add_argument("--translation-retries", type=int, default=2, help="翻译分块失败时的重试次数。")
     parser.add_argument("--openai-base-url", default=None, help="OpenAI 兼容中转地址；不填则读取环境变量。")
@@ -67,6 +70,9 @@ def main() -> None:
         device=args.device,
         compute_type=args.compute_type,
         beam_size=args.beam_size,
+        asr_audio_mode=args.asr_audio_mode,
+        asr_audio_gain_db=args.asr_audio_gain_db,
+        asr_vad_mode=args.asr_vad,
         translation_model=args.translation_model,
         translation_chunk_size=args.translation_chunk_size,
         translation_retries=args.translation_retries,

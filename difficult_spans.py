@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from .models import Segment
-from .text_quality import find_text_pollution
+from .text_quality import find_text_pollution, find_untranslated_discourse_markers
 
 
 SOURCE_CONTINUATION_WORDS = {
@@ -156,6 +156,13 @@ def evaluate_segment(segment: Segment, index: int, *, zh_max_cps: float = 18.0, 
     pollution = find_text_pollution(target_text, dst_lang="zh-Hans")
     if pollution:
         risk.add("target_text_pollution", "; ".join(pollution), 6)
+    discourse_markers = find_untranslated_discourse_markers(target_text, dst_lang="zh-Hans")
+    if discourse_markers:
+        risk.add(
+            "target_untranslated_discourse_marker",
+            "untranslated discourse marker(s): " + ", ".join(discourse_markers),
+            6,
+        )
 
     suspicious_words = suspicious_source_words(source_text)
     if suspicious_words:
@@ -209,7 +216,12 @@ def expand_span(segments: list[Segment], risks: list[SegmentRisk], center_index:
 
 
 def span_severity(score: int, reason_codes: set[str]) -> str:
-    if reason_codes & {"target_text_pollution", "target_too_short", "source_suspicious_asr_word"}:
+    if reason_codes & {
+        "target_text_pollution",
+        "target_too_short",
+        "source_suspicious_asr_word",
+        "target_untranslated_discourse_marker",
+    }:
         return "high"
     if (
         "target_open_ending" in reason_codes

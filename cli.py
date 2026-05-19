@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from .asr import transcribe_audio
-from .media import extract_audio, probe_media
+from .media import enhance_audio_for_asr, extract_audio, probe_media
 from .qa import qa_check
 from .segment_io import load_segments, save_segments
 from .style_learning import write_style_learning_artifacts
@@ -57,9 +57,22 @@ def parse_args() -> argparse.Namespace:
         help="ASR 解码 beam size；更高可能提升质量，但会变慢。",
     )
     parser.add_argument(
-        "--no-vad",
-        action="store_true",
-        help="关闭 ASR 阶段的 VAD 静音过滤。",
+        "--asr-audio-mode",
+        default="off",
+        choices=["off", "whisper", "strong_whisper"],
+        help="ASR 前是否生成增强音频；whisper 会轻度增强，strong_whisper 会更激进。",
+    )
+    parser.add_argument(
+        "--asr-audio-gain-db",
+        type=float,
+        default=6.0,
+        help="增强音频时额外提升的分贝数。",
+    )
+    parser.add_argument(
+        "--asr-vad",
+        default="auto",
+        choices=["auto", "on", "off"],
+        help="ASR 阶段的 VAD 策略；auto 在增强模式下默认关闭。",
     )
     parser.add_argument(
         "--work-dir",
@@ -79,7 +92,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--translation-model",
-        default="gpt-5.4-mini",
+        default="gpt-5.4",
         help="字幕翻译使用的 OpenAI 兼容模型名。",
     )
     parser.add_argument(
@@ -203,15 +216,25 @@ def main() -> None:
         # ASR 阶段只负责源语言文本和时间轴；翻译放到后续阶段，便于单独排查问题。
         print(f"Extracting audio to: {work_dir}")
         audio_path = extract_audio(input_path, work_dir=work_dir)
-        print(f"Running faster-whisper model '{args.model}' on: {audio_path}")
+        asr_input_path = audio_path
+        if args.asr_audio_mode != "off":
+            enhanced_path = work_dir / "01b_audio_asr_enhanced.wav"
+            print(f"Enhancing ASR audio ({args.asr_audio_mode}) to: {enhanced_path}")
+            asr_input_path = enhance_audio_for_asr(
+                audio_path,
+                enhanced_path,
+                mode=args.asr_audio_mode,
+                gain_db=args.asr_audio_gain_db,
+            )
+        print(f"Running faster-whisper model '{args.model}' on: {asr_input_path}")
         segments = transcribe_audio(
-            audio_path,
+            asr_input_path,
             model_name=args.model,
             language=args.src_lang,
             device=args.device,
             compute_type=args.compute_type,
             beam_size=args.beam_size,
-            vad_filter=not args.no_vad,
+            vad_filter=(args.asr_vad == "on") or (args.asr_vad == "auto" and args.asr_audio_mode == "off"),
         )
         segments = refine_timing(segments)
 

@@ -156,6 +156,22 @@ def build_editor_review_rows(
                     note=note.replace(sample_suffix, ""),
                 )
 
+    translation_metrics = (quality_metrics or {}).get("translation") if isinstance(quality_metrics, dict) else {}
+    if isinstance(translation_metrics, dict):
+        for sample in translation_metrics.get("untranslated_discourse_marker_samples") or []:
+            if not isinstance(sample, dict):
+                continue
+            markers = ", ".join(str(value) for value in sample.get("markers") or [])
+            add_row(
+                segment_id=int(sample.get("segment_id") or 0),
+                risk_type="untranslated_discourse_marker",
+                severity="high",
+                risk_score=10,
+                source_text=str(sample.get("source_text") or ""),
+                target_text=str(sample.get("target_text") or ""),
+                note=f"Translate discourse marker(s) according to context: {markers}",
+            )
+
     rows.sort(key=lambda row: (-int(row["risk_score"]), row["severity"], int(row["segment_id"])))
     return rows
 

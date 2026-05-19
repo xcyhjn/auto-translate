@@ -102,6 +102,8 @@ def build_span_repair_prompt(
         "- Do not shift meaning into the previous or next ID; do not leave fragments like a lone noun, punctuation, or dangling connector.\n"
         "- If the ASR source has an obvious typo, infer the intended phrase from context, but keep the repair concise.\n"
         "- Preserve names, numbers, album titles, and technical terms according to the glossary.\n"
+        "- Do not preserve conversational discourse markers as English or as proper nouns. Words like because, maybe, right, well, okay, so, actually, basically, just, like, yeah, and sure must be translated or naturally absorbed into the Chinese line.\n"
+        "- For ambiguous discourse markers, sample the Chinese meaning from context: right can be 对吧/是吧/好了/正确/右边, maybe can be 也许/可能/要不, because can be 因为/是因为/毕竟. Keep English only for literal UI/code labels.\n"
         "- Do not include Devanagari, Cyrillic, Arabic, Korean, Japanese, replacement characters, mojibake, markdown, or manual line breaks.\n\n"
         f"Style guidance:\n{build_style_guidance(style_prompt_text)}\n\n"
         f"{style_glossary_hints(glossary_text)}\n"

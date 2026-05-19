@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Autosub Studio</title>
-    <link rel="stylesheet" href="./styles.css?v=20260514-utf8fix1" />
+    <link rel="stylesheet" href="./styles.css?v=20260519-stability1" />
   </head>
   <body>
     <div class="app-shell">
@@ -143,6 +143,10 @@
             <div class="card-toolbar">
               <button id="openYoutubeOutputBtn" class="mini-btn">打开信息输出</button>
             </div>
+            <div class="input-ass-tools">
+              <div id="inputAssStatus" class="input-ass-status idle">请先选择一个 input 视频</div>
+              <button id="reburnFromInputBtn" class="mini-btn" type="button" disabled>按当前双语字幕 ASS 重新烧录</button>
+            </div>
             <div class="preview-pane youtube-preview">
               <img id="youtubeCoverPreview" class="video-preview hidden" alt="YouTube cover" />
               <pre id="youtubeInfoPreview" class="text-preview"></pre>
@@ -188,8 +192,36 @@
                 <div class="form-grid">
                   <label><span>源语言</span><input id="src_lang" type="text" /></label>
                   <label><span>识别模型</span><input id="model" type="text" /></label>
-                  <label><span>运行设备</span><input id="device" type="text" /></label>
-                  <label><span>计算类型</span><input id="compute_type" type="text" /></label>
+                  <label><span>低语增强</span>
+                    <select id="asr_audio_mode">
+                      <option value="off">off</option>
+                      <option value="whisper">whisper</option>
+                      <option value="strong_whisper">strong_whisper</option>
+                    </select>
+                  </label>
+                  <label><span>增强增益 dB</span><input id="asr_audio_gain_db" type="number" step="0.5" /></label>
+                  <label><span>VAD 策略</span>
+                    <select id="asr_vad_mode">
+                      <option value="auto">auto</option>
+                      <option value="on">on</option>
+                      <option value="off">off</option>
+                    </select>
+                  </label>
+                  <label><span>运行设备</span>
+                    <select id="device">
+                      <option value="auto">auto</option>
+                      <option value="cpu">cpu</option>
+                      <option value="cuda">cuda</option>
+                    </select>
+                  </label>
+                  <label><span>计算类型</span>
+                    <select id="compute_type">
+                      <option value="default">default</option>
+                      <option value="float16">float16</option>
+                      <option value="int8_float16">int8_float16</option>
+                      <option value="int8">int8</option>
+                    </select>
+                  </label>
                   <label><span>Beam Size</span><input id="beam_size" type="number" /></label>
                   <label><span>调试预览秒数</span><input id="preview_seconds" type="number" /></label>
                 </div>
@@ -205,11 +237,13 @@
                 <div class="form-grid">
                   <label><span>目标语言</span><input id="dst_lang" type="text" /></label>
                   <label><span>翻译模型</span><input id="translation_model" type="text" /></label>
+                  <label class="wide"><span>Prompt 注入</span><textarea id="translation_prompt" rows="5"></textarea></label>
                   <label><span>Chunk Size</span><input id="translation_chunk_size" type="number" /></label>
                   <label><span>重试次数</span><input id="translation_retries" type="number" /></label>
                   <label class="wide"><span>OpenAI Base URL</span><input id="openai_base_url" type="text" /></label>
                   <label class="wide"><span>附加音频路径</span><input id="audio_override_path" type="text" readonly /></label>
                   <label class="toggle-row"><span>复用已有分段</span><input id="load_existing_segments" type="checkbox" /></label>
+                  <label class="toggle-row"><span>强制重翻译已有分段</span><input id="force_retranslate_existing_segments" type="checkbox" /></label>
                   <label class="toggle-row"><span>只输出到 ASS</span><input id="skip_burn" type="checkbox" /></label>
                   <label class="toggle-row"><span>启用难句 AI 修复</span><input id="repair_high_risk_spans" type="checkbox" /></label>
                   <label><span>最多修复 Span</span><input id="span_repair_max_spans" type="number" min="0" /></label>
@@ -231,12 +265,46 @@
                     <div class="form-grid compact">
                       <label><span>字体</span><input id="zh_font_name" type="text" /></label>
                       <label><span>字号</span><input id="zh_font_size" type="number" /></label>
+                      <label><span>描边宽度</span><input id="zh_outline_width" type="number" min="0" max="12" step="0.1" /></label>
+                      <label><span>阴影深度</span><input id="zh_shadow_depth" type="number" min="0" max="12" step="0.1" /></label>
                       <label><span>左边距</span><input id="zh_margin_l" type="number" /></label>
                       <label><span>右边距</span><input id="zh_margin_r" type="number" /></label>
                       <label><span>底边距</span><input id="zh_margin_v" type="number" /></label>
                       <label><span>换行触发</span><input id="zh_wrap_trigger_chars" type="number" min="8" /></label>
                       <label><span>单行上限</span><input id="zh_max_chars_per_line" type="number" min="8" /></label>
                       <label><span>最多行数</span><input id="zh_max_lines" type="number" min="1" /></label>
+                    </div>
+                    <div class="color-toolbox">
+                      <div class="subtitle-preview-frame">
+                        <div id="zhStylePreview" class="subtitle-preview-text">中文字幕预览</div>
+                      </div>
+                      <div class="color-control-grid">
+                        <div class="color-control">
+                          <div class="color-control-head">
+                            <span>正文颜色</span>
+                            <input id="zh_primary_color" type="color" />
+                            <input id="zh_primary_color_hex" class="color-hex-input" type="text" maxlength="7" />
+                          </div>
+                          <label class="range-row"><span>不透明度</span><input id="zh_primary_opacity" type="range" min="0" max="100" /><output id="zh_primary_opacity_value"></output></label>
+                        </div>
+                        <div class="color-control">
+                          <div class="color-control-head">
+                            <span>描边颜色</span>
+                            <input id="zh_outline_color" type="color" />
+                            <input id="zh_outline_color_hex" class="color-hex-input" type="text" maxlength="7" />
+                          </div>
+                          <label class="range-row"><span>不透明度</span><input id="zh_outline_opacity" type="range" min="0" max="100" /><output id="zh_outline_opacity_value"></output></label>
+                        </div>
+                        <div class="color-control">
+                          <div class="color-control-head">
+                            <span>阴影颜色</span>
+                            <input id="zh_shadow_color" type="color" />
+                            <input id="zh_shadow_color_hex" class="color-hex-input" type="text" maxlength="7" />
+                          </div>
+                          <label class="range-row"><span>不透明度</span><input id="zh_shadow_opacity" type="range" min="0" max="100" /><output id="zh_shadow_opacity_value"></output></label>
+                        </div>
+                      </div>
+                      <button id="resetZhColorBtn" class="mini-btn color-reset-btn" type="button">重置颜色</button>
                     </div>
                   </div>
                   <div class="style-card">
@@ -286,6 +354,11 @@
                 </div>
               </section>
             </div>
+
+            <div class="config-save-bar">
+              <div id="configSaveState" class="config-save-state saved">当前配置已保存</div>
+              <button id="saveConfigBottomBtn" class="primary-btn" type="button">永久保存当前配置</button>
+            </div>
           </section>
         </section>
       </main>
@@ -293,6 +366,6 @@
 
     <div id="toast" class="toast hidden"></div>
 
-    <script src="./app.js?v=20260515-reburn1"></script>
+    <script src="./app.js?v=20260519-stability1"></script>
   </body>
 </html>

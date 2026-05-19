@@ -10,7 +10,7 @@ from typing import Callable
 
 from .models import Segment
 from .style_rules import build_style_guidance, load_style_prompt_text
-from .text_quality import find_text_pollution
+from .text_quality import TRANSLATABLE_DISCOURSE_MARKERS, find_text_pollution
 
 TranslationProgressCallback = Callable[[str, dict], None]
 TRANSLATABLE_FUNCTION_WORDS = {
@@ -211,6 +211,8 @@ def extract_preserve_terms(glossary_text: str) -> set[str]:
         if "policy=preserve" not in stripped:
             continue
         normalized = normalize_term_text(canonical)
+        if normalized in TRANSLATABLE_DISCOURSE_MARKERS:
+            continue
         if normalized:
             preserved.add(normalized)
     return preserved
@@ -226,6 +228,8 @@ def extract_preserve_term_map(glossary_text: str) -> dict[str, str]:
         if not canonical or "policy=preserve" not in stripped:
             continue
         normalized = normalize_term_text(canonical)
+        if normalized in TRANSLATABLE_DISCOURSE_MARKERS:
+            continue
         if normalized and normalized not in preserved:
             preserved[normalized] = canonical
     return preserved
@@ -375,6 +379,8 @@ def build_translation_prompt(
         "- Keep the translation concise; avoid explanatory expansion.\n"
         "- If the target language is Chinese, every translatable English fragment must contain Chinese words, not only punctuation.\n"
         "- Preserve names, numbers, and domain terms according to the glossary.\n\n"
+        "- Do not treat conversational discourse markers as glossary terms or proper nouns. Words like because, maybe, right, well, okay, so, actually, basically, just, like, yeah, and sure must be translated or naturally absorbed into the Chinese line.\n"
+        "- For ambiguous discourse markers, choose the Chinese rendering from context: right can mean 对吧/是吧/好了/正确/右边, maybe can mean 也许/可能/要不, because can mean 因为/是因为/毕竟. Do not leave them in English unless they are part of a literal UI/code label.\n"
         "- Do not add manual line breaks, markdown, bullets, or numbering inside target_text.\n"
         "- Preserve the input IDs exactly; each ID must return one complete translation.\n"
         "- Translate each input ID as its own on-screen subtitle; do not omit it or merge its meaning into another ID.\n"
@@ -611,6 +617,7 @@ def translate_segments(
     context_window: int = 4,
     locked_segment_ids: set[int] | None = None,
     style_prompt_path: str | None = None,
+    style_prompt_text: str | None = None,
     progress_callback: TranslationProgressCallback | None = None,
 ) -> list[Segment]:
     if not enabled:
@@ -625,7 +632,10 @@ def translate_segments(
         raise ValueError("dst_lang is required when translation is enabled.")
 
     glossary_text = load_glossary(glossary)
-    style_prompt_text = load_style_prompt_text(style_prompt_path)
+    loaded_style_prompt_text = load_style_prompt_text(style_prompt_path)
+    style_prompt_text = "\n\n".join(
+        item for item in [style_prompt_text or "", loaded_style_prompt_text] if item.strip()
+    )
     preserve_term_map = extract_preserve_term_map(glossary_text)
     resolved_base_url = resolve_openai_base_url(openai_base_url)
     locked_segment_ids = locked_segment_ids or set()

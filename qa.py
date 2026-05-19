@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .models import Segment, SubtitleRules
 from .subtitle_io import DisplayCue, wrap_chinese_text, normalize_inline_text
-from .text_quality import find_text_pollution, format_pollution_issues
+from .text_quality import find_text_pollution, find_untranslated_discourse_markers, format_pollution_issues
 
 DEFAULT_MAX_CHARS = 42
 DEFAULT_MAX_CPS = 18.0
@@ -52,6 +52,7 @@ DIFFICULT_SPAN_BLOCKING_REASON_CODES = {
     "source_suspicious_asr_word",
     "target_text_pollution",
     "target_too_short",
+    "target_untranslated_discourse_marker",
 }
 
 
@@ -292,10 +293,12 @@ def build_quality_metrics(
             "empty_target_count": 0,
             "target_without_chinese_count": 0,
             "text_pollution_count": 0,
+            "untranslated_discourse_marker_count": 0,
             "source_echo_ids": [],
             "empty_target_ids": [],
             "target_without_chinese_ids": [],
             "text_pollution_samples": [],
+            "untranslated_discourse_marker_samples": [],
         },
         "display": {
             "empty_chinese_cue_count": 0,
@@ -359,6 +362,18 @@ def build_quality_metrics(
                     "segment_id": segment.id,
                     "issues": pollution_issues,
                     "text": target_text,
+                },
+            )
+        discourse_markers = find_untranslated_discourse_markers(target_text, dst_lang=dst_lang)
+        if discourse_markers:
+            metrics["translation"]["untranslated_discourse_marker_count"] += 1
+            append_sample(
+                metrics["translation"]["untranslated_discourse_marker_samples"],
+                {
+                    "segment_id": segment.id,
+                    "markers": discourse_markers,
+                    "source_text": source_text,
+                    "target_text": target_text,
                 },
             )
 
@@ -487,6 +502,7 @@ def build_quality_metrics(
         + metrics["translation"]["empty_target_count"]
         + metrics["translation"]["target_without_chinese_count"]
         + metrics["translation"]["text_pollution_count"]
+        + metrics["translation"]["untranslated_discourse_marker_count"]
         + metrics["display"]["empty_chinese_cue_count"]
         + metrics["display"]["chinese_line_hard_over_count"]
         + metrics["display"]["chinese_cps_hard_over_count"]
@@ -560,6 +576,12 @@ def qa_check(
                 f"Segment {segment.id} target text contains suspicious polluted text: "
                 f"{format_pollution_issues(pollution_issues)}."
             )
+        discourse_markers = find_untranslated_discourse_markers(segment.target_text or "", dst_lang=dst_lang)
+        if discourse_markers:
+            report.errors.append(
+                f"Segment {segment.id} keeps translatable discourse marker(s) in Chinese target: "
+                f"{', '.join(discourse_markers)}."
+            )
 
         if previous_text and text == previous_text:
             report.warnings.append(
@@ -626,6 +648,12 @@ def qa_display_cues(
             report.errors.append(
                 f"Display cue {index} Chinese text contains suspicious polluted text: "
                 f"{format_pollution_issues(pollution_issues)}."
+            )
+        discourse_markers = find_untranslated_discourse_markers(zh_text, dst_lang=dst_lang)
+        if discourse_markers:
+            report.errors.append(
+                f"Display cue {index} keeps translatable discourse marker(s) in Chinese text: "
+                f"{', '.join(discourse_markers)}."
             )
 
         if zh_text:
@@ -768,6 +796,12 @@ def qa_final_ass_file(
                 report.errors.append(
                     f"Final ASS dialogue {index} Chinese text contains suspicious polluted text: "
                     f"{format_pollution_issues(pollution_issues)}."
+                )
+            discourse_markers = find_untranslated_discourse_markers(text, dst_lang=dst_lang)
+            if discourse_markers:
+                report.errors.append(
+                    f"Final ASS dialogue {index} keeps translatable discourse marker(s) in Chinese text: "
+                    f"{', '.join(discourse_markers)}."
                 )
             for line_number, line in enumerate(text.splitlines() or [text], start=1):
                 line_length = visible_length(line)

@@ -411,6 +411,47 @@ body {
   background: rgba(15, 122, 255, 0.08);
 }
 
+.input-ass-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 14px;
+  flex-wrap: wrap;
+}
+
+.input-ass-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.input-ass-status.saved {
+  color: #157347;
+  border-color: rgba(28, 183, 117, 0.25);
+  background: rgba(28, 183, 117, 0.08);
+}
+
+.input-ass-status.dirty {
+  color: #9a6700;
+  border-color: rgba(241, 163, 0, 0.28);
+  background: rgba(241, 163, 0, 0.12);
+}
+
+.input-ass-status.idle {
+  color: var(--muted);
+}
+
+#reburnFromAssBtn {
+  display: none;
+}
+
 .meta-row {
   display: flex;
   justify-content: space-between;
@@ -599,6 +640,46 @@ body {
 .workspace-panel { display: none; }
 .workspace-panel.active { display: block; }
 
+.config-save-bar {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.config-save-state {
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.config-save-state.saved {
+  color: #157347;
+  border-color: rgba(28, 183, 117, 0.25);
+  background: rgba(28, 183, 117, 0.08);
+}
+
+.config-save-state.dirty {
+  color: #9a6700;
+  border-color: rgba(241, 163, 0, 0.28);
+  background: rgba(241, 163, 0, 0.12);
+}
+
+.config-save-state.saving {
+  color: var(--accent);
+  border-color: rgba(15, 122, 255, 0.22);
+  background: rgba(15, 122, 255, 0.08);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -620,19 +701,32 @@ body {
 
 input[type="text"],
 input[type="number"],
+input[type="color"],
+textarea,
 select {
-  width: 100%;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.88);
-  border-radius: 14px;
-  padding: 14px 14px;
-  font-size: 14px;
-  color: var(--text);
-}
+    width: 100%;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.88);
+    border-radius: 14px;
+    padding: 14px 14px;
+    font-size: 14px;
+    color: var(--text);
+  }
+
+  textarea {
+    min-height: 120px;
+    resize: vertical;
+    line-height: 1.55;
+  }
 
 input[type="checkbox"] {
   width: 18px;
   height: 18px;
+  accent-color: var(--accent);
+}
+
+input[type="range"] {
+  width: 100%;
   accent-color: var(--accent);
 }
 
@@ -651,6 +745,88 @@ input[type="checkbox"] {
 }
 
 .style-card h4 { margin: 0 0 12px; }
+
+.color-toolbox {
+  margin-top: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.subtitle-preview-frame {
+  min-height: 180px;
+  display: grid;
+  place-items: end center;
+  padding: 18px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(rgba(18, 23, 33, 0.18), rgba(18, 23, 33, 0.18)),
+    linear-gradient(135deg, #527394 0%, #b8c4cc 48%, #273241 100%);
+}
+
+.subtitle-preview-text {
+  max-width: 92%;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.16;
+  overflow-wrap: anywhere;
+}
+
+.color-control-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.color-control {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.color-control-head {
+  display: grid;
+  grid-template-columns: minmax(88px, 1fr) 44px minmax(92px, 120px);
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.color-control input[type="color"] {
+  width: 44px;
+  height: 42px;
+  padding: 4px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.color-hex-input {
+  min-width: 0;
+  font-family: Consolas, "Maple Mono NF CN", monospace;
+  text-transform: uppercase;
+}
+
+.range-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 48px;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.range-row output {
+  text-align: right;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.color-reset-btn {
+  justify-self: start;
+}
 
 .preview-pane {
   min-height: 520px;

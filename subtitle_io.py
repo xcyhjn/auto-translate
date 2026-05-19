@@ -76,6 +76,43 @@ def escape_ass_text(text: str) -> str:
     )
 
 
+def normalize_hex_color(value: object, fallback: str = "#FFFFFF") -> str:
+    raw = str(value or "").strip()
+    if raw.startswith("#"):
+        raw = raw[1:]
+    if len(raw) == 3 and re.fullmatch(r"[0-9a-fA-F]{3}", raw):
+        raw = "".join(ch * 2 for ch in raw)
+    if not re.fullmatch(r"[0-9a-fA-F]{6}", raw):
+        raw = fallback.lstrip("#")
+    return f"#{raw.upper()}"
+
+
+def clamp_int(value: object, minimum: int, maximum: int, fallback: int) -> int:
+    try:
+        parsed = int(round(float(value)))
+    except (TypeError, ValueError):
+        parsed = fallback
+    return max(minimum, min(maximum, parsed))
+
+
+def clamp_float(value: object, minimum: float, maximum: float, fallback: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = fallback
+    return max(minimum, min(maximum, parsed))
+
+
+def ass_color(hex_color: object, opacity_percent: object = 100, fallback: str = "#FFFFFF") -> str:
+    normalized = normalize_hex_color(hex_color, fallback=fallback).lstrip("#")
+    opacity = clamp_int(opacity_percent, 0, 100, 100)
+    alpha = round(255 * (100 - opacity) / 100)
+    red = normalized[0:2]
+    green = normalized[2:4]
+    blue = normalized[4:6]
+    return f"&H{alpha:02X}{blue}{green}{red}"
+
+
 def normalize_inline_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
 
@@ -846,6 +883,11 @@ def write_bilingual_ass(
     ensure_parent(output_path)
     if style is None:
         style = BilingualSubtitleStyle()
+    zh_primary = ass_color(style.zh_primary_color, style.zh_primary_opacity, fallback="#FFFFFF")
+    zh_outline = ass_color(style.zh_outline_color, style.zh_outline_opacity, fallback="#141414")
+    zh_shadow = ass_color(style.zh_shadow_color, style.zh_shadow_opacity, fallback="#000000")
+    zh_outline_width = clamp_float(style.zh_outline_width, 0.0, 12.0, 2.2)
+    zh_shadow_depth = clamp_float(style.zh_shadow_depth, 0.0, 12.0, 0.6)
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -857,7 +899,7 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style.zh_font_name},{style.zh_font_size},&H00FFFFFF,&H000000FF,&H00141414,&H64000000,0,0,0,0,100,100,0,0,1,2.2,0.6,2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
+Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,0,0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
 Style: EnglishSmall,{style.en_font_name},{style.en_font_size},&H00E8E8E8,&H000000FF,&H00141414,&H50000000,0,0,0,0,100,100,0,0,1,1.6,0.4,2,{style.en_margin_l},{style.en_margin_r},{style.en_margin_v},1
 
 [Events]
@@ -897,6 +939,11 @@ def write_zh_ass(
     ensure_parent(output_path)
     if style is None:
         style = BilingualSubtitleStyle()
+    zh_primary = ass_color(style.zh_primary_color, style.zh_primary_opacity, fallback="#FFFFFF")
+    zh_outline = ass_color(style.zh_outline_color, style.zh_outline_opacity, fallback="#141414")
+    zh_shadow = ass_color(style.zh_shadow_color, style.zh_shadow_opacity, fallback="#000000")
+    zh_outline_width = clamp_float(style.zh_outline_width, 0.0, 12.0, 2.2)
+    zh_shadow_depth = clamp_float(style.zh_shadow_depth, 0.0, 12.0, 0.6)
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -908,7 +955,7 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style.zh_font_name},{style.zh_font_size},&H00FFFFFF,&H000000FF,&H00141414,&H64000000,0,0,0,0,100,100,0,0,1,2.2,0.6,2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
+Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,0,0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

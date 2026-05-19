@@ -4,6 +4,40 @@ import re
 import unicodedata
 
 
+TRANSLATABLE_DISCOURSE_MARKERS = {
+    "actually",
+    "again",
+    "alright",
+    "anyway",
+    "basically",
+    "because",
+    "cause",
+    "exactly",
+    "honestly",
+    "just",
+    "like",
+    "literally",
+    "maybe",
+    "okay",
+    "ok",
+    "right",
+    "see",
+    "seriously",
+    "so",
+    "sure",
+    "then",
+    "though",
+    "well",
+    "yeah",
+    "yep",
+    "yes",
+}
+DISCOURSE_MARKER_RE = re.compile(
+    rf"(?<![A-Za-z0-9_.-])({'|'.join(sorted(map(re.escape, TRANSLATABLE_DISCOURSE_MARKERS), key=len, reverse=True))})(?![A-Za-z0-9_-])",
+    re.IGNORECASE,
+)
+
+
 DISALLOWED_SCRIPT_RANGES = (
     (0x0370, 0x03FF, "Greek"),
     (0x0400, 0x052F, "Cyrillic"),
@@ -101,6 +135,43 @@ def find_text_pollution(text: str, *, dst_lang: str | None = None, sample_limit:
             break
 
     return issues[:sample_limit]
+
+
+def is_chinese_target_language(dst_lang: str | None) -> bool:
+    normalized = (dst_lang or "").strip().lower()
+    return normalized.startswith("zh") or "chinese" in normalized
+
+
+def contains_chinese(text: str) -> bool:
+    return bool(re.search(r"[\u3400-\u9fff]", text or ""))
+
+
+def find_untranslated_discourse_markers(
+    text: str,
+    *,
+    dst_lang: str | None = None,
+    sample_limit: int = 5,
+) -> list[str]:
+    if not text or not is_chinese_target_language(dst_lang):
+        return []
+    if not contains_chinese(text):
+        return []
+    markers: list[str] = []
+    seen: set[str] = set()
+    for match in DISCOURSE_MARKER_RE.finditer(text):
+        marker = match.group(1)
+        key = marker.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        markers.append(marker)
+        if len(markers) >= sample_limit:
+            break
+    return markers
+
+
+def has_untranslated_discourse_marker(text: str, *, dst_lang: str | None = None) -> bool:
+    return bool(find_untranslated_discourse_markers(text, dst_lang=dst_lang, sample_limit=1))
 
 
 def has_text_pollution(text: str, *, dst_lang: str | None = None) -> bool:

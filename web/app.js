@@ -6,6 +6,9 @@ const state = {
   selectedVideo: null,
   selectedProject: null,
   selectedFilePath: null,
+  selectedFileProjectPath: null,
+  selectedVideoProjectPath: null,
+  selectedVideoProject: null,
   polling: null,
   proxyStatus: null,
   idmStatus: null,
@@ -13,8 +16,105 @@ const state = {
   selectedMediaInfo: null,
   mediaInspectToken: 0,
   lastErrorPayload: null,
+  runtime: null,
   pollCount: 0,
+  formDirty: false,
+  configSaveState: "saved",
 };
+
+const DEFAULT_UI_CONFIG = {
+  src_lang: "en",
+  dst_lang: "zh-Hans",
+  model: "distil-large-v3",
+  asr_audio_mode: "off",
+  asr_audio_gain_db: 6.0,
+  asr_vad_mode: "auto",
+  device: "cuda",
+  compute_type: "float16",
+  beam_size: 5,
+  translation_model: "gpt-5.4",
+  translation_prompt:
+    "Prioritize faithful meaning over literal wording. Preserve casual spoken tone, hesitation, intimacy, jokes, sarcasm, and implied meaning when present. Translate spoken English into natural Simplified Chinese subtitles, not formal written Chinese. Keep the line concise and subtitle-friendly; do not add explanations.",
+  translation_chunk_size: 24,
+  translation_retries: 4,
+  openai_base_url: "",
+  audio_override_path: "",
+  preview_seconds: null,
+  load_existing_segments: false,
+  force_retranslate_existing_segments: false,
+  skip_burn: false,
+  repair_high_risk_spans: true,
+  span_repair_max_spans: 12,
+  enable_ai_display_rewrite: false,
+  display_rewrite_max_ai_segments: 12,
+  download_backend: "auto",
+  idm_exe_path: "",
+  idm_output_dir: "",
+  idm_wait_timeout_seconds: 1800,
+  idm_stable_seconds: 8,
+  download_keep_intermediate_files: false,
+  download_manual_fallback: true,
+  style: {
+    zh_font_name: "Maple Mono NF CN",
+    zh_font_size: 64,
+    zh_primary_color: "#FFFFFF",
+    zh_primary_opacity: 100,
+    zh_outline_color: "#141414",
+    zh_outline_opacity: 100,
+    zh_shadow_color: "#000000",
+    zh_shadow_opacity: 60,
+    zh_outline_width: 2.2,
+    zh_shadow_depth: 0.6,
+    zh_margin_l: 90,
+    zh_margin_r: 90,
+    zh_margin_v: 94,
+    zh_wrap_trigger_chars: 32,
+    zh_max_chars_per_line: 28,
+    zh_max_lines: 2,
+    en_font_name: "Arial",
+    en_font_size: 40,
+    en_margin_l: 80,
+    en_margin_r: 100,
+    en_margin_v: 44,
+    en_max_single_line_chars: 78,
+    en_max_split_parts: 3,
+    min_split_duration: 0.9,
+    reference_mode: "compact",
+  },
+};
+
+function normalizeUiConfig(config) {
+  const incoming = config && typeof config === "object" ? config : {};
+  const incomingStyle = incoming.style && typeof incoming.style === "object" ? incoming.style : {};
+  return {
+    ...DEFAULT_UI_CONFIG,
+    ...incoming,
+    style: {
+      ...DEFAULT_UI_CONFIG.style,
+      ...incomingStyle,
+    },
+  };
+}
+
+function syncLocalConfigFromForm() {
+  state.config = normalizeUiConfig(readFormConfig());
+}
+
+function markConfigDirty() {
+  state.formDirty = true;
+  syncLocalConfigFromForm();
+  state.configSaveState = "dirty";
+  renderConfigSaveState();
+}
+
+function clearConfigDirty(config = null) {
+  if (config) {
+    state.config = normalizeUiConfig(config);
+  }
+  state.formDirty = false;
+  state.configSaveState = "saved";
+  renderConfigSaveState();
+}
 
 const phaseLabels = {
   audio_extract: "音频提取",
@@ -34,8 +134,15 @@ const summaryLabels = {
   path: "输出路径",
   input_path: "输入路径",
   audio_path: "音频路径",
+  source_audio_path: "原始音频",
+  enhanced_audio_path: "增强音频",
   merged_path: "合并路径",
   output_dir: "输出目录",
+  audio_mode: "音频模式",
+  enhancement_mode: "增强模式",
+  vad_mode: "VAD 策略",
+  vad_filter: "VAD 开关",
+  gain_db: "增益 dB",
   duration_seconds: "总时长",
   processed_seconds: "已处理",
   remaining_seconds: "剩余时间",
@@ -105,6 +212,81 @@ function setRunState(stateText) {
   el("runStatePill").textContent = stateText;
 }
 
+function setTaskButtonsDisabled(disabled) {
+  ["runBtn", "previewBtn", "downloadOnlyBtn", "downloadAndRunBtn"].forEach((id) => {
+    const node = el(id);
+    if (node) node.disabled = disabled;
+  });
+}
+
+function taskIsBusy(runtime) {
+  return !["idle", "complete", "error", "recovered_state"].includes(String(runtime?.stage_key || "idle"));
+}
+
+function findProjectForSelectedVideo() {
+  const videoPath = state.selectedVideo?.path || "";
+  if (!videoPath) return null;
+  const normalizedVideoPath = String(videoPath).toLowerCase();
+  return (
+    state.projects.find((project) => {
+      const inputVideo = String(project.input_video || "").toLowerCase();
+      const inputVideoName = String(project.input_video_name || "").toLowerCase();
+      return inputVideo === normalizedVideoPath || inputVideoName === normalizedVideoPath.split("\\").pop();
+    }) || null
+  );
+}
+
+function renderInputAssStatus() {
+  const statusNode = el("inputAssStatus");
+  const buttonNode = el("reburnFromInputBtn");
+  if (!statusNode || !buttonNode) return;
+
+  const project = state.selectedVideoProject;
+  const busy = taskIsBusy(state.runtime);
+  buttonNode.disabled = busy || !project?.ass_path;
+
+  if (!state.selectedVideo) {
+    statusNode.textContent = "请先选择一个 input 视频";
+    statusNode.className = "input-ass-status idle";
+    return;
+  }
+  if (!project) {
+    statusNode.textContent = "当前 input 还没有对应输出项目";
+    statusNode.className = "input-ass-status idle";
+    return;
+  }
+  if (!project.ass_path) {
+    statusNode.textContent = "对应项目里还没有双语 ASS";
+    statusNode.className = "input-ass-status idle";
+    return;
+  }
+  if (!project.burned_video_path) {
+    statusNode.textContent = "已找到双语 ASS，尚未烧录成视频";
+    statusNode.className = "input-ass-status dirty";
+    return;
+  }
+
+  const assTime = Number(project.ass_mtime_ts || 0);
+  const burnedTime = Number(project.burned_video_mtime_ts || 0);
+  if (assTime > burnedTime + 0.001) {
+    statusNode.textContent = "双语 ASS 已修改，建议重新烧录";
+    statusNode.className = "input-ass-status dirty";
+    return;
+  }
+  statusNode.textContent = "当前烧录视频已和双语 ASS 同步";
+  statusNode.className = "input-ass-status saved";
+}
+
+function updateFileActionButtons() {
+  const isAss = /\.ass$/i.test(state.selectedFilePath || "");
+  const reburnFromAssBtn = el("reburnFromAssBtn");
+  if (reburnFromAssBtn) {
+    reburnFromAssBtn.disabled = !isAss || taskIsBusy(state.runtime);
+  }
+  el("learnStyleBtn").disabled = !isAss;
+  renderInputAssStatus();
+}
+
 function setLinkedAudioLabel(path) {
   el("linkedAudioLabel").textContent = `当前附加音频：${path || "未设置"}`;
 }
@@ -130,6 +312,19 @@ function showToast(message) {
   }, 1800);
 }
 
+function renderConfigSaveState() {
+  const node = el("configSaveState");
+  if (!node) return;
+  if (state.configSaveState === "saving") {
+    node.textContent = "正在保存当前配置";
+    node.className = "config-save-state saving";
+    return;
+  }
+  const dirty = state.configSaveState === "dirty";
+  node.textContent = dirty ? "当前配置未保存" : "当前配置已保存";
+  node.className = `config-save-state ${dirty ? "dirty" : "saved"}`;
+}
+
 async function copyText(text) {
   if (!text) return;
   try {
@@ -140,21 +335,130 @@ async function copyText(text) {
   }
 }
 
+function normalizeHexColor(value, fallback = "#FFFFFF") {
+  let raw = String(value || "").trim();
+  if (raw.startsWith("#")) raw = raw.slice(1);
+  if (/^[0-9a-fA-F]{3}$/.test(raw)) {
+    raw = raw.split("").map((ch) => ch + ch).join("");
+  }
+  if (!/^[0-9a-fA-F]{6}$/.test(raw)) {
+    raw = fallback.replace("#", "");
+  }
+  return `#${raw.toUpperCase()}`;
+}
+
+function clampNumber(value, min, max, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function alphaFromOpacity(opacity) {
+  return clampNumber(opacity, 0, 100, 100) / 100;
+}
+
+function rgbaFromHex(hex, opacity) {
+  const normalized = normalizeHexColor(hex).replace("#", "");
+  const red = parseInt(normalized.slice(0, 2), 16);
+  const green = parseInt(normalized.slice(2, 4), 16);
+  const blue = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alphaFromOpacity(opacity).toFixed(2)})`;
+}
+
+function readColorField(id, fallback) {
+  return normalizeHexColor(el(id)?.value, fallback);
+}
+
+function readOpacityField(id, fallback) {
+  return clampNumber(el(id)?.value, 0, 100, fallback);
+}
+
+function setColorField(id, value, fallback) {
+  const color = normalizeHexColor(value, fallback);
+  const picker = el(id);
+  const hex = el(`${id}_hex`);
+  if (picker) picker.value = color;
+  if (hex) hex.value = color;
+}
+
+function setOpacityField(id, value, fallback) {
+  const opacity = clampNumber(value, 0, 100, fallback);
+  const input = el(id);
+  const output = el(`${id}_value`);
+  if (input) input.value = opacity;
+  if (output) output.value = `${Math.round(opacity)}%`;
+}
+
+function syncColorInputs(id, fallback) {
+  const picker = el(id);
+  const hex = el(`${id}_hex`);
+  if (!picker || !hex) return;
+  const apply = (value) => {
+    setColorField(id, value, fallback);
+    updateSubtitleStylePreview();
+    markConfigDirty();
+  };
+  picker.addEventListener("input", () => apply(picker.value));
+  hex.addEventListener("input", () => {
+    if (/^#?[0-9a-fA-F]{0,6}$/.test(hex.value.trim())) {
+      hex.value = hex.value.toUpperCase();
+    }
+  });
+  hex.addEventListener("change", () => apply(hex.value));
+}
+
+function syncOpacityInput(id, fallback) {
+  const input = el(id);
+  if (!input) return;
+  input.addEventListener("input", () => {
+    setOpacityField(id, input.value, fallback);
+    updateSubtitleStylePreview();
+    markConfigDirty();
+  });
+}
+
+function updateSubtitleStylePreview() {
+  const preview = el("zhStylePreview");
+  if (!preview) return;
+  const style = {
+    fontName: el("zh_font_name")?.value || "Maple Mono NF CN",
+    fontSize: clampNumber(el("zh_font_size")?.value, 24, 96, 64),
+    primaryColor: readColorField("zh_primary_color", "#FFFFFF"),
+    primaryOpacity: readOpacityField("zh_primary_opacity", 100),
+    outlineColor: readColorField("zh_outline_color", "#141414"),
+    outlineOpacity: readOpacityField("zh_outline_opacity", 100),
+    shadowColor: readColorField("zh_shadow_color", "#000000"),
+    shadowOpacity: readOpacityField("zh_shadow_opacity", 60),
+    outlineWidth: clampNumber(el("zh_outline_width")?.value, 0, 12, 2.2),
+    shadowDepth: clampNumber(el("zh_shadow_depth")?.value, 0, 12, 0.6),
+  };
+  preview.style.fontFamily = `"${style.fontName}", "Microsoft YaHei", sans-serif`;
+  preview.style.fontSize = `${Math.round(style.fontSize * 0.42)}px`;
+  preview.style.color = rgbaFromHex(style.primaryColor, style.primaryOpacity);
+  preview.style.webkitTextStroke = `${style.outlineWidth}px ${rgbaFromHex(style.outlineColor, style.outlineOpacity)}`;
+  preview.style.textShadow = `${style.shadowDepth * 3}px ${style.shadowDepth * 3}px ${Math.max(2, style.shadowDepth * 4)}px ${rgbaFromHex(style.shadowColor, style.shadowOpacity)}`;
+}
+
 function readFormConfig() {
   return {
     src_lang: el("src_lang").value,
     dst_lang: el("dst_lang").value,
     model: el("model").value,
+    asr_audio_mode: el("asr_audio_mode").value,
+    asr_audio_gain_db: Number(el("asr_audio_gain_db").value || 6.0),
+    asr_vad_mode: el("asr_vad_mode").value,
     device: el("device").value,
     compute_type: el("compute_type").value,
     beam_size: Number(el("beam_size").value),
     translation_model: el("translation_model").value,
+    translation_prompt: el("translation_prompt").value,
     translation_chunk_size: Number(el("translation_chunk_size").value),
     translation_retries: Number(el("translation_retries").value),
     openai_base_url: el("openai_base_url").value,
     audio_override_path: el("audio_override_path").value,
     preview_seconds: el("preview_seconds").value ? Number(el("preview_seconds").value) : null,
     load_existing_segments: el("load_existing_segments").checked,
+    force_retranslate_existing_segments: el("force_retranslate_existing_segments").checked,
     skip_burn: el("skip_burn").checked,
     repair_high_risk_spans: el("repair_high_risk_spans").checked,
     span_repair_max_spans: Number(el("span_repair_max_spans").value || 12),
@@ -170,6 +474,14 @@ function readFormConfig() {
     style: {
       zh_font_name: el("zh_font_name").value,
       zh_font_size: Number(el("zh_font_size").value),
+      zh_primary_color: readColorField("zh_primary_color", "#FFFFFF"),
+      zh_primary_opacity: readOpacityField("zh_primary_opacity", 100),
+      zh_outline_color: readColorField("zh_outline_color", "#141414"),
+      zh_outline_opacity: readOpacityField("zh_outline_opacity", 100),
+      zh_shadow_color: readColorField("zh_shadow_color", "#000000"),
+      zh_shadow_opacity: readOpacityField("zh_shadow_opacity", 60),
+      zh_outline_width: Number(el("zh_outline_width").value || 2.2),
+      zh_shadow_depth: Number(el("zh_shadow_depth").value || 0.6),
       zh_margin_l: Number(el("zh_margin_l").value),
       zh_margin_r: Number(el("zh_margin_r").value),
       zh_margin_v: Number(el("zh_margin_v").value),
@@ -190,20 +502,27 @@ function readFormConfig() {
 }
 
 function fillForm(config) {
-  state.config = config;
+  const normalized = normalizeUiConfig(config);
+  state.config = normalized;
+  config = normalized;
   el("src_lang").value = config.src_lang;
   el("dst_lang").value = config.dst_lang;
   el("model").value = config.model;
+  el("asr_audio_mode").value = config.asr_audio_mode || "off";
+  el("asr_audio_gain_db").value = config.asr_audio_gain_db ?? 6.0;
+  el("asr_vad_mode").value = config.asr_vad_mode || "auto";
   el("device").value = config.device;
   el("compute_type").value = config.compute_type;
   el("beam_size").value = config.beam_size;
   el("translation_model").value = config.translation_model;
+  el("translation_prompt").value = config.translation_prompt || "";
   el("translation_chunk_size").value = config.translation_chunk_size;
   el("translation_retries").value = config.translation_retries;
   el("openai_base_url").value = config.openai_base_url || "";
   el("audio_override_path").value = config.audio_override_path || "";
   el("preview_seconds").value = config.preview_seconds ?? "";
   el("load_existing_segments").checked = Boolean(config.load_existing_segments);
+  el("force_retranslate_existing_segments").checked = Boolean(config.force_retranslate_existing_segments);
   el("skip_burn").checked = Boolean(config.skip_burn);
   el("repair_high_risk_spans").checked = config.repair_high_risk_spans !== false;
   el("span_repair_max_spans").value = config.span_repair_max_spans ?? 12;
@@ -215,8 +534,16 @@ function fillForm(config) {
   el("idm_wait_timeout_seconds").value = config.idm_wait_timeout_seconds ?? 1800;
 
   const style = config.style || {};
-  el("zh_font_name").value = style.zh_font_name || "Microsoft YaHei";
+  el("zh_font_name").value = style.zh_font_name || "Maple Mono NF CN";
   el("zh_font_size").value = style.zh_font_size ?? 64;
+  setColorField("zh_primary_color", style.zh_primary_color || "#FFFFFF", "#FFFFFF");
+  setOpacityField("zh_primary_opacity", style.zh_primary_opacity ?? 100, 100);
+  setColorField("zh_outline_color", style.zh_outline_color || "#141414", "#141414");
+  setOpacityField("zh_outline_opacity", style.zh_outline_opacity ?? 100, 100);
+  setColorField("zh_shadow_color", style.zh_shadow_color || "#000000", "#000000");
+  setOpacityField("zh_shadow_opacity", style.zh_shadow_opacity ?? 60, 60);
+  el("zh_outline_width").value = style.zh_outline_width ?? 2.2;
+  el("zh_shadow_depth").value = style.zh_shadow_depth ?? 0.6;
   el("zh_margin_l").value = style.zh_margin_l ?? 90;
   el("zh_margin_r").value = style.zh_margin_r ?? 90;
   el("zh_margin_v").value = style.zh_margin_v ?? 94;
@@ -233,7 +560,13 @@ function fillForm(config) {
   el("min_split_duration").value = style.min_split_duration ?? 0.9;
   el("reference_mode").value = style.reference_mode || "compact";
 
+  updateSubtitleStylePreview();
   setLinkedAudioLabel(config.audio_override_path || "");
+}
+
+function fillFormIfClean(config) {
+  if (state.formDirty) return;
+  fillForm(config);
 }
 
 function renderMediaAlert() {
@@ -274,6 +607,17 @@ function renderMediaAlert() {
   `;
 }
 
+function humanRunStateLabel(stageKey, title) {
+  if (title) return title;
+  const fallbackMap = {
+    idle: "等待中",
+    complete: "完成",
+    error: "错误",
+    recovered_state: "已恢复",
+  };
+  return fallbackMap[String(stageKey || "idle")] || "等待中";
+}
+
 async function inspectSelectedVideo() {
   const video = state.selectedVideo;
   if (!video) {
@@ -303,25 +647,33 @@ async function inspectSelectedVideo() {
 function syncSelectedVideo(videos) {
   if (!videos.length) {
     state.selectedVideo = null;
+    state.selectedVideoProject = null;
+    state.selectedVideoProjectPath = null;
     state.selectedMediaInfo = null;
     el("selectedVideoName").textContent = "未选择视频";
     el("selectedVideoMeta").textContent = "请添加视频后开始处理。";
     renderMediaAlert();
+    renderInputAssStatus();
     return;
   }
   const previousPath = state.selectedVideo?.path;
   const matched = videos.find((video) => video.path === previousPath);
   state.selectedVideo = matched || videos[0];
+  state.selectedVideoProject = findProjectForSelectedVideo();
+  state.selectedVideoProjectPath = state.selectedVideoProject?.path || null;
   el("selectedVideoName").textContent = state.selectedVideo.name;
   el("selectedVideoMeta").textContent = `输入路径：${state.selectedVideo.path}`;
   if (state.selectedVideo.path !== previousPath || !state.selectedMediaInfo) {
     inspectSelectedVideo();
   }
+  renderInputAssStatus();
 }
 
 function renderVideos(videos) {
   state.videos = videos;
   syncSelectedVideo(videos);
+  state.selectedVideoProject = findProjectForSelectedVideo();
+  state.selectedVideoProjectPath = state.selectedVideoProject?.path || null;
   const root = el("videoList");
   root.innerHTML = "";
 
@@ -440,12 +792,16 @@ function renderPhaseStatus(phaseStatus) {
     if (key === "audio_extract") {
       if (phase.processed_seconds || phase.duration_seconds) stats.push(`${seconds(phase.processed_seconds || 0)} / ${seconds(phase.duration_seconds || 0)}`);
       if (phase.size_bytes) stats.push(`输出 ${bytes(phase.size_bytes)}`);
+      if (phase.enhancement_mode && phase.enhancement_mode !== "off") stats.push(`增强 ${phase.enhancement_mode}`);
+      if (phase.gain_db) stats.push(`+${Number(phase.gain_db).toFixed(1)} dB`);
     }
 
     if (key === "asr") {
       if (phase.current || phase.total) stats.push(`块 ${phase.current || 0}/${phase.total || 0}`);
       if (phase.segment_count) stats.push(`段数 ${phase.segment_count}`);
       if (phase.processed_seconds || phase.duration_seconds) stats.push(`${seconds(phase.processed_seconds || 0)} / ${seconds(phase.duration_seconds || 0)}`);
+      if (phase.audio_mode && phase.audio_mode !== "off") stats.push(`音频 ${phase.audio_mode}`);
+      if (phase.vad_mode) stats.push(`VAD ${phase.vad_mode}${phase.vad_filter ? " on" : " off"}`);
     }
 
     if (key === "translation") {
@@ -485,14 +841,13 @@ function renderPhaseStatus(phaseStatus) {
 
 function openFile(path, name) {
   state.selectedFilePath = path;
+  const matchedProject = state.projects.find((project) => project.files.some((file) => file.path === path)) || null;
+  state.selectedProject = matchedProject;
+  state.selectedFileProjectPath = matchedProject?.path || null;
   el("previewTitle").textContent = name;
   const video = el("videoPreview");
   const text = el("textPreview");
-  const reburnBtn = el("reburnFromAssBtn");
-  const learnStyleBtn = el("learnStyleBtn");
-  const isAss = /\.ass$/i.test(path);
-  reburnBtn.disabled = !isAss;
-  learnStyleBtn.disabled = !isAss;
+  updateFileActionButtons();
 
   if (/\.(mp4|wav)$/i.test(path)) {
     const relative = path.split("output\\").pop().replaceAll("\\", "/");
@@ -513,17 +868,18 @@ function openFile(path, name) {
 function syncSelectedProject(projects) {
   if (!projects.length) {
     state.selectedProject = null;
+    state.selectedFileProjectPath = null;
     if (!state.selectedFilePath) {
       el("previewTitle").textContent = "文件预览";
       el("textPreview").textContent = "";
       el("videoPreview").classList.add("hidden");
       el("videoPreview").src = "";
-      el("reburnFromAssBtn").disabled = true;
-      el("learnStyleBtn").disabled = true;
+      updateFileActionButtons();
     }
     return;
   }
-  const matched = projects.find((project) => project.path === state.selectedProject?.path);
+  const preferredPath = state.selectedFileProjectPath || state.selectedProject?.path;
+  const matched = projects.find((project) => project.path === preferredPath);
   state.selectedProject = matched || projects[0];
 }
 
@@ -562,6 +918,7 @@ function renderProjects(projects) {
 
     wrapper.addEventListener("click", () => {
       state.selectedProject = project;
+      state.selectedFileProjectPath = project.path;
       renderProjects(state.projects);
     });
 
@@ -673,9 +1030,9 @@ function renderYoutubeMeta() {
 }
 
 function renderRuntime(runtime, lastError) {
-  const title = runtime?.title || "等待中";
+  const title = humanRunStateLabel(runtime?.stage_key, runtime?.title);
   const progress = Math.max(0, Math.min(100, Number(runtime?.overall_progress || 0)));
-  const description = lastError?.message || runtime?.description || "等待开始新的任务。";
+  const description = runtime?.recovery?.message || lastError?.message || runtime?.description || "等待开始新的任务。";
   setRunState(title);
   el("currentStageLabel").textContent = `当前阶段：${title}`;
   el("currentStageDescription").textContent = description;
@@ -685,14 +1042,21 @@ function renderRuntime(runtime, lastError) {
 }
 
 function renderState(payload) {
-  const runtime = payload.state.runtime || {};
-  renderRuntime(runtime, payload.state.last_error);
-  renderStageFeed(payload.state.history || []);
-  renderQueue(payload.state.queue || []);
-  renderPhaseStatus(payload.state.phase_status || {});
-  if (payload.projects) renderProjects(payload.projects);
-  if (payload.videos) renderVideos(payload.videos);
-  if (payload.config) fillForm(payload.config);
+  const safePayload = payload && typeof payload === "object" ? payload : {};
+  const safeState = safePayload.state && typeof safePayload.state === "object" ? safePayload.state : {};
+  state.runtime = safeState.runtime || {};
+  const runtime = safeState.runtime || {};
+  renderRuntime(runtime, safeState.last_error || null);
+  setTaskButtonsDisabled(taskIsBusy(runtime));
+  renderStageFeed(safeState.history || []);
+  renderQueue(safeState.queue || []);
+  renderPhaseStatus(safeState.phase_status || {});
+  if (safePayload.projects) renderProjects(safePayload.projects);
+  if (safePayload.videos) renderVideos(safePayload.videos);
+  state.selectedVideoProject = findProjectForSelectedVideo();
+  state.selectedVideoProjectPath = state.selectedVideoProject?.path || null;
+  fillFormIfClean(safePayload.config || state.config || DEFAULT_UI_CONFIG);
+  updateFileActionButtons();
   renderProxyStatus();
   renderIdmStatus();
   renderYoutubeMeta();
@@ -745,12 +1109,32 @@ async function checkIdm() {
 }
 
 function bootstrap() {
+  fillForm(DEFAULT_UI_CONFIG);
+  renderState({ state: { runtime: {}, history: [], queue: [], phase_status: {} }, config: DEFAULT_UI_CONFIG, videos: [], projects: [] });
+  startPolling();
   fetch("/api/bootstrap")
     .then((res) => res.json())
     .then((payload) => {
-      fillForm(payload.config);
       renderState(payload);
-      startPolling();
+    })
+    .catch(() => {
+      renderState({
+        state: {
+          runtime: {
+            stage_key: "idle",
+            title: "离线",
+            description: "暂时无法连接本地服务，页面已加载默认配置。",
+            overall_progress: 0,
+          },
+          history: [],
+          queue: [],
+          phase_status: {},
+          last_error: null,
+        },
+        config: DEFAULT_UI_CONFIG,
+        videos: [],
+        projects: [],
+      });
     });
 }
 
@@ -795,7 +1179,12 @@ function bindActions() {
       },
       body: await file.arrayBuffer(),
     });
-    return response.json();
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const message = payload?.error || payload?.message || `${endpoint} failed (${response.status})`;
+      throw new Error(message);
+    }
+    return payload;
   };
 
   const videoInput = el("videoFileInput");
@@ -814,25 +1203,35 @@ function bindActions() {
   videoInput.addEventListener("change", async () => {
     const file = videoInput.files?.[0];
     if (!file) return;
-    const payload = await uploadFile("/api/upload-video", file);
-    if (!payload.ok) return;
-    state.selectedVideo = payload.video;
-    state.selectedMediaInfo = null;
-    renderState(payload);
+    try {
+      const payload = await uploadFile("/api/upload-video", file);
+      if (!payload.ok) return;
+      state.selectedVideo = payload.video;
+      state.selectedMediaInfo = null;
+      renderState(payload);
+      showToast("Input 已添加");
+    } catch (error) {
+      showToast(`添加 Input 失败：${error.message || error}`);
+    }
   });
 
   audioInput.addEventListener("change", async () => {
     const file = audioInput.files?.[0];
     if (!file) return;
-    const payload = await uploadFile("/api/upload-audio", file);
-    if (!payload.ok) return;
-    el("audio_override_path").value = payload.audio.path;
-    setLinkedAudioLabel(payload.audio.path);
-    inspectSelectedVideo();
+    try {
+      const payload = await uploadFile("/api/upload-audio", file);
+      if (!payload.ok) return;
+      el("audio_override_path").value = payload.audio.path;
+      setLinkedAudioLabel(payload.audio.path);
+      inspectSelectedVideo();
+      showToast("MP3 已添加");
+    } catch (error) {
+      showToast(`添加 MP3 失败：${error.message || error}`);
+    }
   });
 
   const openOutput = () => {
-    const projectPath = state.selectedProject?.path || state.projects[0]?.path || null;
+    const projectPath = state.selectedFileProjectPath || state.selectedProject?.path || state.projects[0]?.path || null;
     fetch("/api/open-output", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -928,7 +1327,12 @@ function bindActions() {
         run_after_download: runAfterDownload,
         config,
       }),
-    });
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload.ok) showToast(payload.error || "下载任务启动失败");
+      })
+      .catch((error) => showToast(`下载任务启动失败：${error.message || error}`));
   };
 
   const runPipeline = (previewSeconds = null) => {
@@ -942,7 +1346,12 @@ function bindActions() {
         video_path: state.selectedVideo.path,
         config,
       }),
-    });
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload.ok) showToast(payload.error || "流程启动失败");
+      })
+      .catch((error) => showToast(`流程启动失败：${error.message || error}`));
   };
 
   el("pickInputBtn").addEventListener("click", pickInput);
@@ -983,6 +1392,7 @@ function bindActions() {
       .then((payload) => {
         state.selectedProject = null;
         state.selectedFilePath = null;
+        state.selectedFileProjectPath = null;
         state.selectedVideo = null;
         state.selectedMediaInfo = null;
         renderState(payload);
@@ -991,7 +1401,7 @@ function bindActions() {
   el("openOutputBtn").addEventListener("click", openOutput);
   el("openOutputInlineBtn").addEventListener("click", openOutput);
   el("learnStyleBtn").addEventListener("click", () => {
-    const projectPath = state.selectedProject?.path || null;
+    const projectPath = state.selectedFileProjectPath || state.selectedProject?.path || null;
     if (!projectPath) return;
     fetch("/api/learn-style", {
       method: "POST",
@@ -1005,8 +1415,22 @@ function bindActions() {
         showToast(payload.message || "风格样例已生成");
       });
   });
+  el("reburnFromInputBtn").addEventListener("click", () => {
+    const projectPath = state.selectedVideoProjectPath || null;
+    if (!projectPath) return;
+    fetch("/api/reburn-from-ass", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_path: projectPath }),
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload.ok) return;
+        showToast("已开始按当前双语 ASS 重新烧录");
+      });
+  });
   el("reburnFromAssBtn").addEventListener("click", () => {
-    const projectPath = state.selectedProject?.path || null;
+    const projectPath = state.selectedFileProjectPath || state.selectedProject?.path || null;
     if (!projectPath || !state.selectedFilePath || !/\.ass$/i.test(state.selectedFilePath)) return;
     fetch("/api/reburn-from-ass", {
       method: "POST",
@@ -1022,16 +1446,77 @@ function bindActions() {
 
   el("saveConfigBtn").addEventListener("click", () => {
     const config = readFormConfig();
+    state.configSaveState = "saving";
+    renderConfigSaveState();
     fetch("/api/save-config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(config),
-    });
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload.ok) {
+          state.configSaveState = "dirty";
+          renderConfigSaveState();
+          showToast(payload.error || "保存配置失败");
+          return;
+        }
+        clearConfigDirty(payload.config || config);
+        fillForm(payload.config || config);
+        showToast("配置已保存");
+      })
+      .catch((error) => {
+        state.configSaveState = "dirty";
+        renderConfigSaveState();
+        showToast(`保存配置失败：${error.message || error}`);
+      });
   });
+  el("saveConfigBottomBtn").addEventListener("click", () => el("saveConfigBtn").click());
 
   el("runBtn").addEventListener("click", () => runPipeline(null));
 }
 
+function bindSubtitleStyleControls() {
+  syncColorInputs("zh_primary_color", "#FFFFFF");
+  syncColorInputs("zh_outline_color", "#141414");
+  syncColorInputs("zh_shadow_color", "#000000");
+  syncOpacityInput("zh_primary_opacity", 100);
+  syncOpacityInput("zh_outline_opacity", 100);
+  syncOpacityInput("zh_shadow_opacity", 60);
+  ["zh_font_name", "zh_font_size", "zh_outline_width", "zh_shadow_depth"].forEach((id) => {
+    const node = el(id);
+    if (node) node.addEventListener("input", updateSubtitleStylePreview);
+  });
+  el("resetZhColorBtn").addEventListener("click", () => {
+    setColorField("zh_primary_color", "#FFFFFF", "#FFFFFF");
+    setOpacityField("zh_primary_opacity", 100, 100);
+    setColorField("zh_outline_color", "#141414", "#141414");
+    setOpacityField("zh_outline_opacity", 100, 100);
+    setColorField("zh_shadow_color", "#000000", "#000000");
+    setOpacityField("zh_shadow_opacity", 60, 60);
+    el("zh_outline_width").value = 2.2;
+    el("zh_shadow_depth").value = 0.6;
+    updateSubtitleStylePreview();
+    markConfigDirty();
+  });
+}
+
+function bindConfigInputs() {
+  document.querySelectorAll("input, textarea, select").forEach((node) => {
+    if (!node.id) return;
+    if (["videoFileInput", "audioFileInput"].includes(node.id)) return;
+    if (node.id.endsWith("_value")) return;
+    const eventName = node.type === "checkbox" || node.tagName === "SELECT" ? "change" : "input";
+    node.addEventListener(eventName, () => {
+      if (node.id === "audio_override_path") return;
+      markConfigDirty();
+    });
+  });
+}
+
 bindTabs();
+bindSubtitleStyleControls();
+bindConfigInputs();
 bindActions();
+renderConfigSaveState();
 bootstrap();
