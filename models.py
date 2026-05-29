@@ -25,7 +25,7 @@ class Segment:
 
 @dataclass(slots=True)
 class SubtitleRules:
-    min_duration: float = 1.0
+    min_duration: float = 2.0
     max_duration: float = 6.5
     min_gap: float = 0.08
     max_chars_per_line: int = 42
@@ -61,7 +61,7 @@ class BilingualSubtitleStyle:
     en_margin_v: int = 44
     en_max_single_line_chars: int = 78
     en_max_split_parts: int = 3
-    min_split_duration: float = 0.9
+    min_split_duration: float = 2.0
     reference_mode: str = "compact"
 
 

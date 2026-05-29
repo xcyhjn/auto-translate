@@ -6,9 +6,94 @@ from pathlib import Path
 
 from .glossary import clean_candidate, load_glossary_payload, normalize_term_key, term_pattern
 from .models import Segment, Word
+from .text_quality import ASMR_PET_CONTEXT_RE
 
 
 WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9'.-]*")
+ASR_REPAIR_CONTEXT_RADIUS = 2
+
+
+def source_context_text(segments: list[Segment], index: int, *, radius: int = ASR_REPAIR_CONTEXT_RADIUS) -> str:
+    start = max(0, index - radius)
+    end = min(len(segments), index + radius + 1)
+    return " ".join(segment.source_text or "" for segment in segments[start:end])
+
+
+def replace_i_love_fragment(text: str) -> tuple[str, int]:
+    repaired, count = re.subn(r"\bI\s+love\s*\.\s*$", "I love you.", text, flags=re.IGNORECASE)
+    return repaired, count
+
+
+def repair_builtin_asr_text(text: str, *, context_text: str = "") -> tuple[str, list[dict]]:
+    repaired = text or ""
+    repairs: list[dict] = []
+
+    pet_context = ASMR_PET_CONTEXT_RE.search(f"{context_text} {repaired}") is not None
+    if pet_context:
+        def replace_pet(match: re.Match[str]) -> str:
+            prefix = match.group(1)
+            return f"{prefix} pet you"
+
+        repaired, count = re.subn(
+            r"\b(I(?:'|’)?ll|I\s+will|when\s+I|while\s+I|if\s+I)\s+bet\s+you\b",
+            replace_pet,
+            repaired,
+            flags=re.IGNORECASE,
+        )
+        if count:
+            repairs.append(
+                {
+                    "bad_alias": "bet you",
+                    "canonical": "pet you",
+                    "reason": "builtin_asr_pet_bet_context",
+                    "confidence": 0.92,
+                    "replacement_count": count,
+                }
+            )
+
+    repaired, count = re.subn(r"\bfeel\s+good\s+good\b", "feel good", repaired, flags=re.IGNORECASE)
+    if count:
+        repairs.append(
+            {
+                "bad_alias": "feel good good",
+                "canonical": "feel good",
+                "reason": "builtin_asr_duplicate_word",
+                "confidence": 0.95,
+                "replacement_count": count,
+            }
+        )
+
+    repaired, count = re.subn(
+        r"\bYou\s+don'?t\s+need\s+me\s+to\s+give\s+me\s+the\s+world\b",
+        "You don't need to give me the world",
+        repaired,
+        flags=re.IGNORECASE,
+    )
+    if count:
+        repairs.append(
+            {
+                "bad_alias": "You don't need me to give me the world",
+                "canonical": "You don't need to give me the world",
+                "reason": "builtin_asr_inserted_pronoun",
+                "confidence": 0.9,
+                "replacement_count": count,
+            }
+        )
+
+    if pet_context or re.search(r"\b(?:you|darling|honey|sweetheart|baby)\b", f"{context_text} {repaired}", re.IGNORECASE):
+        repaired, count = replace_i_love_fragment(repaired)
+        if count:
+            repairs.append(
+                {
+                    "bad_alias": "I love.",
+                    "canonical": "I love you.",
+                    "reason": "builtin_asr_truncated_phrase",
+                    "confidence": 0.8,
+                    "replacement_count": count,
+                }
+            )
+
+    return repaired, repairs
 
 
 def load_source_repair_rules(glossary_path: str | Path | None) -> list[dict]:
@@ -82,6 +167,14 @@ def repair_word_items(words: list[Word], bad_alias: str, canonical: str) -> list
     return changed
 
 
+def builtin_word_repair_items(words: list[Word], repair: dict) -> list[int]:
+    bad_alias = str(repair.get("bad_alias") or "")
+    canonical = str(repair.get("canonical") or "")
+    if not words or not bad_alias or not canonical:
+        return []
+    return repair_word_items(words, bad_alias, canonical)
+
+
 def repair_source_segments(
     segments: list[Segment],
     glossary_path: str | Path | None,
@@ -90,22 +183,27 @@ def repair_source_segments(
     repairs: list[dict] = []
     rule_hits: Counter[str] = Counter()
 
-    if not rules:
-        return {
-            "schema_version": 1,
-            "summary": {
-                "segment_count": len(segments),
-                "rule_count": 0,
-                "repaired_segment_count": 0,
-                "replacement_count": 0,
-            },
-            "repairs": [],
-        }
-
-    for segment in segments:
+    for index, segment in enumerate(segments):
         original_text = segment.source_text or ""
         repaired_text = original_text
         segment_repairs: list[dict] = []
+        repaired_text, builtin_repairs = repair_builtin_asr_text(
+            repaired_text,
+            context_text=source_context_text(segments, index),
+        )
+        for repair in builtin_repairs:
+            changed_word_indexes = builtin_word_repair_items(segment.words, repair)
+            segment_repairs.append(
+                {
+                    **repair,
+                    "term_id": repair["reason"],
+                    "word_indexes": changed_word_indexes,
+                    "word_text_changed": bool(changed_word_indexes),
+                    "sources": ["builtin_asr_repair"],
+                }
+            )
+            rule_hits[str(repair["reason"])] += int(repair.get("replacement_count") or 0)
+
         for rule in rules:
             pattern = term_pattern(str(rule["bad_alias"]))
             repaired_text, count = pattern.subn(str(rule["canonical"]), repaired_text)

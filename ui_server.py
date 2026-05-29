@@ -9,6 +9,7 @@ import shutil
 import time
 import threading
 import traceback
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from dataclasses import asdict
@@ -611,7 +612,43 @@ def ensure_proxy_environment() -> None:
             os.environ[key] = DEFAULT_HTTP_PROXY
 
 
+def normalize_lookup_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or "").strip())
+    collapsed = re.sub(r"\s+", " ", normalized)
+    return collapsed.casefold()
+
+
+def iter_input_video_files(root: Path, *, include_video_suffixes: bool = True) -> list[Path]:
+    video_suffixes = {".mp4", ".mkv", ".mov", ".avi", ".webm"}
+    files: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if include_video_suffixes and path.suffix.lower() not in video_suffixes:
+            continue
+        files.append(path)
+    return sorted(files)
+
+
 def list_input_videos() -> list[dict]:
+    INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    videos = []
+    for path in iter_input_video_files(INPUT_DIR):
+        size = path.stat().st_size
+        # 0 B 的残留文件没有处理价值，也会污染输入列表。
+        if size <= 0:
+            continue
+        videos.append(
+            {
+                "name": path.name,
+                "stem": path.stem,
+                "path": str(path),
+                "size": size,
+                "external": False,
+                "managed": str(path.resolve()) not in INITIAL_INPUT_SNAPSHOT,
+            }
+        )
+    return videos
     INPUT_DIR.mkdir(parents=True, exist_ok=True)
     videos = []
     for path in sorted(INPUT_DIR.iterdir()):
@@ -677,6 +714,10 @@ def resolve_input_video_path(path_or_name: str) -> Path:
     if not raw:
         raise FileNotFoundError("Input video path is empty.")
 
+    raw_name = Path(raw).name
+    raw_name_key = normalize_lookup_text(raw_name)
+    raw_path_key = normalize_lookup_text(raw)
+
     direct = Path(raw)
     if direct.exists() and direct.is_file():
         return direct
@@ -684,6 +725,14 @@ def resolve_input_video_path(path_or_name: str) -> Path:
     candidate = INPUT_DIR / Path(raw).name
     if candidate.exists() and candidate.is_file():
         return candidate
+
+    for item in iter_input_video_files(INPUT_DIR):
+        item_name_key = normalize_lookup_text(item.name)
+        item_path_key = normalize_lookup_text(str(item))
+        if item.name == raw_name:
+            return item
+        if item_name_key == raw_name_key or item_path_key == raw_path_key:
+            return item
 
     for item in INPUT_DIR.iterdir():
         if item.is_file() and item.name == Path(raw).name:
@@ -2205,7 +2254,7 @@ def main() -> None:
     ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
     WEB_DIR.mkdir(parents=True, exist_ok=True)
     global INITIAL_INPUT_SNAPSHOT
-    INITIAL_INPUT_SNAPSHOT = {str(item.resolve()) for item in INPUT_DIR.iterdir() if item.is_file()}
+    INITIAL_INPUT_SNAPSHOT = {str(item.resolve()) for item in iter_input_video_files(INPUT_DIR)}
     restore_state_from_snapshot()
     ensure_proxy_environment()
     server = ReusableThreadingHTTPServer(("127.0.0.1", SERVER_PORT), UIServerHandler)

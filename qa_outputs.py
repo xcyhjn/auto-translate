@@ -171,6 +171,23 @@ def build_editor_review_rows(
                 target_text=str(sample.get("target_text") or ""),
                 note=f"Translate discourse marker(s) according to context: {markers}",
             )
+        for key, risk_type, severity, risk_score in (
+            ("literal_chinese_artifact_samples", "literal_chinese_artifact", "medium", 6),
+            ("source_target_semantic_conflict_samples", "source_target_semantic_conflict", "high", 10),
+        ):
+            for sample in translation_metrics.get(key) or []:
+                if not isinstance(sample, dict):
+                    continue
+                issues = ", ".join(str(value) for value in sample.get("issues") or [])
+                add_row(
+                    segment_id=int(sample.get("segment_id") or 0),
+                    risk_type=risk_type,
+                    severity=severity,
+                    risk_score=risk_score,
+                    source_text=str(sample.get("source_text") or ""),
+                    target_text=str(sample.get("target_text") or ""),
+                    note=issues,
+                )
 
     rows.sort(key=lambda row: (-int(row["risk_score"]), row["severity"], int(row["segment_id"])))
     return rows

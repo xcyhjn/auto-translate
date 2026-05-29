@@ -12,6 +12,7 @@ from .difficult_spans import (
     suspicious_source_words,
 )
 from .models import Segment
+from .text_quality import find_repeated_short_source_phrases, find_source_asr_suspicions
 
 
 MAX_SOURCE_SPAN_SIZE = 8
@@ -40,6 +41,18 @@ def source_segment_reasons(segment: Segment, previous: Segment | None, following
         reasons.append("open_clause")
     if suspicious_source_words(text):
         reasons.append("suspicious_asr_word")
+    source_asr_suspicions = find_source_asr_suspicions(
+        text,
+        context_text=" ".join(
+            item.source_text
+            for item in (previous, segment, following)
+            if item is not None
+        ),
+    )
+    if source_asr_suspicions:
+        reasons.extend(f"source_asr_{reason}" for reason in source_asr_suspicions)
+    if find_repeated_short_source_phrases(text):
+        reasons.append("repeated_short_phrase")
     if COMMA_RE.search(text) and len(text) >= 50:
         reasons.append("internal_clause_boundary")
     if previous and segment_gap(previous, segment) <= SOFT_JOIN_GAP and starts_with_continuation(text):
@@ -71,6 +84,10 @@ def should_join(current: Segment, following: Segment, current_reasons: set[str],
 def span_strategy(reason_counts: Counter[str], source_joined: str, segment_count: int) -> str:
     if reason_counts.get("suspicious_asr_word"):
         return "source_repair_review"
+    if any(reason.startswith("source_asr_") for reason in reason_counts):
+        return "source_repair_review"
+    if reason_counts.get("repeated_short_phrase") and segment_count >= 1:
+        return "span_first"
     if segment_count >= 2 and (
         reason_counts.get("starts_with_continuation")
         or reason_counts.get("ends_with_function_word")
@@ -94,6 +111,8 @@ def build_source_span(segments: list[Segment], start: int, end: int, reasons_by_
     strategy = span_strategy(reason_counts, source_joined, len(span_segments))
     risk_score = (
         reason_counts.get("suspicious_asr_word", 0) * 5
+        + sum(int(count) * 5 for reason, count in reason_counts.items() if str(reason).startswith("source_asr_"))
+        + reason_counts.get("repeated_short_phrase", 0) * 3
         + reason_counts.get("ends_with_function_word", 0) * 3
         + reason_counts.get("starts_with_continuation", 0) * 2
         + reason_counts.get("open_clause", 0)
@@ -152,6 +171,8 @@ def detect_source_spans(segments: list[Segment], *, max_span_size: int = MAX_SOU
             text = normalize_inline(segments[start].source_text)
             if (
                 "suspicious_asr_word" in reasons
+                or any(reason.startswith("source_asr_") for reason in reasons)
+                or "repeated_short_phrase" in reasons
                 or len(text) >= LONG_SOURCE_CHARS
                 or text.count(",") >= COMPLEX_SOURCE_COMMAS
             ):

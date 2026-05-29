@@ -1257,3 +1257,468 @@ Traceback (most recent call last):
 PermissionError: [Errno 13] Target output video is currently in use and could not be replaced. A new burned video was saved as: D:\autosub_zh\output\The-Dating-Sim-That-Hates-Itself-Reflexia-Prototype-Ver\09_burned_bilingual_video.reburned.924a1cda.mp4: 'D:\\autosub_zh\\output\\The-Dating-Sim-That-Hates-Itself-Reflexia-Prototype-Ver\\09_burned_bilingual_video.mp4'
 
 
+Traceback (most recent call last):
+  File "D:\autosub_zh\pipeline_core.py", line 228, in burn_subtitle
+    temp_output_path.replace(output_path)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\pathlib.py", line 1188, in replace
+    os.replace(self, target)
+PermissionError: [WinError 5] 拒绝访问。: 'D:\\autosub_zh\\output\\The-Dating-Sim-That-Hates-Itself-Reflexia-Prototype-Ver\\.09_burned_bilingual_video.f2399cf01f45415ea436016e50121e72.tmp.mp4' -> 'D:\\autosub_zh\\output\\The-Dating-Sim-That-Hates-Itself-Reflexia-Prototype-Ver\\09_burned_bilingual_video.mp4'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1861, in safe_reburn_from_ass_job
+    reburn_from_ass_job(project_path, task_id)
+  File "D:\autosub_zh\ui_server.py", line 1801, in reburn_from_ass_job
+    burn_subtitle(
+  File "D:\autosub_zh\pipeline_core.py", line 235, in burn_subtitle
+    raise PermissionError(
+PermissionError: [Errno 13] Target output video is currently in use and could not be replaced. A new burned video was saved as: D:\autosub_zh\output\The-Dating-Sim-That-Hates-Itself-Reflexia-Prototype-Ver\09_burned_bilingual_video.reburned.a3c821d4.mp4: 'D:\\autosub_zh\\output\\The-Dating-Sim-That-Hates-Itself-Reflexia-Prototype-Ver\\09_burned_bilingual_video.mp4'
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\[M4M] You're My Little Puppy, Such a Good Boy! [Femboy ASMR] [Whispers]_1.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\[M4M] You're My Little Puppy, Such a Good Boy! [Femboy ASMR] [Whispers]_1.mp4
+output_dir=D:\autosub_zh\output\M4M-You-re-My-Little-Puppy-Such-a-Good-Boy-Femboy-ASMR-Whispers-_1
+files=32
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\pipeline_core.py", line 228, in burn_subtitle
+    temp_output_path.replace(output_path)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\pathlib.py", line 1188, in replace
+    os.replace(self, target)
+PermissionError: [WinError 5] 拒绝访问。: 'D:\\autosub_zh\\output\\M4M-You-re-My-Little-Puppy-Such-a-Good-Boy-Femboy-ASMR-Whispers-_1\\.09_burned_bilingual_video.369bc32690d6409481361e17a18790f5.tmp.mp4' -> 'D:\\autosub_zh\\output\\M4M-You-re-My-Little-Puppy-Such-a-Good-Boy-Femboy-ASMR-Whispers-_1\\09_burned_bilingual_video.mp4'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1861, in safe_reburn_from_ass_job
+    reburn_from_ass_job(project_path, task_id)
+  File "D:\autosub_zh\ui_server.py", line 1801, in reburn_from_ass_job
+    burn_subtitle(
+  File "D:\autosub_zh\pipeline_core.py", line 235, in burn_subtitle
+    raise PermissionError(
+PermissionError: [Errno 13] Target output video is currently in use and could not be replaced. A new burned video was saved as: D:\autosub_zh\output\M4M-You-re-My-Little-Puppy-Such-a-Good-Boy-Femboy-ASMR-Whispers-_1\09_burned_bilingual_video.reburned.28fe201e.mp4: 'D:\\autosub_zh\\output\\M4M-You-re-My-Little-Puppy-Such-a-Good-Boy-Femboy-ASMR-Whispers-_1\\09_burned_bilingual_video.mp4'
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\An Ignorant Guide to Shoegaze.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\An Ignorant Guide to Shoegaze.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\An Ignorant Guide to Shoegaze.mp4
+output_dir=D:\autosub_zh\output\An-Ignorant-Guide-to-Shoegaze
+files=34
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\An Ignorant Guide to Shoegaze.mp4
+output_dir=D:\autosub_zh\output\An-Ignorant-Guide-to-Shoegaze
+files=34
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\Porter and Stout： What's the difference？ ｜ The Craft Beer Channel.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\Porter and Stout： What's the difference？ ｜ The Craft Beer Channel.mp4
+output_dir=D:\autosub_zh\output\Porter-and-Stout-What-s-the-difference-The-Craft-Beer-Channel
+files=34
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\Why Tokyo Has The Most CHAOTIC Power Lines in the World？.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\Why Tokyo Has The Most CHAOTIC Power Lines in the World？.mp4
+output_dir=D:\autosub_zh\output\Why-Tokyo-Has-The-Most-CHAOTIC-Power-Lines-in-the-World
+files=34
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\The Best Game You Never Heard About 2 ｜ Disillusion ST.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\The Best Game You Never Heard About 2 ｜ Disillusion ST.mp4
+output_dir=D:\autosub_zh\output\The-Best-Game-You-Never-Heard-About-2-Disillusion-ST
+files=34
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\pipeline_core.py", line 210, in burn_subtitle
+    try:
+        ^
+  File "D:\autosub_zh\media.py", line 272, in run_ffmpeg_command
+    raise RuntimeError(f"Command failed: {command}\n{details}")
+RuntimeError: Command failed: ffmpeg -progress pipe:1 -nostats -y -hwaccel cuda -c:v av1_cuvid -i D:\autosub_zh\input\Why Tokyo Has The Most CHAOTIC Power Lines in the World？.mp4 -vf ass='C\:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' -c:v h264_nvenc -preset p4 -cq 25 -pix_fmt yuv420p -c:a copy D:\autosub_zh\output\已发归档\Why-Tokyo-Has-The-Most-CHAOTIC-Power-Lines-in-the-World\.09_burned_bilingual_video.cc7902daa82a441ab3bcd553b2af4f7f.tmp.mp4
+ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 15.2.0 (Rev13, Built by MSYS2 project)
+  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-zlib --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-sdl2 --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxvid --enable-libaom --enable-libopenjpeg --enable-libvpx --enable-mediafoundation --enable-libass --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-openal --enable-libgme --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libtheora --enable-libvo-amrwbenc --enable-libgsm --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-librubberband
+  libavutil      60. 26.101 / 60. 26.101
+  libavcodec     62. 28.101 / 62. 28.101
+  libavformat    62. 12.101 / 62. 12.101
+  libavdevice    62.  3.101 / 62.  3.101
+  libavfilter    11. 14.101 / 11. 14.101
+  libswscale      9.  5.101 /  9.  5.101
+  libswresample   6.  3.101 /  6.  3.101
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\autosub_zh\input\Why Tokyo Has The Most CHAOTIC Power Lines in the World？.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.12.101
+  Duration: 00:12:13.77, start: 0.000000, bitrate: 1298 kb/s
+  Stream #0:0[0x1](und): Video: av1 (libaom-av1) (Main) (av01 / 0x31307661), yuv420p(tv, bt709), 1920x1080 [SAR 1:1 DAR 16:9], 1164 kb/s, 29.97 fps, 29.97 tbr, 30k tbn (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+  Stream #0:1[0x2](eng): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 127 kb/s (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+[Parsed_ass_0 @ 0000017615eff280] libass API version: 0x1704000
+[Parsed_ass_0 @ 0000017615eff280] libass source: commit: 0.17.4-27-g1cbba0a8818c83495114b3c2b5730410eecbdb2c
+[Parsed_ass_0 @ 0000017615eff280] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+[Parsed_ass_0 @ 0000017615eff280] Using font provider directwrite (with GDI)
+[Parsed_ass_0 @ 0000017615eff280] Added subtitle file: 'C:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' (3 styles, 482 events)
+Stream mapping:
+  Stream #0:0 -> #0:0 (av1 (av1_cuvid) -> h264 (h264_nvenc))
+  Stream #0:1 -> #0:1 (copy)
+Press [q] to stop, [?] for help
+[Parsed_ass_0 @ 0000017615eff5c0] libass API version: 0x1704000
+[Parsed_ass_0 @ 0000017615eff5c0] libass source: commit: 0.17.4-27-g1cbba0a8818c83495114b3c2b5730410eecbdb2c
+[Parsed_ass_0 @ 0000017615eff5c0] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+[Parsed_ass_0 @ 0000017615eff5c0] Using font provider directwrite (with GDI)
+[Parsed_ass_0 @ 0000017615eff5c0] Added subtitle file: 'C:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' (3 styles, 482 events)
+[Parsed_ass_0 @ 0000017615eff5c0] fontselect: (Maple Mono NF CN, 400, 0) -> MapleMono-NF-CN-Regular, 0, MapleMono-NF-CN-Regular
+[Parsed_ass_0 @ 0000017615eff5c0] fontselect: (Maple Mono, 400, 0) -> ArialMT, 0, ArialMT
+Output #0, mp4, to 'D:\autosub_zh\output\已发归档\Why-Tokyo-Has-The-Most-CHAOTIC-Power-Lines-in-the-World\.09_burned_bilingual_video.cc7902daa82a441ab3bcd553b2af4f7f.tmp.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.12.101
+  Stream #0:0(und): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], q=2-31, 29.97 fps, 30k tbn (default)
+    Metadata:
+      encoder         : Lavc62.28.101 h264_nvenc
+      handler_name    : ISO Media file produced by Google Inc.
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A
+  Stream #0:1(eng): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 127 kb/s (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1861, in safe_reburn_from_ass_job
+    reburn_from_ass_job(project_path, task_id)
+  File "D:\autosub_zh\ui_server.py", line 1801, in reburn_from_ass_job
+    burn_subtitle(
+  File "D:\autosub_zh\pipeline_core.py", line 224, in burn_subtitle
+    fallback_args[cq_index : cq_index + 2] = ["-crf", "25"]
+  File "D:\autosub_zh\media.py", line 272, in run_ffmpeg_command
+    raise RuntimeError(f"Command failed: {command}\n{details}")
+RuntimeError: Command failed: ffmpeg -progress pipe:1 -nostats -y -i D:\autosub_zh\input\Why Tokyo Has The Most CHAOTIC Power Lines in the World？.mp4 -vf ass='C\:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' -c:v libx264 -preset medium -crf 25 -pix_fmt yuv420p -c:a copy D:\autosub_zh\output\已发归档\Why-Tokyo-Has-The-Most-CHAOTIC-Power-Lines-in-the-World\.09_burned_bilingual_video.cc7902daa82a441ab3bcd553b2af4f7f.tmp.mp4
+ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 15.2.0 (Rev13, Built by MSYS2 project)
+  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-zlib --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-sdl2 --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxvid --enable-libaom --enable-libopenjpeg --enable-libvpx --enable-mediafoundation --enable-libass --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-openal --enable-libgme --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libtheora --enable-libvo-amrwbenc --enable-libgsm --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-librubberband
+  libavutil      60. 26.101 / 60. 26.101
+  libavcodec     62. 28.101 / 62. 28.101
+  libavformat    62. 12.101 / 62. 12.101
+  libavdevice    62.  3.101 / 62.  3.101
+  libavfilter    11. 14.101 / 11. 14.101
+  libswscale      9.  5.101 /  9.  5.101
+  libswresample   6.  3.101 /  6.  3.101
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\autosub_zh\input\Why Tokyo Has The Most CHAOTIC Power Lines in the World？.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.12.101
+  Duration: 00:12:13.77, start: 0.000000, bitrate: 1298 kb/s
+  Stream #0:0[0x1](und): Video: av1 (libaom-av1) (Main) (av01 / 0x31307661), yuv420p(tv, bt709), 1920x1080 [SAR 1:1 DAR 16:9], 1164 kb/s, 29.97 fps, 29.97 tbr, 30k tbn (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+  Stream #0:1[0x2](eng): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 127 kb/s (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+[Parsed_ass_0 @ 0000029971fae680] libass API version: 0x1704000
+[Parsed_ass_0 @ 0000029971fae680] libass source: commit: 0.17.4-27-g1cbba0a8818c83495114b3c2b5730410eecbdb2c
+[Parsed_ass_0 @ 0000029971fae680] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+[Parsed_ass_0 @ 0000029971fae680] Using font provider directwrite (with GDI)
+[Parsed_ass_0 @ 0000029971fae680] Added subtitle file: 'C:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' (3 styles, 482 events)
+Stream mapping:
+  Stream #0:0 -> #0:0 (av1 (libaom-av1) -> h264 (libx264))
+  Stream #0:1 -> #0:1 (copy)
+Press [q] to stop, [?] for help
+[Parsed_ass_0 @ 0000029971faf480] libass API version: 0x1704000
+[Parsed_ass_0 @ 0000029971faf480] libass source: commit: 0.17.4-27-g1cbba0a8818c83495114b3c2b5730410eecbdb2c
+[Parsed_ass_0 @ 0000029971faf480] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+[Parsed_ass_0 @ 0000029971faf480] Using font provider directwrite (with GDI)
+[Parsed_ass_0 @ 0000029971faf480] Added subtitle file: 'C:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' (3 styles, 482 events)
+[Parsed_ass_0 @ 0000029971faf480] fontselect: (Maple Mono NF CN, 400, 0) -> MapleMono-NF-CN-Regular, 0, MapleMono-NF-CN-Regular
+[Parsed_ass_0 @ 0000029971faf480] fontselect: (Maple Mono, 400, 0) -> ArialMT, 0, ArialMT
+[libx264 @ 0000029972007e40] using SAR=1/1
+[libx264 @ 0000029972007e40] using cpu capabilities: MMX2 SSE2Fast SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2
+[libx264 @ 0000029972007e40] profile High, level 4.0, 4:2:0, 8-bit
+[libx264 @ 0000029972007e40] 264 - core 165 r3223 0480cb0 - H.264/MPEG-4 AVC codec - Copyleft 2003-2025 - http://www.videolan.org/x264.html - options: cabac=1 ref=3 deblock=1:0:0 analyse=0x3:0x113 me=hex subme=7 psy=1 psy_rd=1.00:0.00 mixed_ref=1 me_range=16 chroma_me=1 trellis=1 8x8dct=1 cqm=0 deadzone=21,11 fast_pskip=1 chroma_qp_offset=-2 threads=34 lookahead_threads=5 sliced_threads=0 nr=0 decimate=1 interlaced=0 bluray_compat=0 constrained_intra=0 bframes=3 b_pyramid=2 b_adapt=1 b_bias=0 direct=1 weightb=1 open_gop=0 weightp=2 keyint=250 keyint_min=25 scenecut=40 intra_refresh=0 rc_lookahead=40 rc=crf mbtree=1 crf=25.0 qcomp=0.60 qpmin=0 qpmax=69 qpstep=4 ip_ratio=1.40 aq=1:1.00
+Output #0, mp4, to 'D:\autosub_zh\output\已发归档\Why-Tokyo-Has-The-Most-CHAOTIC-Power-Lines-in-the-World\.09_burned_bilingual_video.cc7902daa82a441ab3bcd553b2af4f7f.tmp.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.12.101
+  Stream #0:0(und): Video: h264 (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], q=2-31, 29.97 fps, 30k tbn (default)
+    Metadata:
+      encoder         : Lavc62.28.101 libx264
+      handler_name    : ISO Media file produced by Google Inc.
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A
+  Stream #0:1(eng): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 127 kb/s (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\downloaders.py", line 524, in download
+    return self.ytdlp.native_download(url)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\downloaders.py", line 296, in native_download
+    raise DownloadError(
+autosub_zh.downloaders.DownloadError: yt-dlp download failed; primary: [0;31mERROR:[0m [youtube] Tmte0qRKF1A: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies | fallback: [0;31mERROR:[0m [youtube] Tmte0qRKF1A: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1698, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1833, in __extract_info
+    ie_result = ie.extract(url)
+                ^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\extractor\common.py", line 763, in extract
+    ie_result = self._real_extract(url)
+                ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\extractor\youtube\_video.py", line 4061, in _real_extract
+    self.raise_no_formats(reason, expected=True)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\extractor\common.py", line 1275, in raise_no_formats
+    raise ExtractorError(msg, expected=expected, video_id=video_id)
+yt_dlp.utils.ExtractorError: [youtube] Tmte0qRKF1A: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\downloaders.py", line 310, in extract_direct_media
+    info = ydl.extract_info(url, download=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1687, in extract_info
+    return self.__extract_info(url, self.get_info_extractor(key), download, extra_info, process)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1716, in wrapper
+    self.report_error(str(e), e.format_traceback())
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1154, in report_error
+    self.trouble(f'{self._format_err("ERROR:", self.Styles.ERROR)} {message}', *args, **kwargs)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1093, in trouble
+    raise DownloadError(message, exc_info)
+yt_dlp.utils.DownloadError: [0;31mERROR:[0m [youtube] Tmte0qRKF1A: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\downloaders.py", line 532, in download
+    return self.idm_bridge_download(url)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\downloaders.py", line 542, in idm_bridge_download
+    media_items = self.ytdlp.extract_direct_media(url)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\downloaders.py", line 312, in extract_direct_media
+    raise DownloadError(
+autosub_zh.downloaders.DownloadError: yt-dlp could not extract direct media URLs: [0;31mERROR:[0m [youtube] Tmte0qRKF1A: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1893, in download_and_optionally_run_job
+    video = download_video_from_url(url, config, task_id)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\ui_server.py", line 1884, in download_video_from_url
+    result = manager.download(url)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\downloaders.py", line 535, in download
+    return self.require_manual_import(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\downloaders.py", line 612, in require_manual_import
+    raise ManualImportRequired(message, details=details)
+autosub_zh.downloaders.ManualImportRequired: Automatic download failed. Use the browser IDM integration to download the video into D:\autosub_zh\input, then click scan input in the UI.
+
+
+Traceback (most recent call last):
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1698, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1833, in __extract_info
+    ie_result = ie.extract(url)
+                ^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\extractor\common.py", line 763, in extract
+    ie_result = self._real_extract(url)
+                ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\extractor\youtube\_video.py", line 4061, in _real_extract
+    self.raise_no_formats(reason, expected=True)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\extractor\common.py", line 1275, in raise_no_formats
+    raise ExtractorError(msg, expected=expected, video_id=video_id)
+yt_dlp.utils.ExtractorError: [youtube] Tmte0qRKF1A: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 2101, in do_POST
+    manifest = youtube_assets_job(url, download_cover_only=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\ui_server.py", line 1574, in youtube_assets_job
+    meta = fetch_youtube_meta(url, proxy_url=get_proxy_url())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\youtube_meta.py", line 100, in fetch_youtube_meta
+    info = ydl.extract_info(url, download=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1687, in extract_info
+    return self.__extract_info(url, self.get_info_extractor(key), download, extra_info, process)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1716, in wrapper
+    self.report_error(str(e), e.format_traceback())
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1154, in report_error
+    self.trouble(f'{self._format_err("ERROR:", self.Styles.ERROR)} {message}', *args, **kwargs)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1093, in trouble
+    raise DownloadError(message, exc_info)
+yt_dlp.utils.DownloadError: [0;31mERROR:[0m [youtube] Tmte0qRKF1A: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
+
+
+[run_pipeline_job:start] video_path=C:\Users\bulbel\Downloads\The Secret Plan to Save a Toxic Megastructure.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=C:\Users\bulbel\Downloads\The Secret Plan to Save a Toxic Megastructure.mp4
+output_dir=D:\autosub_zh\output\The-Secret-Plan-to-Save-a-Toxic-Megastructure
+files=34
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 2144, in do_POST
+    resolved_video_path = str(resolve_input_video_path(payload["video_path"]))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\ui_server.py", line 692, in resolve_input_video_path
+    raise FileNotFoundError(f"Input video not found: {raw}")
+FileNotFoundError: Input video not found: D:\autosub_zh\input\5.19-yt\How did Alchemy work?.mp4
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\How did Alchemy work.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\How did Alchemy work？.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\5.19-yt\How did Alchemy work？.mp4
+output_dir=D:\autosub_zh\output\How-did-Alchemy-work
+files=31
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\What is Hermeticism？.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\media.py", line 120, in run_command
+    return subprocess.run(
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['ffprobe', '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', 'D:\\autosub_zh\\input\\What is Hermeticism？.mp4']' returned non-zero exit status 1.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 1255, in run_pipeline
+    burn_plan = burn_subtitle(
+                ^^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 160, in burn_subtitle
+    if needs_downscale(video_path):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 140, in needs_downscale
+    probe = probe_media(video_path)
+            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\media.py", line 294, in probe_media
+    completed = run_command(
+                ^^^^^^^^^^^^
+  File "D:\autosub_zh\media.py", line 138, in run_command
+    raise RuntimeError(f"Command failed: {command}\n{details}") from exc
+RuntimeError: Command failed: ffprobe -v error -print_format json -show_format -show_streams D:\autosub_zh\input\What is Hermeticism？.mp4
+D:\autosub_zh\input\What is Hermeticism？.mp4: Illegal byte sequence
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\Secrets of the Voynich Manuscript.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\Secrets of the Voynich Manuscript.mp4
+output_dir=D:\autosub_zh\output\Secrets-of-the-Voynich-Manuscript
+files=34
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\pipeline_core.py", line 229, in burn_subtitle
+    temp_output_path.replace(output_path)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\pathlib.py", line 1188, in replace
+    os.replace(self, target)
+PermissionError: [WinError 5] 拒绝访问。: 'D:\\autosub_zh\\output\\Secrets-of-the-Voynich-Manuscript\\.09_burned_bilingual_video.a7505831389f44838f065487b1ffa43f.tmp.mp4' -> 'D:\\autosub_zh\\output\\Secrets-of-the-Voynich-Manuscript\\09_burned_bilingual_video.mp4'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1910, in safe_reburn_from_ass_job
+    reburn_from_ass_job(project_path, task_id)
+  File "D:\autosub_zh\ui_server.py", line 1850, in reburn_from_ass_job
+    burn_subtitle(
+  File "D:\autosub_zh\pipeline_core.py", line 236, in burn_subtitle
+    raise PermissionError(
+PermissionError: [Errno 13] Target output video is currently in use and could not be replaced. A new burned video was saved as: D:\autosub_zh\output\Secrets-of-the-Voynich-Manuscript\09_burned_bilingual_video.reburned.0d64af4e.mp4: 'D:\\autosub_zh\\output\\Secrets-of-the-Voynich-Manuscript\\09_burned_bilingual_video.mp4'
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\Wittgenstein on Religion.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+Traceback (most recent call last):
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1698, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1854, in __extract_info
+    return self.process_ie_result(ie_result, download, extra_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1913, in process_ie_result
+    ie_result = self.process_video_result(ie_result, download=download)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 3058, in process_video_result
+    raise ExtractorError(
+yt_dlp.utils.ExtractorError: [youtube] -0ViohsKbDw: Requested format is not available. Use --list-formats for a list of available formats
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 2141, in do_POST
+    manifest = youtube_info_job(url)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\ui_server.py", line 1648, in youtube_info_job
+    meta = fetch_youtube_info(url, proxy_url=get_proxy_url())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\youtube_meta.py", line 131, in fetch_youtube_info
+    meta = fetch_youtube_meta(url, proxy_url=proxy_url)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\youtube_meta.py", line 107, in fetch_youtube_meta
+    info = ydl.extract_info(url, download=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1687, in extract_info
+    return self.__extract_info(url, self.get_info_extractor(key), download, extra_info, process)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1716, in wrapper
+    self.report_error(str(e), e.format_traceback())
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1154, in report_error
+    self.trouble(f'{self._format_err("ERROR:", self.Styles.ERROR)} {message}', *args, **kwargs)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1093, in trouble
+    raise DownloadError(message, exc_info)
+yt_dlp.utils.DownloadError: [0;31mERROR:[0m [youtube] -0ViohsKbDw: Requested format is not available. Use --list-formats for a list of available formats
+
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\Wittgenstein on Religion.mp4
+output_dir=D:\autosub_zh\output\Wittgenstein-on-Religion
+files=34
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+

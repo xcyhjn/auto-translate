@@ -9,11 +9,23 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import httpx
-from yt_dlp import YoutubeDL
+
+from .yt_dlp_config import ytdlp_auth_options_from_user_config
 
 
 YOUTUBE_DOMAINS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}
 YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def get_youtube_dl_class():
+    try:
+        from yt_dlp import YoutubeDL
+    except ImportError as exc:
+        raise RuntimeError(
+            "yt-dlp is not installed in this Python environment. "
+            "Install it with: python -m pip install yt-dlp"
+        ) from exc
+    return YoutubeDL
 
 
 @dataclass(slots=True)
@@ -71,6 +83,7 @@ def extract_video_id(url: str) -> str:
     if YOUTUBE_ID_RE.match(candidate or ""):
         return candidate
 
+    YoutubeDL = get_youtube_dl_class()
     with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
         info = ydl.extract_info(url, download=False)
     if isinstance(info, dict):
@@ -81,9 +94,15 @@ def extract_video_id(url: str) -> str:
 
 
 def fetch_youtube_meta(url: str, *, proxy_url: str | None = None) -> YouTubeMeta:
-    options = {"quiet": True, "no_warnings": True, "skip_download": True}
+    options = {
+        **ytdlp_auth_options_from_user_config(),
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+    }
     if proxy_url:
         options["proxy"] = proxy_url
+    YoutubeDL = get_youtube_dl_class()
     with YoutubeDL(options) as ydl:
         info = ydl.extract_info(url, download=False)
     if not isinstance(info, dict):

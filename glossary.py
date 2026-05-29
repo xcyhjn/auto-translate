@@ -78,6 +78,50 @@ NOISY_CANDIDATE_RE = re.compile(
     re.IGNORECASE,
 )
 ASR_TERM_RE = re.compile(rf"\b{TITLE_CASE_WORD_RE}(?:\s+(?:{TITLE_CASE_WORD_RE}|{CONNECTOR_RE}))*")
+POSSESSIVE_SUFFIX_RE = re.compile(r"(?:['’]s|s['’])$", re.IGNORECASE)
+
+COMMON_TRANSLATABLE_TERMS = {
+    "america": "美国",
+    "american": "美国",
+    "americans": "美国人",
+    "berlin": "柏林",
+    "britain": "英国",
+    "british": "英国",
+    "china": "中国",
+    "chinese": "中国",
+    "edo": "江户",
+    "europe": "欧洲",
+    "european": "欧洲",
+    "europeans": "欧洲人",
+    "france": "法国",
+    "french": "法国",
+    "germany": "德国",
+    "german": "德国",
+    "japan": "日本",
+    "japanese": "日本",
+    "london": "伦敦",
+    "meiji": "明治",
+    "pacific ring of fire": "环太平洋火山地震带",
+    "paris": "巴黎",
+    "shibuya": "涩谷",
+    "shinjuku": "新宿",
+    "tokyo": "东京",
+    "tokyo olympics": "东京奥运会",
+    "uncle sam": "山姆大叔",
+    "united states": "美国",
+    "world war ii": "二战",
+    "world war 2": "二战",
+    "wwii": "二战",
+    "ww2": "二战",
+}
+
+COMMON_TRANSLATABLE_ALIASES = {
+    "america": ["United States", "U.S.", "USA", "U.S.A."],
+    "japan": ["Japan's"],
+    "tokyo": ["Tokyo's"],
+    "europe": ["Europe's"],
+    "world war ii": ["World War 2", "WWII", "WW2"],
+}
 
 
 @dataclass(slots=True)
@@ -98,9 +142,55 @@ def normalize_term_key(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip()).casefold()
 
 
+def normalize_common_term_key(text: str) -> str:
+    cleaned = clean_candidate(text)
+    cleaned = POSSESSIVE_SUFFIX_RE.sub("", cleaned)
+    cleaned = re.sub(r"[\W_]+", " ", cleaned.casefold())
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def common_translation_for_term(text: str) -> tuple[str, str, list[str]] | None:
+    common_key = normalize_common_term_key(text)
+    if not common_key:
+        return None
+    zh = COMMON_TRANSLATABLE_TERMS.get(common_key)
+    if not zh:
+        return None
+    aliases = COMMON_TRANSLATABLE_ALIASES.get(common_key, [])
+    return zh, "common_zh_name", aliases
+
+
 def clean_candidate(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", text.strip(" \t\r\n.,;:!?()[]{}<>\"'“”‘’"))
     return cleaned.strip()
+
+
+def common_term_surface_forms() -> list[str]:
+    forms: set[str] = set(COMMON_TRANSLATABLE_TERMS)
+    for aliases in COMMON_TRANSLATABLE_ALIASES.values():
+        forms.update(alias for alias in aliases if alias)
+    return sorted(forms, key=len, reverse=True)
+
+
+def common_surface_pattern(surface: str) -> re.Pattern[str]:
+    escaped = re.escape(surface).replace(r"\ ", r"\s+")
+    return re.compile(rf"(?<![A-Za-z0-9]){escaped}(?:['’]s|s['’])?(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def extract_common_translatable_terms(text: str) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+    for surface in common_term_surface_forms():
+        for match in common_surface_pattern(surface).finditer(text or ""):
+            candidate = clean_candidate(match.group(0))
+            key = normalize_term_key(candidate)
+            if not candidate or key in seen:
+                continue
+            if common_translation_for_term(candidate) is None:
+                continue
+            seen.add(key)
+            found.append(candidate)
+    return found
 
 
 def looks_like_term(text: str) -> bool:
@@ -155,12 +245,25 @@ def add_candidate(
     canonical = clean_candidate(text)
     if not looks_like_term(canonical):
         return
+    common_translation = common_translation_for_term(canonical)
+    aliases: list[str] = []
+    if common_translation is not None:
+        zh, term_type, aliases = common_translation
+        policy = "translate"
+        priority = "hard"
+        confidence = max(confidence, 0.98)
+        if not short_name:
+            short_name = zh
+    else:
+        zh = canonical
+        term_type = term_type
     key = normalize_term_key(canonical)
     existing = terms.get(key)
     if existing is None:
         terms[key] = GlossaryTerm(
             canonical=canonical,
             type=term_type,
+            aliases=aliases,
             zh=canonical,
             policy=policy,
             confidence=confidence,
@@ -168,7 +271,18 @@ def add_candidate(
             short_name=short_name,
             sources=[source],
         )
+        if common_translation is not None:
+            terms[key].zh = zh
         return
+    if common_translation is not None:
+        existing.type = term_type
+        existing.zh = zh
+        existing.policy = "translate"
+        existing.priority = "hard"
+        existing.short_name = existing.short_name or zh
+        for alias in aliases:
+            if alias not in existing.aliases:
+                existing.aliases.append(alias)
     existing.confidence = max(existing.confidence, confidence)
     if priority and not existing.priority:
         existing.priority = priority
@@ -233,6 +347,15 @@ def extract_mention_terms(text: str) -> list[tuple[str, str, float]]:
 
 def generate_youtube_glossary(meta: YouTubeMeta) -> dict:
     terms: dict[str, GlossaryTerm] = {}
+    for candidate in extract_common_translatable_terms(f"{meta.title}\n{meta.description}"):
+        add_candidate(
+            terms,
+            candidate,
+            source="common_zh_name",
+            confidence=0.99,
+            priority="hard",
+            policy="translate",
+        )
     for candidate, source, confidence in extract_title_subject_terms(meta.title):
         add_candidate(
             terms,
@@ -326,6 +449,10 @@ def generate_asr_terms(segments: list[Segment], *, min_count: int = 2) -> dict:
     first_seen: dict[str, str] = {}
     for segment in segments:
         text = URL_BRAND_RE.sub(" ", segment.source_text or "")
+        for candidate in extract_common_translatable_terms(text):
+            key = normalize_term_key(candidate)
+            counts[key] += 1
+            first_seen.setdefault(key, candidate)
         for match in ASR_TERM_RE.finditer(text):
             candidate = clean_candidate(match.group(0))
             if not looks_like_term(candidate):
@@ -339,18 +466,33 @@ def generate_asr_terms(segments: list[Segment], *, min_count: int = 2) -> dict:
         if count < min_count:
             continue
         canonical = first_seen[key]
-        if not looks_like_asr_term(canonical, count):
-            continue
         confidence = min(0.82, 0.45 + count * 0.05)
-        terms[key] = GlossaryTerm(
-            canonical=canonical,
-            type="asr_candidate",
-            zh=canonical,
-            policy="preserve",
-            confidence=confidence,
-            short_name=canonical.split()[0] if " " in canonical else canonical,
-            sources=[f"asr_count:{count}"],
-        )
+        common_translation = common_translation_for_term(canonical)
+        if common_translation is None and not looks_like_asr_term(canonical, count):
+            continue
+        if common_translation is not None:
+            zh, term_type, aliases = common_translation
+            terms[key] = GlossaryTerm(
+                canonical=canonical,
+                type=term_type,
+                aliases=aliases,
+                zh=zh,
+                policy="translate",
+                confidence=max(confidence, 0.98),
+                priority="hard",
+                short_name=zh,
+                sources=[f"asr_count:{count}", "common_zh_name"],
+            )
+        else:
+            terms[key] = GlossaryTerm(
+                canonical=canonical,
+                type="asr_candidate",
+                zh=canonical,
+                policy="preserve",
+                confidence=confidence,
+                short_name=canonical.split()[0] if " " in canonical else canonical,
+                sources=[f"asr_count:{count}"],
+            )
     return glossary_from_terms(terms, strategy="asr_term_discovery")
 
 
@@ -377,6 +519,11 @@ def term_pattern(term: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])", re.IGNORECASE)
 
 
+def translatable_term_pattern(term: str) -> re.Pattern[str]:
+    escaped = re.escape(clean_candidate(term))
+    return re.compile(rf"(?<![A-Za-z0-9]){escaped}(?:['’]s|s['’])?(?![A-Za-z0-9])", re.IGNORECASE)
+
+
 def replace_bad_aliases(text: str, replacements: list[tuple[str, str]]) -> tuple[str, int]:
     if not text or not replacements:
         return text, 0
@@ -385,6 +532,20 @@ def replace_bad_aliases(text: str, replacements: list[tuple[str, str]]) -> tuple
     count = 0
     for bad_alias, canonical in replacements:
         replaced, hits = term_pattern(bad_alias).subn(canonical, replaced)
+        count += hits
+    return replaced, count
+
+
+def replace_translatable_terms(text: str, replacements: list[tuple[str, str]]) -> tuple[str, int]:
+    if not text or not replacements:
+        return text, 0
+
+    replaced = text
+    count = 0
+    for source_form, zh in replacements:
+        if not source_form or not zh:
+            continue
+        replaced, hits = translatable_term_pattern(source_form).subn(zh, replaced)
         count += hits
     return replaced, count
 
@@ -416,6 +577,43 @@ def build_alias_replacements(glossary_path: str | Path | None) -> list[tuple[str
                 continue
             seen.add(key)
             replacements.append((bad_alias, canonical))
+
+    replacements.sort(key=lambda item: len(item[0]), reverse=True)
+    return replacements
+
+
+def build_translate_policy_replacements(glossary_path: str | Path | None) -> list[tuple[str, str]]:
+    if not glossary_path:
+        return []
+    path = Path(glossary_path)
+    if not path.exists() or path.suffix.lower() != ".json":
+        return []
+
+    payload = load_glossary_payload(path)
+    replacements: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in payload.get("terms", []):
+        if not isinstance(item, dict):
+            continue
+        policy = str(item.get("policy") or "").strip()
+        if policy != "translate":
+            continue
+        zh = str(item.get("zh") or "").strip()
+        if not zh:
+            continue
+        forms = [
+            clean_candidate(str(item.get("canonical") or "")),
+            *[clean_candidate(str(value)) for value in item.get("aliases") or []],
+            *[clean_candidate(str(value)) for value in item.get("bad_aliases") or []],
+        ]
+        for form in forms:
+            if len(form) < 2 or form == zh:
+                continue
+            key = (normalize_term_key(form), zh)
+            if key in seen:
+                continue
+            seen.add(key)
+            replacements.append((form, zh))
 
     replacements.sort(key=lambda item: len(item[0]), reverse=True)
     return replacements
@@ -458,10 +656,49 @@ def apply_glossary_alias_corrections(
     return stats
 
 
+def apply_translate_policy_corrections(
+    segments: list[Segment],
+    glossary_path: str | Path | None,
+) -> dict:
+    replacements = build_translate_policy_replacements(glossary_path)
+    stats = {
+        "segments_changed": 0,
+        "target_text_replacements": 0,
+        "replacement_count": len(replacements),
+    }
+    if not replacements:
+        return stats
+
+    for segment in segments:
+        if segment.target_text is None:
+            continue
+        target_text, target_count = replace_translatable_terms(segment.target_text, replacements)
+        if not target_count:
+            continue
+        segment.target_text = target_text
+        stats["target_text_replacements"] += target_count
+        stats["segments_changed"] += 1
+
+    return stats
+
+
 def merge_term_item(terms: dict[str, GlossaryTerm], item: dict) -> None:
     canonical = clean_candidate(str(item.get("canonical") or ""))
     if not canonical:
         return
+    common_translation = common_translation_for_term(canonical)
+    if common_translation is not None:
+        common_zh, common_type, common_aliases = common_translation
+        item = {
+            **item,
+            "type": common_type,
+            "zh": common_zh,
+            "policy": "translate",
+            "priority": "hard",
+            "confidence": max(float(item.get("confidence") or 0.5), 0.98),
+            "short_name": str(item.get("short_name") or common_zh),
+            "aliases": [*(item.get("aliases") or []), *common_aliases],
+        }
     key = normalize_term_key(canonical)
     aliases = [clean_candidate(str(value)) for value in item.get("aliases") or [] if clean_candidate(str(value))]
     bad_aliases = [clean_candidate(str(value)) for value in item.get("bad_aliases") or [] if clean_candidate(str(value))]
@@ -482,6 +719,12 @@ def merge_term_item(terms: dict[str, GlossaryTerm], item: dict) -> None:
             sources=sources,
         )
         return
+    if common_translation is not None:
+        existing.type = str(item.get("type") or existing.type)
+        existing.zh = str(item.get("zh") or existing.zh)
+        existing.policy = "translate"
+        existing.priority = "hard"
+        existing.short_name = existing.short_name or str(item.get("short_name") or existing.zh)
     existing.confidence = max(existing.confidence, confidence)
     if not existing.zh and item.get("zh"):
         existing.zh = str(item.get("zh"))

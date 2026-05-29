@@ -17,6 +17,7 @@ from .translate import (
     resolve_openai_base_url,
     short_error_message,
 )
+from .text_quality import find_short_english_leaks
 
 
 OPEN_ENDING_SUFFIXES = (
@@ -113,6 +114,8 @@ def rewrite_segment_text(segment: Segment, style: BilingualSubtitleStyle) -> tup
         actions.append("review_filler")
     if rewritten and not contains_chinese(rewritten) and has_translatable_alpha_text(segment.source_text):
         actions.append("review_no_chinese")
+    if find_short_english_leaks(rewritten, dst_lang="zh-Hans"):
+        actions.append("review_short_english_leak")
     if rewritten and normalize_for_equality(rewritten) == normalize_for_equality(segment.source_text):
         actions.append("review_source_echo")
     if visible_len > hard_line_limit:
@@ -135,7 +138,7 @@ def should_use_ai_display_rewrite(actions: list[str], details: dict) -> bool:
     if not actions:
         return False
     action_set = set(actions)
-    if action_set & {"review_open_ending", "review_lone_fragment", "review_source_echo"}:
+    if action_set & {"review_open_ending", "review_lone_fragment", "review_source_echo", "review_short_english_leak"}:
         return True
     if "review_cps_high" in action_set and float(details.get("cps") or 0.0) >= 20.0:
         return True

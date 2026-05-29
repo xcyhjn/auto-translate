@@ -1,0 +1,58 @@
+﻿**********************
+Windows PowerShell 脚本开始
+开始时间: 20260528021657
+用户名: XCYHJN\bulbel
+RunAs 用户: XCYHJN\bulbel
+配置名称: 
+计算机: XCYHJN (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\autosub_zh\start_ui_server_8777_codex.ps1
+进程 ID: 4200
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+UI server running at http://127.0.0.1:8777
+Translating chunk 1/11 with 40 segments.
+Translating chunk 2/11 with 40 segments.
+Translating chunk 3/11 with 40 segments.
+Translating chunk 4/11 with 40 segments.
+Translating chunk 5/11 with 40 segments.
+Translating chunk 6/11 with 40 segments.
+Translating chunk 7/11 with 40 segments.
+Translating chunk 8/11 with 40 segments.
+Translating chunk 9/11 with 40 segments.
+Translating chunk 10/11 with 40 segments.
+Translating chunk 11/11 with 21 segments.
+Translating chunk 1/13 with 40 segments.
+Translating chunk 2/13 with 40 segments.
+Translating chunk 3/13 with 40 segments.
+Translating chunk 4/13 with 40 segments.
+PS>$global:?
+True
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260528034713
+**********************
+**********************
+Windows PowerShell 脚本开始
+开始时间: 20260528034731
+用户名: XCYHJN\bulbel
+RunAs 用户: XCYHJN\bulbel
+配置名称: 
+计算机: XCYHJN (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\autosub_zh\start_ui_server_8777_codex.ps1
+进程 ID: 5416
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************

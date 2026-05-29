@@ -8,12 +8,20 @@ TRANSLATABLE_DISCOURSE_MARKERS = {
     "actually",
     "again",
     "alright",
+    "and",
     "anyway",
     "basically",
     "because",
+    "but",
     "cause",
     "exactly",
     "honestly",
+    "i",
+    "i'd",
+    "i'll",
+    "i'm",
+    "i've",
+    "im",
     "just",
     "like",
     "literally",
@@ -25,6 +33,8 @@ TRANSLATABLE_DISCOURSE_MARKERS = {
     "seriously",
     "so",
     "sure",
+    "that's",
+    "thats",
     "then",
     "though",
     "well",
@@ -36,6 +46,38 @@ DISCOURSE_MARKER_RE = re.compile(
     rf"(?<![A-Za-z0-9_.-])({'|'.join(sorted(map(re.escape, TRANSLATABLE_DISCOURSE_MARKERS), key=len, reverse=True))})(?![A-Za-z0-9_-])",
     re.IGNORECASE,
 )
+
+ASMR_PET_CONTEXT_RE = re.compile(
+    r"\b(?:good\s+boy|puppy|pup|pet|pat|rub|cuddle|comfort|darling|feel\s+good|head|hair|forever)\b",
+    re.IGNORECASE,
+)
+SOURCE_ASR_SUSPICION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"\b(?:i(?:'|’)?ll|i\s+will|when\s+i|while\s+i|if\s+i)\s+bet\s+you\b", re.IGNORECASE),
+        "possible_pet_bet_misrecognition",
+    ),
+    (
+        re.compile(r"\bfeel\s+good\s+good\b", re.IGNORECASE),
+        "duplicated_source_word",
+    ),
+    (
+        re.compile(r"\byou\s+don'?t\s+need\s+me\s+to\s+give\s+me\s+the\s+world\b", re.IGNORECASE),
+        "probable_inserted_pronoun",
+    ),
+    (
+        re.compile(r"\bi\s+love\s*\.?\s*$", re.IGNORECASE),
+        "truncated_i_love_you",
+    ),
+)
+LITERAL_CHINESE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"让我安慰"), "comfort_you_literal_as_let_me_be_comforted"),
+    (re.compile(r"让我抚摸"), "pet_you_literal_as_let_me_pet"),
+    (re.compile(r"我就完整"), "complete_literal_as_whole"),
+    (re.compile(r"我很完整"), "complete_literal_as_whole"),
+    (re.compile(r"把世界给我"), "give_me_the_world_literal"),
+)
+SENTENCE_SPLIT_RE = re.compile(r"[.!?。！？]+")
+LATIN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9'.-]*")
 
 
 DISALLOWED_SCRIPT_RANGES = (
@@ -146,6 +188,78 @@ def contains_chinese(text: str) -> bool:
     return bool(re.search(r"[\u3400-\u9fff]", text or ""))
 
 
+def normalize_latin_phrase(text: str) -> str:
+    return " ".join(word.casefold().strip(".'’") for word in LATIN_WORD_RE.findall(text or ""))
+
+
+def find_source_asr_suspicions(text: str, *, context_text: str | None = None) -> list[str]:
+    if not text:
+        return []
+    haystack = f"{context_text or ''} {text}"
+    issues: list[str] = []
+    seen: set[str] = set()
+    for pattern, label in SOURCE_ASR_SUSPICION_PATTERNS:
+        if not pattern.search(text):
+            continue
+        if label == "possible_pet_bet_misrecognition" and not ASMR_PET_CONTEXT_RE.search(haystack):
+            continue
+        if label not in seen:
+            seen.add(label)
+            issues.append(label)
+    return issues
+
+
+def find_repeated_short_source_phrases(text: str, *, min_words: int = 2, max_words: int = 6) -> list[str]:
+    if not text:
+        return []
+    phrases: list[str] = []
+    for part in SENTENCE_SPLIT_RE.split(text):
+        normalized = normalize_latin_phrase(part)
+        if not normalized:
+            continue
+        word_count = len(normalized.split())
+        if min_words <= word_count <= max_words:
+            phrases.append(normalized)
+    counts: dict[str, int] = {}
+    repeated: list[str] = []
+    for phrase in phrases:
+        counts[phrase] = counts.get(phrase, 0) + 1
+        if counts[phrase] == 2:
+            repeated.append(phrase)
+    return repeated
+
+
+def find_literal_chinese_artifacts(target_text: str, *, source_text: str | None = None) -> list[str]:
+    if not target_text:
+        return []
+    issues: list[str] = []
+    source = source_text or ""
+    for pattern, label in LITERAL_CHINESE_PATTERNS:
+        if not pattern.search(target_text):
+            continue
+        if label == "pet_you_literal_as_let_me_pet" and not re.search(r"\b(?:have\s+you\s+to\s+pet|pet\s+you)\b", source, re.IGNORECASE):
+            continue
+        if label == "comfort_you_literal_as_let_me_be_comforted" and not re.search(r"\b(?:have\s+you\s+to\s+comfort|comfort\s+you)\b", source, re.IGNORECASE):
+            continue
+        if label == "complete_literal_as_whole" and not re.search(r"\bcomplete\b", source, re.IGNORECASE):
+            continue
+        issues.append(label)
+    return issues
+
+
+def find_source_target_semantic_conflicts(source_text: str, target_text: str) -> list[str]:
+    if not source_text or not target_text:
+        return []
+    issues: list[str] = []
+    if re.search(r"\bbet\s+you\b", source_text, re.IGNORECASE) and re.search(r"抚摸|摸摸|宠", target_text):
+        issues.append("target_implies_pet_but_source_says_bet")
+    if re.search(r"\bpet\s+you\b", source_text, re.IGNORECASE) and re.search(r"打赌|赌你|押", target_text):
+        issues.append("target_implies_bet_but_source_says_pet")
+    if re.search(r"\bhave\s+you\s+to\s+comfort\b", source_text, re.IGNORECASE) and "让我安慰" in target_text:
+        issues.append("comfort_direction_reversed")
+    return issues
+
+
 def find_untranslated_discourse_markers(
     text: str,
     *,
@@ -156,9 +270,10 @@ def find_untranslated_discourse_markers(
         return []
     if not contains_chinese(text):
         return []
+    scan_text = text.replace("`", "'").replace("’", "'")
     markers: list[str] = []
     seen: set[str] = set()
-    for match in DISCOURSE_MARKER_RE.finditer(text):
+    for match in DISCOURSE_MARKER_RE.finditer(scan_text):
         marker = match.group(1)
         key = marker.casefold()
         if key in seen:
@@ -172,6 +287,19 @@ def find_untranslated_discourse_markers(
 
 def has_untranslated_discourse_marker(text: str, *, dst_lang: str | None = None) -> bool:
     return bool(find_untranslated_discourse_markers(text, dst_lang=dst_lang, sample_limit=1))
+
+
+def find_short_english_leaks(
+    text: str,
+    *,
+    dst_lang: str | None = None,
+    sample_limit: int = 5,
+) -> list[str]:
+    return find_untranslated_discourse_markers(text, dst_lang=dst_lang, sample_limit=sample_limit)
+
+
+def has_short_english_leak(text: str, *, dst_lang: str | None = None) -> bool:
+    return bool(find_short_english_leaks(text, dst_lang=dst_lang, sample_limit=1))
 
 
 def has_text_pollution(text: str, *, dst_lang: str | None = None) -> bool:

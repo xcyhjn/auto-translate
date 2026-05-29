@@ -745,7 +745,7 @@ def enforce_minimum_split_durations(
     if len(segments) <= 1:
         return segments
 
-    min_duration = max(0.2, float(min_duration or 0.9))
+    min_duration = max(2.0, float(min_duration or 2.0))
     total_duration = max(0.0, original.end - original.start)
     if total_duration < len(segments) * min_duration:
         return segments

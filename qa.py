@@ -7,7 +7,14 @@ from pathlib import Path
 
 from .models import Segment, SubtitleRules
 from .subtitle_io import DisplayCue, wrap_chinese_text, normalize_inline_text
-from .text_quality import find_text_pollution, find_untranslated_discourse_markers, format_pollution_issues
+from .text_quality import (
+    find_literal_chinese_artifacts,
+    find_short_english_leaks,
+    find_source_target_semantic_conflicts,
+    find_text_pollution,
+    find_untranslated_discourse_markers,
+    format_pollution_issues,
+)
 
 DEFAULT_MAX_CHARS = 42
 DEFAULT_MAX_CPS = 18.0
@@ -19,12 +26,14 @@ DEFAULT_ZH_SOFT_MAX_LINE_CHARS = 33
 DEFAULT_ZH_HARD_MAX_LINE_CHARS = 36
 DEFAULT_ZH_SOFT_MAX_CPS = 18.0
 DEFAULT_ZH_HARD_MAX_CPS = 22.0
-FIRST_PERSON_I_RE = re.compile(r"(?<![A-Za-z])i(?=(?:['’](?:m|d|ll|ve|re)\b)|\b)")
+FIRST_PERSON_I_RE = re.compile(r"(?<![A-Za-z])i(?=(?:['’`](?:m|d|ll|ve|re)\b)|\b)", re.IGNORECASE)
 TRANSLATABLE_FUNCTION_WORDS = {
     "am",
+    "and",
     "are",
     "been",
     "being",
+    "but",
     "can",
     "could",
     "did",
@@ -32,11 +41,14 @@ TRANSLATABLE_FUNCTION_WORDS = {
     "had",
     "has",
     "have",
+    "im",
     "is",
     "might",
     "must",
     "should",
     "that",
+    "thats",
+    "then",
     "these",
     "they",
     "this",
@@ -49,7 +61,12 @@ TRANSLATABLE_FUNCTION_WORDS = {
 }
 DIFFICULT_SPAN_BLOCKING_REASON_CODES = {
     "number_mismatch",
+    "source_asr_suspicion",
+    "source_repeated_short_phrase",
     "source_suspicious_asr_word",
+    "source_target_semantic_conflict",
+    "target_literal_chinese_artifact",
+    "target_short_english_leak",
     "target_text_pollution",
     "target_too_short",
     "target_untranslated_discourse_marker",
@@ -90,8 +107,10 @@ def is_chinese_target_language(dst_lang: str | None) -> bool:
 
 def has_translatable_alpha_text(text: str) -> bool:
     words = [word.casefold() for word in re.findall(r"[A-Za-z]{2,}", text or "")]
+    if FIRST_PERSON_I_RE.search(text or ""):
+        return True
     if len(words) < 2:
-        return False
+        return bool(words and words[0] in TRANSLATABLE_FUNCTION_WORDS)
     if re.search(r"[.!?]", text or "") and len(words) >= 3:
         return True
     if any(word in TRANSLATABLE_FUNCTION_WORDS for word in words):
@@ -103,6 +122,13 @@ def contains_term(text: str, term: str) -> bool:
     if not text or not term:
         return False
     pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])", re.IGNORECASE)
+    return bool(pattern.search(text))
+
+
+def contains_term_or_possessive(text: str, term: str) -> bool:
+    if not text or not term:
+        return False
+    pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(term)}(?:['’]s|s['’])?(?![A-Za-z0-9])", re.IGNORECASE)
     return bool(pattern.search(text))
 
 
@@ -185,10 +211,14 @@ def qa_glossary_consistency(segments: list[Segment], glossary_path: str | Path |
             if len(canonical) < 3:
                 continue
             term_sources = [str(value) for value in item.get("sources") or []]
-            if not any(source.startswith(("youtube_", "user", "asr_fuzzy_alias")) for source in term_sources):
-                continue
             policy = str(item.get("policy") or "preserve").strip()
             priority = str(item.get("priority") or "").strip().lower()
+            if not (
+                policy == "translate"
+                and priority == "hard"
+                or any(source.startswith(("youtube_", "user", "asr_fuzzy_alias", "asr_count:", "common_zh_name")) for source in term_sources)
+            ):
+                continue
             bad_aliases = [str(value).strip() for value in item.get("bad_aliases") or [] if str(value).strip()]
             for bad_alias in bad_aliases:
                 if contains_term(source_text, bad_alias):
@@ -208,12 +238,14 @@ def qa_glossary_consistency(segments: list[Segment], glossary_path: str | Path |
                         )
                     else:
                         report.warnings.append(message)
-            if policy != "preserve" and contains_term(source_text, canonical) and target_text:
+            if policy != "preserve" and contains_term_or_possessive(source_text, canonical) and target_text:
                 zh = str(item.get("zh") or "").strip()
-                if zh and zh != canonical and contains_term(target_text, canonical) and not contains_term(target_text, zh):
-                    report.warnings.append(
-                        f"Segment {segment.id} keeps glossary term '{canonical}' but expected zh '{zh}'."
-                    )
+                if zh and zh != canonical and contains_term_or_possessive(target_text, canonical) and not contains_term(target_text, zh):
+                    message = f"Segment {segment.id} keeps glossary term '{canonical}' but expected zh '{zh}'."
+                    if priority == "hard" or policy == "translate":
+                        report.errors.append(message)
+                    else:
+                        report.warnings.append(message)
     return report
 
 
@@ -225,6 +257,8 @@ def is_blocking_difficult_span(span: dict) -> bool:
     reason_counts = span.get("reason_counts") if isinstance(span.get("reason_counts"), dict) else {}
     reason_codes = {str(key) for key in reason_counts}
     if "target_text_pollution" in reason_codes:
+        return True
+    if reason_codes & {"source_target_semantic_conflict", "target_literal_chinese_artifact", "source_asr_suspicion"}:
         return True
 
     open_target_count = int(reason_counts.get("target_open_ending") or 0)
@@ -293,12 +327,18 @@ def build_quality_metrics(
             "empty_target_count": 0,
             "target_without_chinese_count": 0,
             "text_pollution_count": 0,
+            "short_english_leak_count": 0,
             "untranslated_discourse_marker_count": 0,
+            "literal_chinese_artifact_count": 0,
+            "source_target_semantic_conflict_count": 0,
             "source_echo_ids": [],
             "empty_target_ids": [],
             "target_without_chinese_ids": [],
             "text_pollution_samples": [],
+            "short_english_leak_samples": [],
             "untranslated_discourse_marker_samples": [],
+            "literal_chinese_artifact_samples": [],
+            "source_target_semantic_conflict_samples": [],
         },
         "display": {
             "empty_chinese_cue_count": 0,
@@ -364,6 +404,18 @@ def build_quality_metrics(
                     "text": target_text,
                 },
             )
+        short_english_leaks = find_short_english_leaks(target_text, dst_lang=dst_lang)
+        if short_english_leaks:
+            metrics["translation"]["short_english_leak_count"] += 1
+            append_sample(
+                metrics["translation"]["short_english_leak_samples"],
+                {
+                    "segment_id": segment.id,
+                    "leaks": short_english_leaks,
+                    "source_text": source_text,
+                    "target_text": target_text,
+                },
+            )
         discourse_markers = find_untranslated_discourse_markers(target_text, dst_lang=dst_lang)
         if discourse_markers:
             metrics["translation"]["untranslated_discourse_marker_count"] += 1
@@ -372,6 +424,30 @@ def build_quality_metrics(
                 {
                     "segment_id": segment.id,
                     "markers": discourse_markers,
+                    "source_text": source_text,
+                    "target_text": target_text,
+                },
+            )
+        literal_artifacts = find_literal_chinese_artifacts(target_text, source_text=source_text)
+        if literal_artifacts:
+            metrics["translation"]["literal_chinese_artifact_count"] += 1
+            append_sample(
+                metrics["translation"]["literal_chinese_artifact_samples"],
+                {
+                    "segment_id": segment.id,
+                    "issues": literal_artifacts,
+                    "source_text": source_text,
+                    "target_text": target_text,
+                },
+            )
+        semantic_conflicts = find_source_target_semantic_conflicts(source_text, target_text)
+        if semantic_conflicts:
+            metrics["translation"]["source_target_semantic_conflict_count"] += 1
+            append_sample(
+                metrics["translation"]["source_target_semantic_conflict_samples"],
+                {
+                    "segment_id": segment.id,
+                    "issues": semantic_conflicts,
                     "source_text": source_text,
                     "target_text": target_text,
                 },
@@ -502,7 +578,9 @@ def build_quality_metrics(
         + metrics["translation"]["empty_target_count"]
         + metrics["translation"]["target_without_chinese_count"]
         + metrics["translation"]["text_pollution_count"]
+        + metrics["translation"]["short_english_leak_count"]
         + metrics["translation"]["untranslated_discourse_marker_count"]
+        + metrics["translation"]["source_target_semantic_conflict_count"]
         + metrics["display"]["empty_chinese_cue_count"]
         + metrics["display"]["chinese_line_hard_over_count"]
         + metrics["display"]["chinese_cps_hard_over_count"]
@@ -513,6 +591,7 @@ def build_quality_metrics(
         "blocking_issue_count": blocking_count,
         "warning_issue_count": (
             metrics["glossary"]["bad_alias_in_source_count"]
+            + metrics["translation"]["literal_chinese_artifact_count"]
             + metrics["glossary"]["preserve_missing_count"]
             + metrics["display"]["chinese_line_soft_over_count"]
             + metrics["display"]["chinese_cps_soft_over_count"]
@@ -576,11 +655,29 @@ def qa_check(
                 f"Segment {segment.id} target text contains suspicious polluted text: "
                 f"{format_pollution_issues(pollution_issues)}."
             )
+        short_english_leaks = find_short_english_leaks(segment.target_text or "", dst_lang=dst_lang)
+        if short_english_leaks:
+            report.errors.append(
+                f"Segment {segment.id} keeps short English fragment(s) in Chinese target: "
+                f"{', '.join(short_english_leaks)}."
+            )
         discourse_markers = find_untranslated_discourse_markers(segment.target_text or "", dst_lang=dst_lang)
         if discourse_markers:
             report.errors.append(
                 f"Segment {segment.id} keeps translatable discourse marker(s) in Chinese target: "
                 f"{', '.join(discourse_markers)}."
+            )
+        literal_artifacts = find_literal_chinese_artifacts(segment.target_text or "", source_text=segment.source_text)
+        if literal_artifacts:
+            report.warnings.append(
+                f"Segment {segment.id} may contain literal Chinese artifact(s): "
+                f"{', '.join(literal_artifacts)}."
+            )
+        semantic_conflicts = find_source_target_semantic_conflicts(segment.source_text, segment.target_text or "")
+        if semantic_conflicts:
+            report.errors.append(
+                f"Segment {segment.id} has source/target semantic conflict(s): "
+                f"{', '.join(semantic_conflicts)}."
             )
 
         if previous_text and text == previous_text:
@@ -648,6 +745,12 @@ def qa_display_cues(
             report.errors.append(
                 f"Display cue {index} Chinese text contains suspicious polluted text: "
                 f"{format_pollution_issues(pollution_issues)}."
+            )
+        short_english_leaks = find_short_english_leaks(zh_text, dst_lang=dst_lang)
+        if short_english_leaks:
+            report.errors.append(
+                f"Display cue {index} keeps short English fragment(s) in Chinese text: "
+                f"{', '.join(short_english_leaks)}."
             )
         discourse_markers = find_untranslated_discourse_markers(zh_text, dst_lang=dst_lang)
         if discourse_markers:
@@ -796,6 +899,12 @@ def qa_final_ass_file(
                 report.errors.append(
                     f"Final ASS dialogue {index} Chinese text contains suspicious polluted text: "
                     f"{format_pollution_issues(pollution_issues)}."
+                )
+            short_english_leaks = find_short_english_leaks(text, dst_lang=dst_lang)
+            if short_english_leaks:
+                report.errors.append(
+                    f"Final ASS dialogue {index} keeps short English fragment(s) in Chinese text: "
+                    f"{', '.join(short_english_leaks)}."
                 )
             discourse_markers = find_untranslated_discourse_markers(text, dst_lang=dst_lang)
             if discourse_markers:

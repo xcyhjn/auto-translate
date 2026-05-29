@@ -10,14 +10,20 @@ from typing import Callable
 
 from .models import Segment
 from .style_rules import build_style_guidance, load_style_prompt_text
-from .text_quality import TRANSLATABLE_DISCOURSE_MARKERS, find_text_pollution
+from .text_quality import (
+    TRANSLATABLE_DISCOURSE_MARKERS,
+    find_short_english_leaks,
+    find_text_pollution,
+)
 
 TranslationProgressCallback = Callable[[str, dict], None]
 TRANSLATABLE_FUNCTION_WORDS = {
     "am",
+    "and",
     "are",
     "been",
     "being",
+    "but",
     "can",
     "could",
     "did",
@@ -25,11 +31,14 @@ TRANSLATABLE_FUNCTION_WORDS = {
     "had",
     "has",
     "have",
+    "im",
     "is",
     "might",
     "must",
     "should",
     "that",
+    "thats",
+    "then",
     "these",
     "they",
     "this",
@@ -40,6 +49,7 @@ TRANSLATABLE_FUNCTION_WORDS = {
     "would",
     "you",
 }
+FIRST_PERSON_I_RE = re.compile(r"(?<![A-Za-z])i(?=(?:['’`](?:m|d|ll|ve|re)\b)|\b)", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -127,16 +137,19 @@ def style_glossary_hints(glossary_text: str) -> str:
     if not glossary_text.strip():
         return (
             "Glossary handling:\n"
-            "- Use established Simplified Chinese names for famous places, companies, products, and infrastructure when known.\n"
-            "- Keep channel names, sponsor names, software/library names, and terms marked preserve in English.\n"
+            "- Chinese localization comes first: translate common proper nouns into established Simplified Chinese names.\n"
+            "- Countries, cities, regions, peoples/languages, historical events, wars, and famous institutions should normally be Chinese, e.g. Japan=日本, Tokyo=东京, World War II=二战, Europe=欧洲, America=美国.\n"
+            "- Keep English only when the item is a channel name, sponsor/brand, software/library name, code/UI label, album/title with no common Chinese rendering, or a niche name whose Chinese translation is uncertain.\n"
         )
     return (
         "Glossary handling:\n"
         "- Follow every glossary line as the source of truth.\n"
         "- If zh differs from the canonical term, use zh in the Chinese subtitle.\n"
         "- If policy=preserve, keep the canonical English term exactly.\n"
+        "- If policy=translate, the Chinese subtitle must use zh and must not keep the English canonical form unless the glossary explicitly says mixed.\n"
         "- Correct aliases and ASR-looking name variants to the canonical term before translating.\n"
-        "- For unlisted but well-known names, prefer the established Simplified Chinese name unless the context is a channel, sponsor, UI label, code term, or product name that should stay English.\n"
+        "- For unlisted but well-known names, prefer the established Simplified Chinese name unless the context is a channel, sponsor, UI label, code term, software/library, product name, or niche creative title that should stay English.\n"
+        "- The localization goal is Chinese readability: common terms like Japan, Tokyo, World War II, Europe, America, Japanese should be 日本、东京、二战、欧洲、美国、日本人/日本的, not left as English in Chinese subtitles.\n"
     )
 
 
@@ -259,8 +272,10 @@ def resolve_preserve_only_translation(source_text: str, preserve_term_map: dict[
 
 def has_translatable_alpha_text(text: str) -> bool:
     words = [word.casefold() for word in re.findall(r"[A-Za-z]{2,}", text or "")]
+    if FIRST_PERSON_I_RE.search(text or ""):
+        return True
     if len(words) < 2:
-        return False
+        return bool(words and words[0] in TRANSLATABLE_FUNCTION_WORDS)
     if re.search(r"[.!?]", text or "") and len(words) >= 3:
         return True
     if any(word in TRANSLATABLE_FUNCTION_WORDS for word in words):
@@ -287,6 +302,7 @@ def validate_translations(
         "source_echo": [],
         "target_without_chinese": [],
         "text_pollution": [],
+        "short_english_leak": [],
     }
     for segment_id in sorted(expected_ids & returned_ids):
         translated_text = translations.get(segment_id, "").strip()
@@ -310,6 +326,9 @@ def validate_translations(
         pollution_issues = find_text_pollution(translated_text, dst_lang=dst_lang)
         if pollution_issues:
             issues["text_pollution"].append(segment_id)
+        short_english_leaks = find_short_english_leaks(translated_text, dst_lang=dst_lang)
+        if short_english_leaks:
+            issues["short_english_leak"].append(segment_id)
     return {key: value for key, value in issues.items() if value}
 
 
@@ -379,8 +398,12 @@ def build_translation_prompt(
         "- Keep the translation concise; avoid explanatory expansion.\n"
         "- If the target language is Chinese, every translatable English fragment must contain Chinese words, not only punctuation.\n"
         "- Preserve names, numbers, and domain terms according to the glossary.\n\n"
+        "- Chinese localization priority: translate common proper nouns with established Chinese names. Countries, cities, regions, peoples/languages, historical events, wars, and famous public institutions should be Chinese by default.\n"
+        "- Examples: Japan=日本, Tokyo=东京, World War II=二战, Europe=欧洲, America/the United States=美国, Japanese=日本人/日本的 according to context.\n"
+        "- Preserve English only for channel names, sponsors/brands, software/library names, code/UI labels, album/title names without a common Chinese rendering, or niche names where a Chinese name would be guesswork.\n\n"
         "- Do not treat conversational discourse markers as glossary terms or proper nouns. Words like because, maybe, right, well, okay, so, actually, basically, just, like, yeah, and sure must be translated or naturally absorbed into the Chinese line.\n"
         "- For ambiguous discourse markers, choose the Chinese rendering from context: right can mean 对吧/是吧/好了/正确/右边, maybe can mean 也许/可能/要不, because can mean 因为/是因为/毕竟. Do not leave them in English unless they are part of a literal UI/code label.\n"
+        "- Short function words and pronouns such as and, but, then, I, I'm, and that's must also be translated or absorbed. Never leave mixed Chinese like And I love it, Then我觉得, I'm可以, That's问题, or And I他妈太喜欢了.\n"
         "- Do not add manual line breaks, markdown, bullets, or numbering inside target_text.\n"
         "- Preserve the input IDs exactly; each ID must return one complete translation.\n"
         "- Translate each input ID as its own on-screen subtitle; do not omit it or merge its meaning into another ID.\n"
@@ -388,6 +411,11 @@ def build_translation_prompt(
         "- Treat every word/token in the source as atomic; never break a word into pieces for layout.\n\n"
         "- Use the surrounding context only to resolve pronouns, terminology, and continuity.\n"
         "- Return translations only for Input JSON items; never return context item IDs.\n\n"
+        "ASMR / whisper subtitle guidance:\n"
+        "- In intimate ASMR contexts, pet means 抚摸/摸摸/宠爱, and Whisper may misrecognize pet as bet. If context mentions good boy, puppy, comfort, or feeling good, prefer the pet/抚摸 meaning over gambling.\n"
+        "- If the source says have you to comfort, the speaker is comforting the listener; translate as 我还能安慰你/陪着你, not 让我安慰.\n"
+        "- I am complete usually means 我就满足了/我就圆满了, not 我很完整.\n"
+        "- Avoid stiff literal Chinese such as 让我安慰, 让我抚摸, 我就完整了, 把世界给我 when a natural subtitle phrasing is available.\n\n"
         f"Style guidance:\n{style_guidance}\n\n"
         f"{style_glossary_hints(glossary_text)}\n"
         f"Glossary:\n{glossary_block}\n\n"

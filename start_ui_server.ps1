@@ -35,22 +35,41 @@ function Test-PythonInterpreter {
 
 $pythonCandidates = @(
     @{
-        Command  = (Get-Command python -ErrorAction SilentlyContinue).Source
-        Arguments = @('-c', 'import yt_dlp')
-    },
-    @{
         Command  = 'C:\Users\bulbel\AppData\Local\Programs\Python\Python311\python.exe'
         Arguments = @('-c', 'import yt_dlp')
     },
     @{
         Command  = 'py'
         Arguments = @('-3.11', '-c', 'import yt_dlp')
+    },
+    @{
+        Command  = (Get-Command python -ErrorAction SilentlyContinue).Source
+        Arguments = @('-c', 'import yt_dlp')
     }
 )
+
+function Test-BlockedPythonCommand {
+    param([string]$Command)
+
+    if (-not $Command) {
+        return $false
+    }
+
+    $normalized = $Command.ToLowerInvariant()
+    return (
+        $normalized.Contains('\appdata\local\hermes\') -or
+        $normalized.Contains('\hermes-agent\venv\scripts\')
+    )
+}
 
 $pythonCommand = $null
 $pythonArgs = @()
 foreach ($candidate in $pythonCandidates) {
+    if (Test-BlockedPythonCommand -Command $candidate.Command) {
+        Write-Host "Skipping Hermes Python: $($candidate.Command)" -ForegroundColor DarkYellow
+        continue
+    }
+
     if (-not (Test-PythonInterpreter -Command $candidate.Command -Arguments $candidate.Arguments)) {
         continue
     }

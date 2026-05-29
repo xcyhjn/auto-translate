@@ -5,7 +5,15 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from .models import Segment
-from .text_quality import find_text_pollution, find_untranslated_discourse_markers
+from .text_quality import (
+    find_literal_chinese_artifacts,
+    find_repeated_short_source_phrases,
+    find_short_english_leaks,
+    find_source_asr_suspicions,
+    find_source_target_semantic_conflicts,
+    find_text_pollution,
+    find_untranslated_discourse_markers,
+)
 
 
 SOURCE_CONTINUATION_WORDS = {
@@ -16,6 +24,7 @@ SOURCE_CONTINUATION_WORDS = {
     "for",
     "from",
     "how",
+    "i",
     "if",
     "of",
     "or",
@@ -163,10 +172,33 @@ def evaluate_segment(segment: Segment, index: int, *, zh_max_cps: float = 18.0, 
             "untranslated discourse marker(s): " + ", ".join(discourse_markers),
             6,
         )
+    short_english_leaks = find_short_english_leaks(target_text, dst_lang="zh-Hans")
+    if short_english_leaks:
+        risk.add(
+            "target_short_english_leak",
+            "short English fragment(s): " + ", ".join(short_english_leaks),
+            7,
+        )
 
     suspicious_words = suspicious_source_words(source_text)
     if suspicious_words:
         risk.add("source_suspicious_asr_word", ", ".join(suspicious_words), 4)
+    source_asr_suspicions = find_source_asr_suspicions(source_text)
+    if source_asr_suspicions:
+        risk.add("source_asr_suspicion", ", ".join(source_asr_suspicions), 5)
+    repeated_source_phrases = find_repeated_short_source_phrases(source_text)
+    if repeated_source_phrases:
+        risk.add(
+            "source_repeated_short_phrase",
+            "repeated short phrase(s): " + "; ".join(repeated_source_phrases[:3]),
+            4,
+        )
+    literal_artifacts = find_literal_chinese_artifacts(target_text, source_text=source_text)
+    if literal_artifacts:
+        risk.add("target_literal_chinese_artifact", ", ".join(literal_artifacts), 6)
+    semantic_conflicts = find_source_target_semantic_conflicts(source_text, target_text)
+    if semantic_conflicts:
+        risk.add("source_target_semantic_conflict", ", ".join(semantic_conflicts), 7)
 
     source_numbers = extract_numbers(source_text)
     if source_numbers:
@@ -220,8 +252,14 @@ def span_severity(score: int, reason_codes: set[str]) -> str:
         "target_text_pollution",
         "target_too_short",
         "source_suspicious_asr_word",
+        "source_asr_suspicion",
+        "source_target_semantic_conflict",
+        "target_literal_chinese_artifact",
         "target_untranslated_discourse_marker",
+        "target_short_english_leak",
     }:
+        return "high"
+    if "source_repeated_short_phrase" in reason_codes and score >= 8:
         return "high"
     if (
         "target_open_ending" in reason_codes

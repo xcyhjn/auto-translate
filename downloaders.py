@@ -13,6 +13,7 @@ from urllib.parse import unquote, urlparse
 from yt_dlp import YoutubeDL
 
 from .media import merge_video_with_audio, probe_media
+from .yt_dlp_config import ytdlp_auth_options_from_user_config
 
 
 VIDEO_SUFFIXES = {".mp4", ".mkv", ".mov", ".avi", ".webm"}
@@ -224,6 +225,7 @@ class YtdlpDownloader:
 
     def base_options(self) -> dict:
         options = {
+            **ytdlp_auth_options_from_user_config(),
             "format": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]/best",
             "merge_output_format": "mp4",
             "outtmpl": str(self.config.input_dir / "%(title)s.%(ext)s"),

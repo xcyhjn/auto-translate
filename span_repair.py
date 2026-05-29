@@ -26,12 +26,20 @@ PRIORITY_REASON_CODES = {
     "target_text_pollution",
     "target_too_short",
     "source_suspicious_asr_word",
+    "source_asr_suspicion",
+    "source_repeated_short_phrase",
+    "target_literal_chinese_artifact",
+    "target_short_english_leak",
+    "source_target_semantic_conflict",
     "number_mismatch",
 }
 TARGET_REPAIR_REASON_CODES = {
     "number_mismatch",
+    "source_target_semantic_conflict",
     "target_cps_high",
     "target_line_long",
+    "target_literal_chinese_artifact",
+    "target_short_english_leak",
     "target_open_ending",
     "target_text_pollution",
     "target_too_short",
@@ -101,9 +109,17 @@ def build_span_repair_prompt(
         "- Each target_text must be a readable on-screen Chinese subtitle for that ID.\n"
         "- Do not shift meaning into the previous or next ID; do not leave fragments like a lone noun, punctuation, or dangling connector.\n"
         "- If the ASR source has an obvious typo, infer the intended phrase from context, but keep the repair concise.\n"
-        "- Preserve names, numbers, album titles, and technical terms according to the glossary.\n"
+        "- In ASMR or comfort contexts, pet means 抚摸/摸摸/宠爱. If ASR says bet but the context is good boy, puppy, comfort, or feeling good, infer pet.\n"
+        "- Translate have you to comfort as the speaker comforting the listener, such as 我还能安慰你/陪着你; do not write 让我安慰.\n"
+        "- Translate I am complete naturally as 我就满足了/我就圆满了; avoid 我很完整/我就完整了.\n"
+        "- Avoid stiff literal Chinese such as 让我安慰, 让我抚摸, 我就完整了, 把世界给我.\n"
+        "- Preserve or translate names, numbers, album titles, and technical terms according to the glossary.\n"
+        "- Chinese localization priority: common proper nouns with established Chinese names must be translated. Countries, cities, regions, peoples/languages, historical events, wars, and famous public institutions should be Chinese by default.\n"
+        "- Examples: Japan=日本, Tokyo=东京, World War II=二战, Europe=欧洲, America/the United States=美国, Japanese=日本人/日本的 according to context.\n"
+        "- Keep English only for channel names, sponsors/brands, software/library names, code/UI labels, album/title names without a common Chinese rendering, or niche names where a Chinese name would be guesswork.\n"
         "- Do not preserve conversational discourse markers as English or as proper nouns. Words like because, maybe, right, well, okay, so, actually, basically, just, like, yeah, and sure must be translated or naturally absorbed into the Chinese line.\n"
         "- For ambiguous discourse markers, sample the Chinese meaning from context: right can be 对吧/是吧/好了/正确/右边, maybe can be 也许/可能/要不, because can be 因为/是因为/毕竟. Keep English only for literal UI/code labels.\n"
+        "- Short function words and pronouns such as and, but, then, I, I'm, and that's must be translated or absorbed. Never leave mixed Chinese like Then我觉得, I'm可以, That's问题, or And I他妈太喜欢了.\n"
         "- Do not include Devanagari, Cyrillic, Arabic, Korean, Japanese, replacement characters, mojibake, markdown, or manual line breaks.\n\n"
         f"Style guidance:\n{build_style_guidance(style_prompt_text)}\n\n"
         f"{style_glossary_hints(glossary_text)}\n"
@@ -166,6 +182,11 @@ def span_priority_score(span: dict) -> int:
     score += int(reason_counts.get("target_open_ending") or 0)
     score += int(reason_counts.get("source_starts_with_continuation") or 0)
     score += int(reason_counts.get("source_ends_with_open_word") or 0)
+    score += int(reason_counts.get("target_literal_chinese_artifact") or 0) * 3
+    score += int(reason_counts.get("target_short_english_leak") or 0) * 4
+    score += int(reason_counts.get("source_target_semantic_conflict") or 0) * 4
+    score += int(reason_counts.get("source_asr_suspicion") or 0) * 2
+    score += int(reason_counts.get("source_repeated_short_phrase") or 0)
     return score
 
 

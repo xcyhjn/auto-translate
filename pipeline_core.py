@@ -16,6 +16,7 @@ from .difficult_spans import detect_difficult_spans
 from .display_rewrite import rewrite_display_segments
 from .glossary import (
     apply_glossary_alias_corrections,
+    apply_translate_policy_corrections,
     ensure_project_glossary,
     write_asr_terms,
     write_resolved_glossary,
@@ -858,12 +859,18 @@ def run_pipeline(
             style_prompt_text=style_prompt_for_translation,
             progress_callback=lambda stage, progress: emit(callback, stage, progress),
         )
-        alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
+        glossary_json_path = get_glossary_json_path(output_dir)
+        alias_stats = apply_glossary_alias_corrections(translated_segments, glossary_json_path)
+        translate_policy_stats = apply_translate_policy_corrections(translated_segments, glossary_json_path)
         save_segments_payload(
             translated_segments,
             translated_json_path,
             input_file=str(input_path),
-            summary={"stage": "translated_segments"},
+            summary={
+                "stage": "translated_segments",
+                "alias_corrections": alias_stats,
+                "translate_policy_corrections": translate_policy_stats,
+            },
         )
         write_srt(translated_segments, output_dir / "06_translated_zh.srt")
         emit(
@@ -873,16 +880,23 @@ def run_pipeline(
                 "path": str(translated_json_path),
                 "count": len(translated_segments),
                 "alias_corrections": alias_stats,
+                "translate_policy_corrections": translate_policy_stats,
             },
         )
 
-    alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
-    if alias_stats["total_replacements"]:
+    glossary_json_path = get_glossary_json_path(output_dir)
+    alias_stats = apply_glossary_alias_corrections(translated_segments, glossary_json_path)
+    translate_policy_stats = apply_translate_policy_corrections(translated_segments, glossary_json_path)
+    if alias_stats["total_replacements"] or translate_policy_stats["target_text_replacements"]:
         save_segments_payload(
             translated_segments,
             translated_json_path,
             input_file=str(input_path),
-            summary={"stage": "translated_segments"},
+            summary={
+                "stage": "translated_segments",
+                "alias_corrections": alias_stats,
+                "translate_policy_corrections": translate_policy_stats,
+            },
         )
         write_srt(translated_segments, output_dir / "06_translated_zh.srt")
         emit(
@@ -891,6 +905,7 @@ def run_pipeline(
             {
                 "path": str(translated_json_path),
                 **alias_stats,
+                "translate_policy_corrections": translate_policy_stats,
             },
         )
 
@@ -916,12 +931,19 @@ def run_pipeline(
         input_path=input_path,
         segment_count=len(translated_segments),
     )
-    if display_rewrite_report["summary"]["changed_count"]:
+    translate_policy_stats = apply_translate_policy_corrections(translated_segments, get_glossary_json_path(output_dir))
+    if translate_policy_stats["target_text_replacements"]:
+        display_rewrite_report["summary"]["post_display_translate_policy_corrections"] = translate_policy_stats
+    if display_rewrite_report["summary"]["changed_count"] or translate_policy_stats["target_text_replacements"]:
         save_segments_payload(
             translated_segments,
             translated_json_path,
             input_file=str(input_path),
-            summary={"stage": "translated_segments"},
+            summary={
+                "stage": "translated_segments",
+                "display_rewrite": display_rewrite_report["summary"],
+                "translate_policy_corrections": translate_policy_stats,
+            },
         )
         write_srt(translated_segments, output_dir / "06_translated_zh.srt")
     emit(
@@ -964,7 +986,8 @@ def run_pipeline(
         },
         "results": [],
     }
-    if repair_high_risk_spans and difficult_spans_initial["summary"]["needs_ai_repair_count"] > 0:
+    repair_candidate_count = int(difficult_spans_initial["summary"].get("needs_ai_repair_count") or 0)
+    if repair_high_risk_spans and repair_candidate_count > 0:
         span_repair_report = repair_difficult_spans(
             translated_segments,
             difficult_spans_initial,
@@ -976,17 +999,27 @@ def run_pipeline(
             base_url=openai_base_url,
             max_retries=translation_retries,
             max_spans=span_repair_max_spans,
+            min_severity="medium",
             progress_callback=lambda stage, progress: emit(callback, stage, progress),
         )
         span_repair_report["summary"]["enabled"] = True
-        alias_stats = apply_glossary_alias_corrections(translated_segments, get_glossary_json_path(output_dir))
+        glossary_json_path = get_glossary_json_path(output_dir)
+        alias_stats = apply_glossary_alias_corrections(translated_segments, glossary_json_path)
+        translate_policy_stats = apply_translate_policy_corrections(translated_segments, glossary_json_path)
         if alias_stats["total_replacements"]:
             span_repair_report["summary"]["post_repair_alias_corrections"] = alias_stats
+        if translate_policy_stats["target_text_replacements"]:
+            span_repair_report["summary"]["post_repair_translate_policy_corrections"] = translate_policy_stats
         save_segments_payload(
             translated_segments,
             translated_json_path,
             input_file=str(input_path),
-            summary={"stage": "translated_segments"},
+            summary={
+                "stage": "translated_segments",
+                "span_repair": span_repair_report["summary"],
+                "alias_corrections": alias_stats,
+                "translate_policy_corrections": translate_policy_stats,
+            },
         )
         write_srt(translated_segments, output_dir / "06_translated_zh.srt")
     write_stage_json(
