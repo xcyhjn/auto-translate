@@ -1722,3 +1722,477 @@ files=34
 [run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
 config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
 
+Traceback (most recent call last):
+  File "D:\autosub_zh\translate.py", line 705, in translate_segments
+    model_translations = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 577, in translate_chunk_with_openai
+    single_translation = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 594, in translate_chunk_with_openai
+    raise TranslationValidationError(issues)
+autosub_zh.translate.TranslationValidationError: Translation validation failed: target_without_chinese=[166]
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 846, in run_pipeline
+    translated_segments = translate_segments(
+                          ^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 723, in translate_segments
+    raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
+RuntimeError: chunk 5/9 failed after 35.44s; segment_ids=161-200; count=40
+Translation validation failed: target_without_chinese=[166]
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 693, in run_pipeline
+    raw_segments = transcribe_audio(
+                   ^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\asr.py", line 392, in transcribe_audio
+    model = WhisperModel(
+            ^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\faster_whisper\transcribe.py", line 689, in __init__
+    self.model = ctranslate2.models.Whisper(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mkl_malloc: failed to allocate memory
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cpu, compute_type=int8}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\translate.py", line 722, in translate_segments
+    model_translations = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 594, in translate_chunk_with_openai
+    single_translation = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 611, in translate_chunk_with_openai
+    raise TranslationValidationError(issues)
+autosub_zh.translate.TranslationValidationError: Translation validation failed: target_without_chinese=[166]
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 846, in run_pipeline
+    translated_segments = translate_segments(
+                          ^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 740, in translate_segments
+    raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
+RuntimeError: chunk 9/17 failed after 18.33s; segment_ids=161-180; count=20
+Translation validation failed: target_without_chinese=[166]
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cpu, compute_type=int8}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\translate.py", line 724, in translate_segments
+    model_translations = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 613, in translate_chunk_with_openai
+    raise TranslationValidationError(issues)
+autosub_zh.translate.TranslationValidationError: Translation validation failed: short_english_leak=[223]
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 846, in run_pipeline
+    translated_segments = translate_segments(
+                          ^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 742, in translate_segments
+    raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
+RuntimeError: chunk 12/17 failed after 17.74s; segment_ids=221-240; count=20
+Translation validation failed: short_english_leak=[223]
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cpu, compute_type=int8}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\translate.py", line 725, in translate_segments
+    model_translations = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 597, in translate_chunk_with_openai
+    single_translation = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 614, in translate_chunk_with_openai
+    raise TranslationValidationError(issues)
+autosub_zh.translate.TranslationValidationError: Translation validation failed: text_pollution=[83]
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 846, in run_pipeline
+    translated_segments = translate_segments(
+                          ^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 743, in translate_segments
+    raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
+RuntimeError: chunk 5/17 failed after 32.03s; segment_ids=81-100; count=20
+Translation validation failed: text_pollution=[83]
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cpu, compute_type=int8}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\translate.py", line 734, in translate_segments
+    model_translations = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 606, in translate_chunk_with_openai
+    single_translation = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 623, in translate_chunk_with_openai
+    raise TranslationValidationError(issues)
+autosub_zh.translate.TranslationValidationError: Translation validation failed: short_english_leak=[223]
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 846, in run_pipeline
+    translated_segments = translate_segments(
+                          ^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 752, in translate_segments
+    raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
+RuntimeError: chunk 12/17 failed after 17.93s; segment_ids=221-240; count=20
+Translation validation failed: short_english_leak=[223]
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cpu, compute_type=int8}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\translate.py", line 779, in translate_segments
+    model_translations = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 606, in translate_chunk_with_openai
+    single_translation = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 668, in translate_chunk_with_openai
+    raise TranslationValidationError(issues)
+autosub_zh.translate.TranslationValidationError: Translation validation failed: short_english_leak=[223]
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 846, in run_pipeline
+    translated_segments = translate_segments(
+                          ^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 797, in translate_segments
+    raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
+RuntimeError: chunk 12/17 failed after 31.34s; segment_ids=221-240; count=20
+Translation validation failed: short_english_leak=[223]
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cpu, compute_type=int8}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\translate.py", line 830, in translate_segments
+    model_translations = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 645, in translate_chunk_with_openai
+    single_translation = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 719, in translate_chunk_with_openai
+    raise TranslationValidationError(issues)
+autosub_zh.translate.TranslationValidationError: Translation validation failed: short_english_leak=[223]
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 846, in run_pipeline
+    translated_segments = translate_segments(
+                          ^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 848, in translate_segments
+    raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
+RuntimeError: chunk 12/17 failed after 30.59s; segment_ids=221-240; count=20
+Translation validation failed: short_english_leak=[223]
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cpu, compute_type=int8}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\translate.py", line 838, in translate_segments
+    model_translations = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 653, in translate_chunk_with_openai
+    single_translation = translate_chunk_with_openai(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 727, in translate_chunk_with_openai
+    raise TranslationValidationError(issues)
+autosub_zh.translate.TranslationValidationError: Translation validation failed: short_english_leak=[223]
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 846, in run_pipeline
+    translated_segments = translate_segments(
+                          ^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 856, in translate_segments
+    raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
+RuntimeError: chunk 12/17 failed after 32.72s; segment_ids=221-240; count=20
+Translation validation failed: short_english_leak=[223]
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cpu, compute_type=int8}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\5.19-yt\China's Underground Music Is Weirder Than You Think.mp4
+output_dir=D:\autosub_zh\output\China-s-Underground-Music-Is-Weirder-Than-You-Think
+files=31
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\A huge path-drawing puzzle where the rules keep changing (Rorschach's River).mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\A huge path-drawing puzzle where the rules keep changing (Rorschach's River).mp4
+output_dir=D:\autosub_zh\output\A-huge-path-drawing-puzzle-where-the-rules-keep-changing-Rorschach-s-River
+files=34
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\How 1 YouTube Glitch Changed Lost Media Forever.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\How 1 YouTube Glitch Changed Lost Media Forever.mp4
+output_dir=D:\autosub_zh\output\How-1-YouTube-Glitch-Changed-Lost-Media-Forever
+files=34
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\pipeline_core.py", line 211, in burn_subtitle
+    run_ffmpeg_command(args, progress_callback=emit_progress if progress_callback else None)
+  File "D:\autosub_zh\media.py", line 272, in run_ffmpeg_command
+    raise RuntimeError(f"Command failed: {command}\n{details}")
+RuntimeError: Command failed: ffmpeg -progress pipe:1 -nostats -y -hwaccel cuda -c:v av1_cuvid -i D:\autosub_zh\input\How 1 YouTube Glitch Changed Lost Media Forever.mp4 -vf ass='C\:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' -c:v h264_nvenc -preset p4 -cq 25 -pix_fmt yuv420p -c:a copy D:\autosub_zh\output\How-1-YouTube-Glitch-Changed-Lost-Media-Forever\.09_burned_bilingual_video.9740ec81513f4236ac8631abc9c5340e.tmp.mp4
+ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 15.2.0 (Rev13, Built by MSYS2 project)
+  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-zlib --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-sdl2 --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxvid --enable-libaom --enable-libopenjpeg --enable-libvpx --enable-mediafoundation --enable-libass --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-openal --enable-libgme --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libtheora --enable-libvo-amrwbenc --enable-libgsm --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-librubberband
+  libavutil      60. 26.101 / 60. 26.101
+  libavcodec     62. 28.101 / 62. 28.101
+  libavformat    62. 12.101 / 62. 12.101
+  libavdevice    62.  3.101 / 62.  3.101
+  libavfilter    11. 14.101 / 11. 14.101
+  libswscale      9.  5.101 /  9.  5.101
+  libswresample   6.  3.101 /  6.  3.101
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\autosub_zh\input\How 1 YouTube Glitch Changed Lost Media Forever.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.12.101
+  Duration: 00:09:45.00, start: 0.000000, bitrate: 784 kb/s
+  Stream #0:0[0x1](und): Video: av1 (libaom-av1) (Main) (av01 / 0x31307661), yuv420p(tv, bt709), 1920x1080 [SAR 1:1 DAR 16:9], 646 kb/s, 60 fps, 60 tbr, 15360 tbn (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+  Stream #0:1[0x2](eng): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 128 kb/s (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+[Parsed_ass_0 @ 000002269beeed00] libass API version: 0x1704000
+[Parsed_ass_0 @ 000002269beeed00] libass source: commit: 0.17.4-27-g1cbba0a8818c83495114b3c2b5730410eecbdb2c
+[Parsed_ass_0 @ 000002269beeed00] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+[Parsed_ass_0 @ 000002269beeed00] Using font provider directwrite (with GDI)
+[Parsed_ass_0 @ 000002269beeed00] Added subtitle file: 'C:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' (3 styles, 468 events)
+Stream mapping:
+  Stream #0:0 -> #0:0 (av1 (av1_cuvid) -> h264 (h264_nvenc))
+  Stream #0:1 -> #0:1 (copy)
+Press [q] to stop, [?] for help
+[Parsed_ass_0 @ 000002269bf8ff00] libass API version: 0x1704000
+[Parsed_ass_0 @ 000002269bf8ff00] libass source: commit: 0.17.4-27-g1cbba0a8818c83495114b3c2b5730410eecbdb2c
+[Parsed_ass_0 @ 000002269bf8ff00] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+[Parsed_ass_0 @ 000002269bf8ff00] Using font provider directwrite (with GDI)
+[Parsed_ass_0 @ 000002269bf8ff00] Added subtitle file: 'C:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' (3 styles, 468 events)
+Output #0, mp4, to 'D:\autosub_zh\output\How-1-YouTube-Glitch-Changed-Lost-Media-Forever\.09_burned_bilingual_video.9740ec81513f4236ac8631abc9c5340e.tmp.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.12.101
+  Stream #0:0(und): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], q=2-31, 60 fps, 15360 tbn (default)
+    Metadata:
+      encoder         : Lavc62.28.101 h264_nvenc
+      handler_name    : ISO Media file produced by Google Inc.
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A
+  Stream #0:1(eng): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 128 kb/s (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+[Parsed_ass_0 @ 000002269bf8ff00] fontselect: (Maple Mono NF CN, 400, 0) -> MapleMono-NF-CN-Regular, 0, MapleMono-NF-CN-Regular
+[Parsed_ass_0 @ 000002269bf8ff00] fontselect: (Maple Mono, 400, 0) -> ArialMT, 0, ArialMT
+[av1_cuvid @ 000002269bf93880] Failed to transfer data to output frame: -12.
+[vist#0:0/av1 @ 000002269bfbee00] [dec:av1_cuvid @ 000002269bf94880] Error while processing the decoded data
+[vist#0:0/av1 @ 000002269bfbee00] [dec:av1_cuvid @ 000002269bf94880] Error processing packet in decoder: Cannot allocate memory
+[vist#0:0/av1 @ 000002269bfbee00] [dec:av1_cuvid @ 000002269bf94880] Task finished with error code: -12 (Cannot allocate memory)
+[vist#0:0/av1 @ 000002269bfbee00] [dec:av1_cuvid @ 000002269bf94880] Terminating thread with return code -12 (Cannot allocate memory)
+[out#0/mp4 @ 000002269bef0140] video:65320KiB audio:2292KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 0.349474%
+frame= 8784 fps=101 q=18.0 Lsize=   67848KiB time=00:02:26.35 bitrate=3797.8kbits/s speed=1.68x elapsed=0:01:27.37    
+Conversion failed!
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1910, in safe_reburn_from_ass_job
+    reburn_from_ass_job(project_path, task_id)
+  File "D:\autosub_zh\ui_server.py", line 1850, in reburn_from_ass_job
+    burn_subtitle(
+  File "D:\autosub_zh\pipeline_core.py", line 225, in burn_subtitle
+    run_ffmpeg_command(fallback_args, progress_callback=emit_progress if progress_callback else None)
+  File "D:\autosub_zh\media.py", line 272, in run_ffmpeg_command
+    raise RuntimeError(f"Command failed: {command}\n{details}")
+RuntimeError: Command failed: ffmpeg -progress pipe:1 -nostats -y -i D:\autosub_zh\input\How 1 YouTube Glitch Changed Lost Media Forever.mp4 -vf ass='C\:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' -c:v libx264 -preset medium -crf 25 -pix_fmt yuv420p -c:a copy D:\autosub_zh\output\How-1-YouTube-Glitch-Changed-Lost-Media-Forever\.09_burned_bilingual_video.9740ec81513f4236ac8631abc9c5340e.tmp.mp4
+ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 15.2.0 (Rev13, Built by MSYS2 project)
+  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-zlib --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-sdl2 --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxvid --enable-libaom --enable-libopenjpeg --enable-libvpx --enable-mediafoundation --enable-libass --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-openal --enable-libgme --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libtheora --enable-libvo-amrwbenc --enable-libgsm --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-librubberband
+  libavutil      60. 26.101 / 60. 26.101
+  libavcodec     62. 28.101 / 62. 28.101
+  libavformat    62. 12.101 / 62. 12.101
+  libavdevice    62.  3.101 / 62.  3.101
+  libavfilter    11. 14.101 / 11. 14.101
+  libswscale      9.  5.101 /  9.  5.101
+  libswresample   6.  3.101 /  6.  3.101
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'D:\autosub_zh\input\How 1 YouTube Glitch Changed Lost Media Forever.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.12.101
+  Duration: 00:09:45.00, start: 0.000000, bitrate: 784 kb/s
+  Stream #0:0[0x1](und): Video: av1 (libaom-av1) (Main) (av01 / 0x31307661), yuv420p(tv, bt709), 1920x1080 [SAR 1:1 DAR 16:9], 646 kb/s, 60 fps, 60 tbr, 15360 tbn (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+  Stream #0:1[0x2](eng): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 128 kb/s (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+[Parsed_ass_0 @ 000001fc78485500] libass API version: 0x1704000
+[Parsed_ass_0 @ 000001fc78485500] libass source: commit: 0.17.4-27-g1cbba0a8818c83495114b3c2b5730410eecbdb2c
+[Parsed_ass_0 @ 000001fc78485500] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+[Parsed_ass_0 @ 000001fc78485500] Using font provider directwrite (with GDI)
+[Parsed_ass_0 @ 000001fc78485500] Added subtitle file: 'C:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' (3 styles, 468 events)
+Stream mapping:
+  Stream #0:0 -> #0:0 (av1 (libaom-av1) -> h264 (libx264))
+  Stream #0:1 -> #0:1 (copy)
+Press [q] to stop, [?] for help
+[Parsed_ass_0 @ 000001fc78485b80] libass API version: 0x1704000
+[Parsed_ass_0 @ 000001fc78485b80] libass source: commit: 0.17.4-27-g1cbba0a8818c83495114b3c2b5730410eecbdb2c
+[Parsed_ass_0 @ 000001fc78485b80] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+[Parsed_ass_0 @ 000001fc78485b80] Using font provider directwrite (with GDI)
+[Parsed_ass_0 @ 000001fc78485b80] Added subtitle file: 'C:/Users/bulbel/AppData/Local/Temp/autosub_zh_burn/08_bilingual_safe.ass' (3 styles, 468 events)
+[libx264 @ 000001fc7a700000] using SAR=1/1
+[libx264 @ 000001fc7a700000] using cpu capabilities: MMX2 SSE2Fast SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2
+[libx264 @ 000001fc7a700000] profile High, level 4.2, 4:2:0, 8-bit
+[libx264 @ 000001fc7a700000] 264 - core 165 r3223 0480cb0 - H.264/MPEG-4 AVC codec - Copyleft 2003-2025 - http://www.videolan.org/x264.html - options: cabac=1 ref=3 deblock=1:0:0 analyse=0x3:0x113 me=hex subme=7 psy=1 psy_rd=1.00:0.00 mixed_ref=1 me_range=16 chroma_me=1 trellis=1 8x8dct=1 cqm=0 deadzone=21,11 fast_pskip=1 chroma_qp_offset=-2 threads=34 lookahead_threads=5 sliced_threads=0 nr=0 decimate=1 interlaced=0 bluray_compat=0 constrained_intra=0 bframes=3 b_pyramid=2 b_adapt=1 b_bias=0 direct=1 weightb=1 open_gop=0 weightp=2 keyint=250 keyint_min=25 scenecut=40 intra_refresh=0 rc_lookahead=40 rc=crf mbtree=1 crf=25.0 qcomp=0.60 qpmin=0 qpmax=69 qpstep=4 ip_ratio=1.40 aq=1:1.00
+Output #0, mp4, to 'D:\autosub_zh\output\How-1-YouTube-Glitch-Changed-Lost-Media-Forever\.09_burned_bilingual_video.9740ec81513f4236ac8631abc9c5340e.tmp.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.12.101
+  Stream #0:0(und): Video: h264 (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], q=2-31, 60 fps, 15360 tbn (default)
+    Metadata:
+      encoder         : Lavc62.28.101 libx264
+      handler_name    : ISO Media file produced by Google Inc.
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A
+  Stream #0:1(eng): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 128 kb/s (default)
+    Metadata:
+      handler_name    : ISO Media file produced by Google Inc.
+[Parsed_ass_0 @ 000001fc78485b80] fontselect: (Maple Mono NF CN, 400, 0) -> MapleMono-NF-CN-Regular, 0, MapleMono-NF-CN-Regular
+[Parsed_ass_0 @ 000001fc78485b80] fontselect: (Maple Mono, 400, 0) -> ArialMT, 0, ArialMT
+x264 [error]: malloc of size 7088704 failed
+[vost#0:0/libx264 @ 000001fc7a4e02c0] [enc:libx264 @ 000001fc784af640] Error submitting video frame to the encoder
+[vost#0:0/libx264 @ 000001fc7a4e02c0] [enc:libx264 @ 000001fc784af640] Error encoding a frame: Generic error in an external library
+[vost#0:0/libx264 @ 000001fc7a4e02c0] Task finished with error code: -542398533 (Generic error in an external library)
+[vost#0:0/libx264 @ 000001fc7a4e02c0] Terminating thread with return code -542398533 (Generic error in an external library)
+[out#0/mp4 @ 000001fc784850c0] video:0KiB audio:22KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 4.883246%
+frame=    0 fps=0.0 q=0.0 Lsize=      23KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.39    
+Conversion failed!
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\Sudokus with MIRRORS？.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\Sudokus with MIRRORS？.mp4
+output_dir=D:\autosub_zh\output\Sudokus-with-MIRRORS
+files=34
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 2164, in do_POST
+    clear_queue()
+  File "D:\autosub_zh\ui_server.py", line 1536, in clear_queue
+    managed_videos = [item for item in list_input_videos() if item.get("managed")]
+                                       ^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\ui_server.py", line 637, in list_input_videos
+    size = path.stat().st_size
+           ^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\pathlib.py", line 1013, in stat
+    return os.stat(self, follow_symlinks=follow_symlinks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [WinError 2] 系统找不到指定的文件。: 'D:\\autosub_zh\\input\\Sudokus with MIRRORS？.mp4'
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\The hardest dungeon EVER designed_1.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1726, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 604, in run_pipeline
+    audio_path = extract_audio(
+                 ^^^^^^^^^^^^^^
+  File "D:\autosub_zh\media.py", line 379, in extract_audio
+    run_ffmpeg_command(
+  File "D:\autosub_zh\media.py", line 272, in run_ffmpeg_command
+    raise RuntimeError(f"Command failed: {command}\n{details}")
+RuntimeError: Command failed: ffmpeg -progress pipe:1 -nostats -y -i D:\autosub_zh\input\The hardest dungeon EVER designed_1.mp4 -vn -ac 1 -ar 16000 D:\autosub_zh\output\The-hardest-dungeon-EVER-designed_1\The hardest dungeon EVER designed_1.wav
+ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 15.2.0 (Rev13, Built by MSYS2 project)
+  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-zlib --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-sdl2 --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxvid --enable-libaom --enable-libopenjpeg --enable-libvpx --enable-mediafoundation --enable-libass --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-openal --enable-libgme --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libtheora --enable-libvo-amrwbenc --enable-libgsm --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-librubberband
+  libavutil      60. 26.101 / 60. 26.101
+  libavcodec     62. 28.101 / 62. 28.101
+  libavformat    62. 12.101 / 62. 12.101
+  libavdevice    62.  3.101 / 62.  3.101
+  libavfilter    11. 14.101 / 11. 14.101
+  libswscale      9.  5.101 /  9.  5.101
+  libswresample   6.  3.101 /  6.  3.101
+[in#0 @ 000001def3322e80] Error opening input: No such file or directory
+Error opening input file D:\autosub_zh\input\The hardest dungeon EVER designed_1.mp4.
+Error opening input files: No such file or directory
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\The hardest dungeon EVER designed.mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:complete] video_path=D:\autosub_zh\input\The hardest dungeon EVER designed.mp4
+output_dir=D:\autosub_zh\output\The-hardest-dungeon-EVER-designed
+files=31
+

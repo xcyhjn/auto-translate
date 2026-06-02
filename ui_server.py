@@ -61,7 +61,9 @@ DEFAULT_CONFIG = {
         "Prioritize faithful meaning over literal wording. Preserve casual spoken tone, "
         "hesitation, intimacy, jokes, sarcasm, and implied meaning when present. Translate "
         "spoken English into natural Simplified Chinese subtitles, not formal written Chinese. "
-        "Keep the line concise and subtitle-friendly; do not add explanations."
+        "Keep the line concise and subtitle-friendly; do not add explanations. Absorb filler "
+        "openings like And I and There is into Chinese, and use Arabic numerals for true "
+        "numbers while preserving natural expressions like 一个, 一遍, 一边, 一样, and 每一行."
     ),
     "translation_chunk_size": 24,
     "translation_retries": 4,

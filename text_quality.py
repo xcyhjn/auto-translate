@@ -35,6 +35,8 @@ TRANSLATABLE_DISCOURSE_MARKERS = {
     "sure",
     "that's",
     "thats",
+    "there's",
+    "theres",
     "then",
     "though",
     "well",
@@ -44,6 +46,10 @@ TRANSLATABLE_DISCOURSE_MARKERS = {
 }
 DISCOURSE_MARKER_RE = re.compile(
     rf"(?<![A-Za-z0-9_.-])({'|'.join(sorted(map(re.escape, TRANSLATABLE_DISCOURSE_MARKERS), key=len, reverse=True))})(?![A-Za-z0-9_-])",
+    re.IGNORECASE,
+)
+EXTRA_DISCOURSE_MARKER_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])there\s+(?:is|are|was|were)(?![A-Za-z0-9_-])",
     re.IGNORECASE,
 )
 
@@ -282,6 +288,16 @@ def find_untranslated_discourse_markers(
         markers.append(marker)
         if len(markers) >= sample_limit:
             break
+    if len(markers) < sample_limit:
+        for match in EXTRA_DISCOURSE_MARKER_RE.finditer(scan_text):
+            marker = match.group(0)
+            key = marker.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            markers.append(marker)
+            if len(markers) >= sample_limit:
+                break
     return markers
 
 

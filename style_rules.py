@@ -7,6 +7,8 @@ DEFAULT_STYLE_GUIDANCE = """House subtitle style:
 - Write natural Simplified Chinese for finished video subtitles, not literal word-by-word Chinese.
 - Keep the tone polished but alive: documentary/explainer narration can be vivid, lightly casual, and humorous when the source is.
 - Prefer concise clauses, but do not crush the line into awkward shorthand. A readable line around 29-33 visible Chinese characters is acceptable when timing is comfortable.
+- Absorb filler openings such as "And I..." and "There is/there are..." into idiomatic Chinese. Do not leave hybrid text like "And I 我..." or mechanically translate existence clauses when Chinese would naturally say "这里有/会有/是/存在/可以看到".
+- For Chinese subtitles, convert true numerals, counts, ordinals, puzzle digits, years, and measurements to Arabic numerals; preserve natural measure-word/fixed expressions such as 一个, 一遍, 一边, 一样, 一下, 一点, 一面, 一种, 一条, 一块, 一旦, 一路, 一直, 每一行, and 唯一.
 - Translate well-known places, products, people, and infrastructure names to their established Chinese names when unambiguous.
 - Keep channel names, sponsor names, product names, UI names, and terms marked preserve by the glossary in English.
 - Use glossary and context to repair obvious ASR name/place mistakes before translating.

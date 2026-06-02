@@ -13,6 +13,7 @@ from .translate import (
     classify_retry,
     contains_chinese,
     has_translatable_alpha_text,
+    is_allowable_non_chinese_translation,
     parse_json_payload,
     resolve_openai_base_url,
     short_error_message,
@@ -136,7 +137,11 @@ def validate_span_translations(
         if not target_text:
             issues["empty"].append(segment_id)
             continue
-        if has_translatable_alpha_text(source_text) and not contains_chinese(target_text):
+        if (
+            has_translatable_alpha_text(source_text)
+            and not contains_chinese(target_text)
+            and not is_allowable_non_chinese_translation(source_text, target_text, set())
+        ):
             issues["target_without_chinese"].append(segment_id)
         if find_text_pollution(target_text, dst_lang=dst_lang):
             issues["text_pollution"].append(segment_id)

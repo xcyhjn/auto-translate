@@ -212,6 +212,23 @@ def normalize_term_text(text: str) -> str:
     return re.sub(r"[\W_]+", "", (text or "").casefold())
 
 
+def is_likely_proper_name_only(text: str) -> bool:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return False
+    words = re.findall(r"[A-Za-z][A-Za-z'’]*", cleaned)
+    if not words or len(words) > 5:
+        return False
+    lowered = [word.casefold().strip("'’") for word in words]
+    if any(word in TRANSLATABLE_FUNCTION_WORDS or word in TRANSLATABLE_DISCOURSE_MARKERS for word in lowered):
+        return False
+    if FIRST_PERSON_I_RE.search(cleaned):
+        return False
+    if re.search(r"\d", cleaned):
+        return True
+    return all(word[:1].isupper() or word.isupper() for word in words)
+
+
 def extract_preserve_terms(glossary_text: str) -> set[str]:
     preserved: set[str] = set()
     for line in (glossary_text or "").splitlines():
@@ -229,6 +246,18 @@ def extract_preserve_terms(glossary_text: str) -> set[str]:
         if normalized:
             preserved.add(normalized)
     return preserved
+
+
+def extract_preserve_term_phrases(glossary_text: str) -> set[str]:
+    phrases: set[str] = set()
+    for line in (glossary_text or "").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("- ") or "policy=preserve" not in stripped:
+            continue
+        canonical = stripped[2:].split("|", 1)[0].strip()
+        if re.search(r"\s", canonical):
+            phrases.add(normalize_for_equality(canonical))
+    return phrases
 
 
 def extract_preserve_term_map(glossary_text: str) -> dict[str, str]:
@@ -255,7 +284,9 @@ def is_allowable_non_chinese_translation(source_text: str, translated_text: str,
     normalized_target = normalize_term_text(translated_text)
     if not normalized_source or not normalized_target:
         return False
-    if normalized_target not in preserved_terms:
+    if is_likely_proper_name_only(source_text) and is_likely_proper_name_only(translated_text):
+        return True
+    if normalized_target not in preserved_terms and not is_likely_proper_name_only(source_text):
         return False
     return normalized_target == normalized_source or normalized_target in normalized_source or normalized_source in normalized_target
 
@@ -268,6 +299,41 @@ def resolve_preserve_only_translation(source_text: str, preserve_term_map: dict[
         if normalized_source == normalized_term or normalized_source in normalized_term or normalized_term in normalized_source:
             return canonical
     return None
+
+
+def filter_allowed_short_english_leaks(
+    leaks: list[str],
+    translated_text: str,
+    source_text: str,
+    preserved_phrases: set[str],
+) -> list[str]:
+    if not leaks:
+        return leaks
+    normalized_text = normalize_for_equality(translated_text)
+    normalized_source = normalize_for_equality(source_text)
+    return [
+        leak
+        for leak in leaks
+        if not (
+            any(
+                normalize_for_equality(leak) in phrase
+                and (phrase in normalized_text or phrase in normalized_source)
+                for phrase in preserved_phrases
+            )
+            or is_leak_part_of_source_proper_phrase(leak, source_text)
+        )
+    ]
+
+
+def is_leak_part_of_source_proper_phrase(leak: str, source_text: str) -> bool:
+    leak_key = normalize_for_equality(leak)
+    if not leak_key:
+        return False
+    for phrase in re.findall(r"\b[A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*)+\b", source_text or ""):
+        words = [word.casefold().strip(".'’") for word in re.findall(r"[A-Za-z][A-Za-z'’.-]*", phrase)]
+        if leak_key in words:
+            return True
+    return False
 
 
 def has_translatable_alpha_text(text: str) -> bool:
@@ -289,11 +355,13 @@ def validate_translations(
     *,
     dst_lang: str | None,
     preserved_terms: set[str] | None = None,
+    preserved_phrases: set[str] | None = None,
 ) -> dict[str, list[int]]:
     expected_ids = {segment.id for segment in chunk}
     returned_ids = set(translations)
     source_by_id = {segment.id: segment.source_text for segment in chunk}
     preserved_terms = preserved_terms or set()
+    preserved_phrases = preserved_phrases or set()
 
     issues: dict[str, list[int]] = {
         "missing": sorted(expected_ids - returned_ids),
@@ -326,7 +394,12 @@ def validate_translations(
         pollution_issues = find_text_pollution(translated_text, dst_lang=dst_lang)
         if pollution_issues:
             issues["text_pollution"].append(segment_id)
-        short_english_leaks = find_short_english_leaks(translated_text, dst_lang=dst_lang)
+        short_english_leaks = filter_allowed_short_english_leaks(
+            find_short_english_leaks(translated_text, dst_lang=dst_lang),
+            translated_text,
+            source_text,
+            preserved_phrases,
+        )
         if short_english_leaks:
             issues["short_english_leak"].append(segment_id)
     return {key: value for key, value in issues.items() if value}
@@ -498,8 +571,18 @@ def translate_chunk_with_openai(
         context_before=context_before,
         context_after=context_after,
     )
+    if not retry_invalid_individually:
+        prompt += (
+            "\n\nQuality repair mode:\n"
+            "- The previous translation for this exact subtitle failed validation.\n"
+            "- Return clean Simplified Chinese subtitle text only, except established names or titles.\n"
+            "- Do not output mojibake, replacement characters, phonetic gibberish, or text in Greek, Cyrillic, Hebrew, Arabic, Korean, Indic, or other unrelated scripts.\n"
+            "- Do not leave short English function words mixed into Chinese.\n"
+            "- If the source is a sentence fragment, translate it as a natural standalone subtitle fragment in Chinese."
+        )
     translation_schema = build_translation_schema()
     preserved_terms = extract_preserve_terms(glossary_text)
+    preserved_phrases = extract_preserve_term_phrases(glossary_text)
 
     raw_text = ""
     last_error: Exception | None = None
@@ -562,13 +645,20 @@ def translate_chunk_with_openai(
     for segment_id in extra_ids:
         translations.pop(segment_id, None)
 
-    issues = validate_translations(chunk, translations, dst_lang=dst_lang, preserved_terms=preserved_terms)
+    issues = validate_translations(
+        chunk,
+        translations,
+        dst_lang=dst_lang,
+        preserved_terms=preserved_terms,
+        preserved_phrases=preserved_phrases,
+    )
     retryable_ids = sorted(
         set(issues.get("missing", []))
         | set(issues.get("empty", []))
         | set(issues.get("source_echo", []))
         | set(issues.get("target_without_chinese", []))
         | set(issues.get("text_pollution", []))
+        | set(issues.get("short_english_leak", []))
     )
     if retryable_ids and retry_invalid_individually and len(chunk) > 1:
         segment_by_id = {segment.id: segment for segment in chunk}
@@ -588,7 +678,64 @@ def translate_chunk_with_openai(
                 context_after=context_after,
             )
             translations[segment_id] = single_translation[segment_id]
-        issues = validate_translations(chunk, translations, dst_lang=dst_lang, preserved_terms=preserved_terms)
+        issues = validate_translations(
+            chunk,
+            translations,
+            dst_lang=dst_lang,
+            preserved_terms=preserved_terms,
+            preserved_phrases=preserved_phrases,
+        )
+
+    if issues and not retry_invalid_individually and len(chunk) == 1:
+        segment = chunk[0]
+        for repair_attempt in range(max_retries):
+            repair_prompt = (
+                f"{prompt}\n\nValidation failure repair attempt {repair_attempt + 1}/{max_retries}:\n"
+                f"- Failed issues: {json.dumps(issues, ensure_ascii=False)}\n"
+                f"- Previous invalid target_text: {json.dumps(translations.get(segment.id, ''), ensure_ascii=False)}\n"
+                "- Return a new clean target_text for this same ID that fixes every listed issue."
+            )
+            try:
+                response = client.responses.create(
+                    model=model,
+                    input=repair_prompt,
+                    text={
+                        "format": {
+                            "type": "json_schema",
+                            "name": "subtitle_translation",
+                            "strict": True,
+                            "schema": translation_schema,
+                        },
+                        "verbosity": "low",
+                    },
+                )
+                raw_text = response.output_text.strip()
+                repaired_payload = parse_json_payload(raw_text)
+                repaired_translations = {
+                    int(item["id"]): str(item["target_text"]).strip()
+                    for item in repaired_payload
+                    if isinstance(item, dict) and "id" in item and "target_text" in item
+                }
+                if segment.id in repaired_translations:
+                    translations[segment.id] = repaired_translations[segment.id]
+                issues = validate_translations(
+                    chunk,
+                    translations,
+                    dst_lang=dst_lang,
+                    preserved_terms=preserved_terms,
+                    preserved_phrases=preserved_phrases,
+                )
+                if not issues:
+                    break
+            except Exception as exc:
+                if repair_attempt >= max_retries - 1:
+                    raise RuntimeError(
+                        "OpenAI translation validation repair failed after retries.\n"
+                        f"issues={json.dumps(issues, ensure_ascii=False)}\n"
+                        f"last_raw_output:\n{raw_text}"
+                    ) from exc
+                wait_seconds, _ = classify_retry(exc, repair_attempt, max_retries)
+                time.sleep(wait_seconds)
 
     if issues:
         raise TranslationValidationError(issues)

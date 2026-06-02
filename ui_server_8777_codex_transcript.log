@@ -56,3 +56,342 @@ WSManStackVersion: 3.0
 PSRemotingProtocolVersion: 2.3
 SerializationVersion: 1.1.0.1
 **********************
+UI server running at http://127.0.0.1:8777
+Translating chunk 1/13 with 40 segments.
+Translating chunk 2/13 with 40 segments.
+Translating chunk 3/13 with 40 segments.
+Translating chunk 4/13 with 40 segments.
+Translating chunk 5/13 with 40 segments.
+Translating chunk 6/13 with 40 segments.
+Translating chunk 7/13 with 40 segments.
+Translating chunk 8/13 with 40 segments.
+Translating chunk 9/13 with 40 segments.
+Translating chunk 10/13 with 40 segments.
+Translating chunk 11/13 with 40 segments.
+Translating chunk 12/13 with 40 segments.
+Translating chunk 13/13 with 3 segments.
+Translating chunk 1/17 with 40 segments.
+Translating chunk 2/17 with 40 segments.
+Translating chunk 3/17 with 40 segments.
+Translating chunk 4/17 with 40 segments.
+Translating chunk 5/17 with 40 segments.
+Translating chunk 6/17 with 40 segments.
+Translating chunk 7/17 with 40 segments.
+Translating chunk 8/17 with 40 segments.
+Translating chunk 9/17 with 40 segments.
+Translating chunk 10/17 with 40 segments.
+Translating chunk 11/17 with 40 segments.
+Translating chunk 12/17 with 40 segments.
+Translating chunk 13/17 with 40 segments.
+Translating chunk 14/17 with 40 segments.
+Translating chunk 15/17 with 40 segments.
+Translating chunk 16/17 with 40 segments.
+Translating chunk 17/17 with 33 segments.
+Translating chunk 1/19 with 40 segments.
+Translating chunk 2/19 with 40 segments.
+Translating chunk 3/19 with 40 segments.
+Translating chunk 4/19 with 40 segments.
+Translating chunk 5/19 with 40 segments.
+Translating chunk 6/19 with 40 segments.
+Translating chunk 7/19 with 40 segments.
+Translating chunk 8/19 with 40 segments.
+Translating chunk 9/19 with 40 segments.
+Translating chunk 10/19 with 40 segments.
+Translating chunk 11/19 with 40 segments.
+Translating chunk 12/19 with 40 segments.
+Translating chunk 13/19 with 40 segments.
+Translating chunk 14/19 with 40 segments.
+Translating chunk 15/19 with 40 segments.
+Translating chunk 16/19 with 40 segments.
+Translating chunk 17/19 with 40 segments.
+Translating chunk 18/19 with 40 segments.
+Translating chunk 19/19 with 24 segments.
+ERROR: [youtube] -0ViohsKbDw: Requested format is not available. Use --list-formats for a list of available formats
+Translating chunk 1/10 with 40 segments.
+Translating chunk 2/10 with 40 segments.
+Translating chunk 3/10 with 40 segments.
+Translating chunk 4/10 with 40 segments.
+Translating chunk 5/10 with 40 segments.
+Translating chunk 6/10 with 40 segments.
+Translating chunk 7/10 with 40 segments.
+Translating chunk 8/10 with 40 segments.
+Translating chunk 9/10 with 40 segments.
+Translating chunk 10/10 with 26 segments.
+Translating chunk 1/9 with 40 segments.
+Translating chunk 2/9 with 40 segments.
+Translating chunk 3/9 with 40 segments.
+Translating chunk 4/9 with 40 segments.
+Translating chunk 5/9 with 40 segments.
+PS>$global:?
+True
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260530053422
+**********************
+**********************
+Windows PowerShell 脚本开始
+开始时间: 20260530053554
+用户名: XCYHJN\bulbel
+RunAs 用户: XCYHJN\bulbel
+配置名称: 
+计算机: XCYHJN (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File D:\autosub_zh\start_ui_server_8777_codex.ps1
+进程 ID: 8324
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+UI server running at http://127.0.0.1:8777
+Translating chunk 1/17 with 20 segments.
+Translating chunk 2/17 with 20 segments.
+Translating chunk 3/17 with 20 segments.
+Translating chunk 4/17 with 20 segments.
+Translating chunk 5/17 with 20 segments.
+Translating chunk 6/17 with 20 segments.
+Translating chunk 7/17 with 20 segments.
+Translating chunk 8/17 with 20 segments.
+Translating chunk 9/17 with 20 segments.
+PS>$global:?
+True
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260530054822
+**********************
+**********************
+Windows PowerShell 脚本开始
+开始时间: 20260530054930
+用户名: XCYHJN\bulbel
+RunAs 用户: XCYHJN\bulbel
+配置名称: 
+计算机: XCYHJN (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File D:\autosub_zh\start_ui_server_8777_codex.ps1
+进程 ID: 46896
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+UI server running at http://127.0.0.1:8777
+Translating chunk 1/17 with 20 segments.
+Translating chunk 2/17 with 20 segments.
+Translating chunk 3/17 with 20 segments.
+Translating chunk 4/17 with 20 segments.
+Translating chunk 5/17 with 20 segments.
+Translating chunk 6/17 with 20 segments.
+Translating chunk 7/17 with 20 segments.
+Translating chunk 8/17 with 20 segments.
+Translating chunk 9/17 with 20 segments.
+Translating chunk 10/17 with 20 segments.
+Translating chunk 11/17 with 20 segments.
+Translating chunk 12/17 with 20 segments.
+PS>$global:?
+True
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260530060426
+**********************
+**********************
+Windows PowerShell 脚本开始
+开始时间: 20260530060501
+用户名: XCYHJN\bulbel
+RunAs 用户: XCYHJN\bulbel
+配置名称: 
+计算机: XCYHJN (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File D:\autosub_zh\start_ui_server_8777_codex.ps1
+进程 ID: 17924
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+UI server running at http://127.0.0.1:8777
+Translating chunk 1/17 with 20 segments.
+Translating chunk 2/17 with 20 segments.
+Translating chunk 3/17 with 20 segments.
+Translating chunk 4/17 with 20 segments.
+Translating chunk 5/17 with 20 segments.
+PS>$global:?
+True
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260530061428
+**********************
+**********************
+Windows PowerShell 脚本开始
+开始时间: 20260530061609
+用户名: XCYHJN\bulbel
+RunAs 用户: XCYHJN\bulbel
+配置名称: 
+计算机: XCYHJN (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File D:\autosub_zh\start_ui_server_8777_codex.ps1
+进程 ID: 50228
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+UI server running at http://127.0.0.1:8777
+Translating chunk 1/17 with 20 segments.
+Translating chunk 2/17 with 20 segments.
+Translating chunk 3/17 with 20 segments.
+Translating chunk 4/17 with 20 segments.
+Translating chunk 5/17 with 20 segments.
+Translating chunk 6/17 with 20 segments.
+Translating chunk 7/17 with 20 segments.
+Translating chunk 8/17 with 20 segments.
+Translating chunk 9/17 with 20 segments.
+Translating chunk 10/17 with 20 segments.
+Translating chunk 11/17 with 20 segments.
+Translating chunk 12/17 with 20 segments.
+PS>$global:?
+True
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260530063046
+**********************
+**********************
+Windows PowerShell 脚本开始
+开始时间: 20260530063104
+用户名: XCYHJN\bulbel
+RunAs 用户: XCYHJN\bulbel
+配置名称: 
+计算机: XCYHJN (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File D:\autosub_zh\start_ui_server_8777_codex.ps1
+进程 ID: 51920
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+UI server running at http://127.0.0.1:8777
+Translating chunk 1/17 with 20 segments.
+Translating chunk 2/17 with 20 segments.
+Translating chunk 3/17 with 20 segments.
+Translating chunk 4/17 with 20 segments.
+Translating chunk 5/17 with 20 segments.
+Translating chunk 6/17 with 20 segments.
+Translating chunk 7/17 with 20 segments.
+Translating chunk 8/17 with 20 segments.
+Translating chunk 9/17 with 20 segments.
+Translating chunk 10/17 with 20 segments.
+Translating chunk 11/17 with 20 segments.
+Translating chunk 12/17 with 20 segments.
+PS>$global:?
+True
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260530064518
+**********************
+**********************
+Windows PowerShell 脚本开始
+开始时间: 20260530065200
+用户名: XCYHJN\bulbel
+RunAs 用户: XCYHJN\bulbel
+配置名称: 
+计算机: XCYHJN (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File D:\autosub_zh\start_ui_server_8777_codex.ps1
+进程 ID: 28000
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+UI server running at http://127.0.0.1:8777
+Translating chunk 1/17 with 20 segments.
+Translating chunk 2/17 with 20 segments.
+Translating chunk 3/17 with 20 segments.
+Translating chunk 4/17 with 20 segments.
+Translating chunk 5/17 with 20 segments.
+Translating chunk 6/17 with 20 segments.
+Translating chunk 7/17 with 20 segments.
+Translating chunk 8/17 with 20 segments.
+Translating chunk 9/17 with 20 segments.
+Translating chunk 10/17 with 20 segments.
+Translating chunk 11/17 with 20 segments.
+Translating chunk 12/17 with 20 segments.
+PS>$global:?
+True
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260530070425
+**********************
+**********************
+Windows PowerShell 脚本开始
+开始时间: 20260530070515
+用户名: XCYHJN\bulbel
+RunAs 用户: XCYHJN\bulbel
+配置名称: 
+计算机: XCYHJN (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File D:\autosub_zh\start_ui_server_8777_codex.ps1
+进程 ID: 31872
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+UI server running at http://127.0.0.1:8777
+Translating chunk 1/17 with 20 segments.
+Translating chunk 2/17 with 20 segments.
+Translating chunk 3/17 with 20 segments.
+Translating chunk 4/17 with 20 segments.
+Translating chunk 5/17 with 20 segments.
+Translating chunk 6/17 with 20 segments.
+Translating chunk 7/17 with 20 segments.
+Translating chunk 8/17 with 20 segments.
+Translating chunk 9/17 with 20 segments.
+Translating chunk 10/17 with 20 segments.
+Translating chunk 11/17 with 20 segments.
+Translating chunk 12/17 with 20 segments.
+PS>$global:?
+True
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260530072019
+**********************
+**********************
+Windows PowerShell 脚本开始
+开始时间: 20260530072042
+用户名: XCYHJN\bulbel
+RunAs 用户: XCYHJN\bulbel
+配置名称: 
+计算机: XCYHJN (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File D:\autosub_zh\start_ui_server_8777_codex.ps1
+进程 ID: 39000
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
