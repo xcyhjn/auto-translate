@@ -2196,3 +2196,64 @@ config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cud
 output_dir=D:\autosub_zh\output\The-hardest-dungeon-EVER-designed
 files=31
 
+Traceback (most recent call last):
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1698, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1854, in __extract_info
+    return self.process_ie_result(ie_result, download, extra_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1913, in process_ie_result
+    ie_result = self.process_video_result(ie_result, download=download)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 3058, in process_video_result
+    raise ExtractorError(
+yt_dlp.utils.ExtractorError: [youtube] oYjLt5yNlqc: Requested format is not available. Use --list-formats for a list of available formats
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 2141, in do_POST
+    self._json_response({"ok": False, "error": "url required"}, status=400)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\ui_server.py", line 1648, in youtube_info_job
+  File "D:\autosub_zh\youtube_meta.py", line 131, in fetch_youtube_info
+    meta = fetch_youtube_meta(url, proxy_url=proxy_url)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\youtube_meta.py", line 107, in fetch_youtube_meta
+    info = ydl.extract_info(url, download=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1687, in extract_info
+    return self.__extract_info(url, self.get_info_extractor(key), download, extra_info, process)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1716, in wrapper
+    self.report_error(str(e), e.format_traceback())
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1154, in report_error
+    self.trouble(f'{self._format_err("ERROR:", self.Styles.ERROR)} {message}', *args, **kwargs)
+  File "C:\Users\bulbel\AppData\Local\Programs\Python\Python311\Lib\site-packages\yt_dlp\YoutubeDL.py", line 1093, in trouble
+    raise DownloadError(message, exc_info)
+yt_dlp.utils.DownloadError: [0;31mERROR:[0m [youtube] oYjLt5yNlqc: Requested format is not available. Use --list-formats for a list of available formats
+
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\Shy Femboy Catboy Loses Bet And Becomes YOURS.. (Tsundere ASMR RP) (M4M) (Maid) (Msub).mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+[run_pipeline_job:start] video_path=D:\autosub_zh\input\Shy Femboy Catboy Loses Bet And Becomes YOURS.. (Tsundere ASMR RP) (M4M) (Maid) (Msub).mp4
+config_summary={src_lang=en, dst_lang=zh-Hans, model=distil-large-v3, device=cuda, compute_type=float16}
+
+Traceback (most recent call last):
+  File "D:\autosub_zh\ui_server.py", line 1728, in execute_pipeline_job
+    manifest = run_pipeline(
+               ^^^^^^^^^^^^^
+  File "D:\autosub_zh\pipeline_core.py", line 846, in run_pipeline
+    translated_segments = translate_segments(
+                          ^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 809, in translate_segments
+    glossary_text = load_glossary(glossary)
+                    ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\autosub_zh\translate.py", line 94, in load_glossary
+    with open(glossary, "r", encoding="utf-8") as file:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'D:\\autosub_zh\\output\\Shy-Femboy-Catboy-Loses-Bet-And-Becomes-YOURS..-Tsundere-ASMR-RP-M4M-Maid-Msub\\03_glossary_resolved_prompt.txt'
+
+
