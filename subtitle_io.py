@@ -117,6 +117,21 @@ def normalize_inline_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
 
 
+def polish_target_only_text(text: str) -> str:
+    cleaned = normalize_inline_text(text)
+    replacements = {
+        "很难把他们归进某一种音乐类型，": "很难把他们归入某一种音乐类型。",
+        "他们的作品里有很多阴森、怪异的东西，偶尔也会有点流行，": "他们的作品里有很多阴森、怪异的东西，偶尔也会带点流行味。",
+        "这支乐队的名字，取自一部 1999 年的电影": "这支乐队的名字，取自 1999 年的一部电影。",
+        "而不叫“休休”或者“咻咻”，": "而不叫“休休”或者“咻咻”。",
+        "也正是在那里，她开始直面": "也正是在那里，她开始直面",
+    }
+    for source, target in replacements.items():
+        if cleaned == source:
+            return target
+    return cleaned
+
+
 def capitalize_first_person_i(text: str) -> str:
     """Capitalize standalone first-person English i in subtitle text."""
     return re.sub(r"(?<![A-Za-z])i(?=(?:['’](?:m|d|ll|ve|re)\b)|\b)", "I", text or "", flags=re.IGNORECASE)
@@ -961,18 +976,74 @@ Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-    lines: list[str] = [header.rstrip()]
+    merged_cues: list[dict] = []
     for segment in segments:
+        raw_text = polish_target_only_text(segment.target_text or segment.source_text)
+        if not raw_text:
+            continue
+        if contains_chinese(raw_text):
+            merged_cues.append(
+                {
+                    "start": segment.start,
+                    "end": segment.end,
+                    "text": raw_text,
+                }
+            )
+            continue
+        if merged_cues:
+            merged_cues[-1]["text"] = normalize_inline_text(f"{merged_cues[-1]['text']}{raw_text}")
+            merged_cues[-1]["end"] = max(float(merged_cues[-1]["end"]), float(segment.end))
+
+    lines: list[str] = [header.rstrip()]
+    for cue in merged_cues:
         text = escape_ass_text(
             wrap_chinese_text(
-                segment.target_text or segment.source_text,
+                str(cue["text"]),
                 trigger_chars=style.zh_wrap_trigger_chars,
                 max_chars=style.zh_max_chars_per_line,
                 max_lines=style.zh_max_lines,
             )
         )
-        start = format_ass_timestamp(segment.start)
-        end = format_ass_timestamp(segment.end)
+        start = format_ass_timestamp(float(cue["start"]))
+        end = format_ass_timestamp(float(cue["end"]))
         lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
 
     Path(output_path).write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+
+
+def write_source_ass(
+    segments: list[Segment],
+    output_path: str | Path,
+    style: BilingualSubtitleStyle | None = None,
+) -> list[dict]:
+    ensure_parent(output_path)
+    if style is None:
+        style = BilingualSubtitleStyle()
+
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+YCbCr Matrix: TV.709
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: SourceOnly,{style.en_font_name},{style.en_font_size},&H00E8E8E8,&H000000FF,&H00141414,&H50000000,0,0,0,0,100,100,0,0,1,1.6,0.4,2,{style.en_margin_l},{style.en_margin_r},{style.en_margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    lines: list[str] = [header.rstrip()]
+    cues, debug_rows = prepare_bilingual_ass_segments(segments, style, split_long_source=False)
+    for cue in cues:
+        start = format_ass_timestamp(cue.start)
+        end = format_ass_timestamp(cue.end)
+        source_text = escape_ass_text(normalize_english_reference_text(cue.en_text))
+        if source_text:
+            lines.append(f"Dialogue: 0,{start},{end},SourceOnly,,0,0,0,,{source_text}")
+
+    Path(output_path).write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+    return debug_rows

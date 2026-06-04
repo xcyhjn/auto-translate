@@ -12,12 +12,16 @@ from typing import Callable
 import tempfile
 
 from .asr import transcribe_audio
+from .bilingual_postprocess import postprocess_bilingual_segments
 from .difficult_spans import detect_difficult_spans
 from .display_rewrite import rewrite_display_segments
 from .glossary import (
     apply_glossary_alias_corrections,
     apply_translate_policy_corrections,
     ensure_project_glossary,
+    glossary_from_terms,
+    glossary_to_prompt_text,
+    merge_term_item,
     write_asr_terms,
     write_resolved_glossary,
 )
@@ -43,12 +47,13 @@ from .source_repair import repair_source_segments
 from .source_spans import detect_source_spans
 from .span_repair import repair_difficult_spans
 from .span_translate import translate_source_spans
-from .subtitle_io import prepare_bilingual_ass_segments, write_bilingual_ass, write_srt
+from .subtitle_io import prepare_bilingual_ass_segments, write_bilingual_ass, write_srt, write_source_ass, write_zh_ass
 from .terminology import apply_terminology_short_circuit
 from .text_quality import find_text_pollution, format_pollution_issues
 from .timing import refine_timing
 from .translate import load_glossary, translate_segments
 from .style_rules import load_style_prompt_text
+from .workflow_profiles import load_dataset_glossary_terms, load_dataset_profile, write_dataset_profile_assets, build_subtitle_output_plan
 
 
 StageCallback = Callable[[str, dict], None]
@@ -58,8 +63,6 @@ VIDEO_ENCODER_FALLBACK = "libx264"
 VIDEO_PRESET = "p4"
 VIDEO_QUALITY = "25"
 TARGET_MAX_HEIGHT = 1080
-
-
 def write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -126,6 +129,25 @@ def empty_span_translation_report() -> dict:
         },
         "results": [],
     }
+
+
+def write_dataset_glossary_bundle(
+    output_dir: Path,
+    dataset_profile: str,
+) -> tuple[Path | None, Path | None]:
+    dataset_terms = load_dataset_glossary_terms(dataset_profile)
+    if not dataset_terms:
+        return (None, None)
+
+    terms: dict[str, object] = {}
+    for item in dataset_terms:
+        merge_term_item(terms, item)
+    glossary = glossary_from_terms(terms, strategy=f"dataset:{dataset_profile}")
+    json_path = output_dir / "00_profile_glossary.json"
+    prompt_path = output_dir / "00_profile_glossary_prompt.txt"
+    json_path.write_text(json.dumps(glossary, ensure_ascii=False, indent=2), encoding="utf-8")
+    prompt_path.write_text(glossary_to_prompt_text(glossary), encoding="utf-8")
+    return (json_path, prompt_path)
 
 
 def build_subtitle_filter_path(subtitle_path: Path) -> str:
@@ -390,6 +412,9 @@ def run_pipeline(
     span_repair_max_spans: int = 12,
     enable_ai_display_rewrite: bool = False,
     display_rewrite_max_ai_segments: int = 12,
+    subtitle_mode: str = "bilingual_source_reference",
+    source_reference_label: str = "",
+    dataset_profile: str = "",
     bilingual_style: BilingualSubtitleStyle | None = None,
     callback: StageCallback | None = None,
 ) -> dict:
@@ -408,6 +433,17 @@ def run_pipeline(
     processing_video_path = input_path
     auto_glossary_path = ensure_project_glossary(output_dir)
     effective_style = bilingual_style if bilingual_style is not None else BilingualSubtitleStyle()
+    dataset_bundle = load_dataset_profile(dataset_profile)
+    dataset_assets = write_dataset_profile_assets(dataset_profile, output_dir) if dataset_profile else {}
+    dataset_glossary_json_path, dataset_glossary_prompt_path = (
+        write_dataset_glossary_bundle(output_dir, dataset_profile) if dataset_profile else (None, None)
+    )
+    plan = build_subtitle_output_plan(
+        src_lang=source_reference_label or src_lang,
+        dst_lang=dst_lang,
+        subtitle_mode=subtitle_mode,
+        preview_seconds=preview_seconds,
+    )
 
     emit(
         callback,
@@ -417,6 +453,9 @@ def run_pipeline(
             "output_dir": str(output_dir),
             "audio_override_path": str(audio_override_path) if audio_override_path else None,
             "glossary_path": str(auto_glossary_path) if auto_glossary_path else "",
+            "dataset_glossary_path": str(dataset_glossary_prompt_path) if dataset_glossary_prompt_path else "",
+            "dataset_profile": dataset_profile,
+            "dataset_assets": dataset_assets,
         },
     )
 
@@ -486,12 +525,13 @@ def run_pipeline(
 
     if load_existing_segments and not force_retranslate_existing_segments and translated_json_path.exists():
         translated_segments = load_segments(translated_json_path)
+        postprocess_stats = postprocess_bilingual_segments(translated_segments)
         source_repair_report = repair_source_segments(translated_segments, get_glossary_json_path(output_dir))
         save_segments_payload(
             translated_segments,
             output_dir / "03b_source_repaired_segments.json",
             input_file=str(input_path),
-            summary=source_repair_report["summary"],
+            summary={**source_repair_report["summary"], "bilingual_postprocess": postprocess_stats},
         )
         write_stage_json(
             output_dir / "03b_source_repair_report.json",
@@ -506,9 +546,9 @@ def run_pipeline(
             input_path=input_path,
             segment_count=len(translated_segments),
         )
-        if source_repair_report["summary"]["replacement_count"]:
+        if source_repair_report["summary"]["replacement_count"] or postprocess_stats["total_replacements"]:
             save_segments(translated_segments, translated_json_path)
-            write_srt(translated_segments, output_dir / "04_source_en.srt")
+            write_srt(translated_segments, output_dir / plan.source_srt_name)
         if not (output_dir / "05b_terminology_actions.json").exists():
             write_json(output_dir / "05b_terminology_actions.json", empty_terminology_report(len(translated_segments)))
         if not (output_dir / "05a_span_translation_report.json").exists():
@@ -533,6 +573,7 @@ def run_pipeline(
                 "duration_seconds": probe_duration,
                 "note": "loaded translated display segments; rerun timing/translation if these were generated before display-level timing was introduced",
                 "source_repairs": source_repair_report["summary"],
+                "bilingual_postprocess": postprocess_stats,
                 "source_spans": source_spans["summary"],
             },
         )
@@ -554,7 +595,7 @@ def run_pipeline(
                     input_file=str(input_path),
                     summary={"stage": "timed_source"},
                 )
-                write_srt(timed_segments, output_dir / "04_source_en.srt")
+                write_srt(timed_segments, output_dir / plan.source_srt_name)
             write_stage_json(
                 output_dir / "03b_source_repair_report.json",
                 source_repair_report,
@@ -760,7 +801,7 @@ def run_pipeline(
                 input_path=input_path,
                 segment_count=len(timed_segments),
             )
-            write_srt(timed_segments, output_dir / "04_source_en.srt")
+            write_srt(timed_segments, output_dir / plan.source_srt_name)
             emit(
                 callback,
                 "timing_complete",
@@ -813,7 +854,16 @@ def run_pipeline(
             source_spans_for_translation,
             src_lang=src_lang,
             dst_lang=dst_lang,
-            glossary_text=load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
+            glossary_text=(
+                "\n\n".join(
+                    item
+                    for item in [
+                        dataset_bundle.get("glossary_text", ""),
+                        load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
+                    ]
+                    if item.strip()
+                )
+            ),
             model=translation_model,
             style_prompt_text=style_prompt_for_translation,
             base_url=openai_base_url,
@@ -857,6 +907,7 @@ def run_pipeline(
             context_window=4,
             locked_segment_ids=locked_translation_ids,
             style_prompt_text=style_prompt_for_translation,
+            glossary_text_override=dataset_bundle.get("glossary_text", ""),
             progress_callback=lambda stage, progress: emit(callback, stage, progress),
         )
         glossary_json_path = get_glossary_json_path(output_dir)
@@ -872,7 +923,7 @@ def run_pipeline(
                 "translate_policy_corrections": translate_policy_stats,
             },
         )
-        write_srt(translated_segments, output_dir / "06_translated_zh.srt")
+        write_srt(translated_segments, output_dir / plan.translated_srt_name)
         emit(
             callback,
             "translation_complete",
@@ -898,7 +949,7 @@ def run_pipeline(
                 "translate_policy_corrections": translate_policy_stats,
             },
         )
-        write_srt(translated_segments, output_dir / "06_translated_zh.srt")
+        write_srt(translated_segments, output_dir / plan.translated_srt_name)
         emit(
             callback,
             "glossary_alias_corrections",
@@ -945,7 +996,7 @@ def run_pipeline(
                 "translate_policy_corrections": translate_policy_stats,
             },
         )
-        write_srt(translated_segments, output_dir / "06_translated_zh.srt")
+        write_srt(translated_segments, output_dir / plan.translated_srt_name)
     emit(
         callback,
         "display_rewrite_complete",
@@ -993,7 +1044,16 @@ def run_pipeline(
             difficult_spans_initial,
             src_lang=src_lang,
             dst_lang=dst_lang,
-            glossary_text=load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
+            glossary_text=(
+                "\n\n".join(
+                    item
+                    for item in [
+                        dataset_bundle.get("glossary_text", ""),
+                        load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
+                    ]
+                    if item.strip()
+                )
+            ),
             model=translation_model,
             style_prompt_text=style_prompt_for_translation,
             base_url=openai_base_url,
@@ -1021,7 +1081,7 @@ def run_pipeline(
                 "translate_policy_corrections": translate_policy_stats,
             },
         )
-        write_srt(translated_segments, output_dir / "06_translated_zh.srt")
+        write_srt(translated_segments, output_dir / plan.translated_srt_name)
     write_stage_json(
         output_dir / "07c_span_repair_report.json",
         span_repair_report,
@@ -1052,9 +1112,24 @@ def run_pipeline(
 
     assert_no_target_text_pollution(translated_segments, dst_lang=dst_lang)
     report = qa_check(translated_segments, dst_lang=dst_lang)
-    ass_path = output_dir / "08_bilingual_zh_en.ass"
-    alignment_debug = write_bilingual_ass(translated_segments, ass_path, style=effective_style)
-    display_cues, _ = prepare_bilingual_ass_segments(translated_segments, effective_style)
+    ass_path = output_dir / plan.ass_name
+    if plan.subtitle_mode == "target_only":
+        write_zh_ass(translated_segments, ass_path, style=effective_style)
+        display_cues, alignment_debug = prepare_bilingual_ass_segments(translated_segments, effective_style)
+        for cue in display_cues:
+            cue.en_text = ""
+    elif plan.subtitle_mode == "source_review":
+        alignment_debug = write_source_ass(translated_segments, ass_path, style=effective_style)
+        display_cues, _ = prepare_bilingual_ass_segments(translated_segments, effective_style)
+        for cue in display_cues:
+            cue.zh_text = ""
+        skip_burn = True
+    else:
+        alignment_debug = write_bilingual_ass(translated_segments, ass_path, style=effective_style)
+        display_cues, _ = prepare_bilingual_ass_segments(translated_segments, effective_style)
+    if plan.ass_name != plan.legacy_ass_name:
+        legacy_ass_path = output_dir / plan.legacy_ass_name
+        legacy_ass_path.write_text(ass_path.read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
     display_report = qa_display_cues(
         display_cues,
         dst_lang=dst_lang,
@@ -1144,7 +1219,7 @@ def run_pipeline(
         segment_count=len(translated_segments),
     )
     write_stage_json(
-        output_dir / "08a_bilingual_alignment_debug.json",
+        output_dir / plan.alignment_debug_name,
         build_stage_metadata(
             input_path=input_path,
             segment_count=len(translated_segments),
@@ -1200,13 +1275,13 @@ def run_pipeline(
                 "03b_source_repair_report.json",
                 "03_glossary_resolved.json" if (output_dir / "03_glossary_resolved.json").exists() else None,
                 "03_glossary_resolved_prompt.txt" if (output_dir / "03_glossary_resolved_prompt.txt").exists() else None,
-                "04_source_en.srt",
+                plan.source_srt_name,
                 "04a_source_spans.json",
                 "05a_span_translated_segments.json",
                 "05a_span_translation_report.json",
                 "05b_terminology_actions.json",
                 "05_translated_segments.json",
-                "06_translated_zh.srt",
+                plan.translated_srt_name,
                 "06b_display_rewritten_segments.json",
                 "06c_display_rewrite_report.json",
                 "07_qa_report.json",
@@ -1218,21 +1293,28 @@ def run_pipeline(
                 "07e_glossary_qa.tsv",
                 "07f_display_qa.tsv",
                 "07g_final_ass_qa.json",
-                "08_bilingual_zh_en.ass",
-                "08a_bilingual_alignment_debug.json",
+                plan.ass_name,
+                plan.legacy_ass_name if plan.ass_name != plan.legacy_ass_name else None,
+                plan.alignment_debug_name,
             ],
         }
+        manifest["subtitle_mode"] = plan.subtitle_mode
+        manifest["subtitle_output"] = {
+            "mode": plan.subtitle_mode,
+            "ass_path": str(ass_path),
+            "ass_name": plan.ass_name,
+            "source_srt_name": plan.source_srt_name,
+            "translated_srt_name": plan.translated_srt_name,
+        }
         manifest["files"] = [item for item in manifest["files"] if item]
-        write_json(output_dir / "10_manifest_bilingual.json", manifest)
+        write_json(output_dir / plan.manifest_name, manifest)
+        if plan.manifest_name != "10_manifest_bilingual.json":
+            write_json(output_dir / "10_manifest_bilingual.json", manifest)
         emit(callback, "complete", manifest)
         return manifest
 
     safe_ass_path = create_safe_ass_copy(ass_path)
-    output_video_name = (
-        f"09_burned_bilingual_preview_{preview_seconds}s.mp4"
-        if preview_seconds is not None
-        else "09_burned_bilingual_video.mp4"
-    )
+    output_video_name = plan.output_video_name
     output_video_path = output_dir / output_video_name
     burn_duration = (
         safe_duration_seconds(preview_seconds)
@@ -1293,13 +1375,13 @@ def run_pipeline(
             "03_timed_source_segments.json",
             "03b_source_repaired_segments.json",
             "03b_source_repair_report.json",
-            "04_source_en.srt",
+            plan.source_srt_name,
             "04a_source_spans.json",
             "05a_span_translated_segments.json",
             "05a_span_translation_report.json",
             "05b_terminology_actions.json",
             "05_translated_segments.json",
-            "06_translated_zh.srt",
+            plan.translated_srt_name,
             "06b_display_rewritten_segments.json",
             "06c_display_rewrite_report.json",
             "07_qa_report.json",
@@ -1311,8 +1393,9 @@ def run_pipeline(
             "07e_glossary_qa.tsv",
             "07f_display_qa.tsv",
             "07g_final_ass_qa.json",
-            "08_bilingual_zh_en.ass",
-            "08a_bilingual_alignment_debug.json",
+            plan.ass_name,
+            plan.legacy_ass_name if plan.ass_name != plan.legacy_ass_name else None,
+            plan.alignment_debug_name,
             "08_bilingual_safe.ass",
             "00_glossary_auto.json" if (output_dir / "00_glossary_auto.json").exists() else None,
             "00_glossary_prompt.txt" if (output_dir / "00_glossary_prompt.txt").exists() else None,
@@ -1323,7 +1406,17 @@ def run_pipeline(
             output_video_name,
         ],
     }
+    manifest["subtitle_mode"] = plan.subtitle_mode
+    manifest["subtitle_output"] = {
+        "mode": plan.subtitle_mode,
+        "ass_path": str(ass_path),
+        "ass_name": plan.ass_name,
+        "source_srt_name": plan.source_srt_name,
+        "translated_srt_name": plan.translated_srt_name,
+    }
     manifest["files"] = [item for item in manifest["files"] if item]
-    write_json(output_dir / "10_manifest_bilingual.json", manifest)
+    write_json(output_dir / plan.manifest_name, manifest)
+    if plan.manifest_name != "10_manifest_bilingual.json":
+        write_json(output_dir / "10_manifest_bilingual.json", manifest)
     emit(callback, "complete", manifest)
     return manifest
