@@ -29,6 +29,15 @@ from .glossary import write_youtube_glossary
 from .segment_io import load_segments
 from .style_learning import write_style_learning_artifacts
 from .subtitle_io import write_bilingual_ass
+from .workflow_profiles import (
+    DEFAULT_WORKFLOW_PROFILE,
+    apply_workflow_profile,
+    list_workflow_profiles,
+    load_dataset_profile,
+    load_prompt_profile,
+    normalize_subtitle_mode,
+    summarize_dataset_profile,
+)
 from .youtube_meta import ensure_cover, ensure_padded_cover, fetch_youtube_info, fetch_youtube_meta, safe_project_slug, save_youtube_meta
 
 
@@ -47,6 +56,7 @@ STATE_SNAPSHOT_VERSION = 1
 STATE_STALE_TIMEOUT_SECONDS = 30 * 60
 
 DEFAULT_CONFIG = {
+    "workflow_profile": DEFAULT_WORKFLOW_PROFILE,
     "src_lang": "en",
     "dst_lang": "zh-Hans",
     "model": "distil-large-v3",
@@ -57,6 +67,10 @@ DEFAULT_CONFIG = {
     "asr_audio_gain_db": 6.0,
     "asr_vad_mode": "auto",
     "translation_model": "gpt-5.4",
+    "prompt_profile": "en_zh_natural_subtitle",
+    "dataset_profile": "en_zh/general",
+    "subtitle_mode": "bilingual_source_reference",
+    "source_reference_label": "en",
     "translation_prompt": (
         "Prioritize faithful meaning over literal wording. Preserve casual spoken tone, "
         "hesitation, intimacy, jokes, sarcasm, and implied meaning when present. Translate "
@@ -444,7 +458,9 @@ def restore_state_from_snapshot() -> None:
 
 
 def normalize_config(config: dict) -> dict:
-    normalized = {**DEFAULT_CONFIG, **(config or {})}
+    incoming = dict(config or {})
+    base = apply_workflow_profile({**DEFAULT_CONFIG, **incoming}, DEFAULT_CONFIG)
+    normalized = {**base, **incoming}
     style = normalized.get("style") if isinstance(normalized.get("style"), dict) else {}
     normalized["style"] = {
         key: style.get(key, default_value)
@@ -474,6 +490,13 @@ def normalize_config(config: dict) -> dict:
         normalized.get("force_retranslate_existing_segments", False)
     )
     normalized["load_existing_segments"] = bool(normalized.get("load_existing_segments", False))
+    normalized["subtitle_mode"] = normalize_subtitle_mode(normalized.get("subtitle_mode"))
+    normalized["workflow_profile"] = str(normalized.get("workflow_profile") or DEFAULT_WORKFLOW_PROFILE)
+    normalized["prompt_profile"] = str(normalized.get("prompt_profile") or "").strip()
+    normalized["dataset_profile"] = str(normalized.get("dataset_profile") or "").strip()
+    normalized["source_reference_label"] = str(
+        normalized.get("source_reference_label") or normalized.get("src_lang") or "source"
+    ).strip()
     return normalized
 
 
@@ -816,8 +839,14 @@ def read_output_tree() -> list[dict]:
                 manifest_payload = json.loads(Path(manifest_file["path"]).read_text(encoding="utf-8"))
             except Exception:
                 manifest_payload = {}
-        ass_file = file_index.get("08_bilingual_zh_en.ass")
-        burned_file = file_index.get("09_burned_bilingual_video.mp4")
+        subtitle_output = manifest_payload.get("subtitle_output") if isinstance(manifest_payload.get("subtitle_output"), dict) else {}
+        manifest_ass_name = str(subtitle_output.get("ass_name") or "").strip()
+        ass_file = file_index.get(manifest_ass_name) if manifest_ass_name else None
+        ass_file = ass_file or file_index.get("08_bilingual_zh_en.ass")
+        burn_plan = manifest_payload.get("burn_plan") if isinstance(manifest_payload.get("burn_plan"), dict) else {}
+        burned_path = str(burn_plan.get("output_path") or "").strip()
+        burned_file = file_index.get(Path(burned_path).name) if burned_path else None
+        burned_file = burned_file or file_index.get("09_burned_bilingual_video.mp4")
         input_video = str(manifest_payload.get("input_video") or "").strip()
         projects.append(
             {
@@ -829,6 +858,7 @@ def read_output_tree() -> list[dict]:
                 "burned_video_path": burned_file.get("path") if burned_file else "",
                 "burned_video_mtime_ts": burned_file.get("mtime_ts") if burned_file else 0,
                 "manifest_path": manifest_file.get("path") if manifest_file else "",
+                "subtitle_mode": str(manifest_payload.get("subtitle_mode") or subtitle_output.get("mode") or ""),
                 "input_video": input_video,
                 "input_video_name": Path(input_video).name if input_video else "",
             }
@@ -846,7 +876,11 @@ def build_bootstrap_payload(*, include_collections: bool) -> dict:
         payload["videos"] = list_input_videos()
         payload["audios"] = list_audio_files()
         payload["projects"] = read_output_tree()
-        payload["config"] = read_config()
+        config = read_config()
+        payload["config"] = config
+        payload["workflow_profiles"] = list_workflow_profiles()
+        payload["active_prompt_profile"] = load_prompt_profile(config.get("prompt_profile"))
+        payload["active_dataset_profile"] = summarize_dataset_profile(config.get("dataset_profile"))
     return payload
 
 
@@ -1751,6 +1785,9 @@ def execute_pipeline_job(video_path: str, config: dict, task_id: str | None = No
             span_repair_max_spans=int(config.get("span_repair_max_spans", 12) or 12),
             enable_ai_display_rewrite=bool(config.get("enable_ai_display_rewrite", False)),
             display_rewrite_max_ai_segments=int(config.get("display_rewrite_max_ai_segments", 12) or 12),
+            subtitle_mode=config.get("subtitle_mode", "bilingual_source_reference"),
+            source_reference_label=config.get("source_reference_label", ""),
+            dataset_profile=config.get("dataset_profile", ""),
             bilingual_style=style,
             callback=lambda stage, payload: append_history(stage, {**payload, "task_id": task_id}),
         )
@@ -1799,19 +1836,25 @@ def reburn_from_ass_job(project_path: str, task_id: str | None = None) -> dict:
     task_id = task_id or current_task_id()
     project_dir = Path(project_path)
     manifest_path = project_dir / "10_manifest_bilingual.json"
-    ass_path = project_dir / "08_bilingual_zh_en.ass"
     translated_segments_path = project_dir / "05_translated_segments.json"
-    output_path = project_dir / "09_burned_bilingual_video.mp4"
     if not project_dir.exists():
         raise FileNotFoundError(f"Project folder not found: {project_dir}")
     if not manifest_path.exists():
         raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    subtitle_output = manifest.get("subtitle_output") if isinstance(manifest.get("subtitle_output"), dict) else {}
+    ass_name = str(subtitle_output.get("ass_name") or "08_bilingual_zh_en.ass").strip()
+    ass_path = project_dir / ass_name
+    burn_plan = manifest.get("burn_plan") if isinstance(manifest.get("burn_plan"), dict) else {}
+    output_name = Path(str(burn_plan.get("output_path") or "09_burned_bilingual_video.mp4")).name
+    output_path = project_dir / output_name
+
     if not ass_path.exists():
         raise FileNotFoundError(f"ASS file not found: {ass_path}")
     if not translated_segments_path.exists():
         raise FileNotFoundError(f"Translated segments not found: {translated_segments_path}")
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     input_video = resolve_manifest_input_video(manifest)
     manifest["input_video"] = str(input_video)
     manifest["output_dir"] = str(project_dir)

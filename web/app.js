@@ -1,5 +1,8 @@
 const state = {
   config: null,
+  workflowProfiles: [],
+  activePromptProfile: "",
+  activeDatasetProfile: null,
   videos: [],
   audios: [],
   projects: [],
@@ -23,6 +26,7 @@ const state = {
 };
 
 const DEFAULT_UI_CONFIG = {
+  workflow_profile: "en_to_zh_default",
   src_lang: "en",
   dst_lang: "zh-Hans",
   model: "distil-large-v3",
@@ -33,6 +37,10 @@ const DEFAULT_UI_CONFIG = {
   compute_type: "float16",
   beam_size: 5,
   translation_model: "gpt-5.4",
+  prompt_profile: "en_zh_natural_subtitle",
+  dataset_profile: "en_zh/general",
+  subtitle_mode: "bilingual_source_reference",
+  source_reference_label: "en",
   translation_prompt:
     "Prioritize faithful meaning over literal wording. Preserve casual spoken tone, hesitation, intimacy, jokes, sarcasm, and implied meaning when present. Translate spoken English into natural Simplified Chinese subtitles, not formal written Chinese. Keep the line concise and subtitle-friendly; do not add explanations.",
   translation_chunk_size: 24,
@@ -98,6 +106,7 @@ function normalizeUiConfig(config) {
 
 function syncLocalConfigFromForm() {
   state.config = normalizeUiConfig(readFormConfig());
+  renderWorkflowSummary();
 }
 
 function markConfigDirty() {
@@ -441,6 +450,7 @@ function updateSubtitleStylePreview() {
 
 function readFormConfig() {
   return {
+    workflow_profile: el("workflow_profile")?.value || "en_to_zh_default",
     src_lang: el("src_lang").value,
     dst_lang: el("dst_lang").value,
     model: el("model").value,
@@ -451,6 +461,10 @@ function readFormConfig() {
     compute_type: el("compute_type").value,
     beam_size: Number(el("beam_size").value),
     translation_model: el("translation_model").value,
+    prompt_profile: el("prompt_profile")?.value || "",
+    dataset_profile: el("dataset_profile")?.value || "",
+    subtitle_mode: el("subtitle_mode")?.value || "bilingual_source_reference",
+    source_reference_label: el("source_reference_label")?.value || "",
     translation_prompt: el("translation_prompt").value,
     translation_chunk_size: Number(el("translation_chunk_size").value),
     translation_retries: Number(el("translation_retries").value),
@@ -505,6 +519,11 @@ function fillForm(config) {
   const normalized = normalizeUiConfig(config);
   state.config = normalized;
   config = normalized;
+  if (el("workflow_profile")) el("workflow_profile").value = config.workflow_profile || "en_to_zh_default";
+  if (el("prompt_profile")) el("prompt_profile").value = config.prompt_profile || "";
+  if (el("dataset_profile")) el("dataset_profile").value = config.dataset_profile || "";
+  if (el("subtitle_mode")) el("subtitle_mode").value = config.subtitle_mode || "bilingual_source_reference";
+  if (el("source_reference_label")) el("source_reference_label").value = config.source_reference_label || config.src_lang || "";
   el("src_lang").value = config.src_lang;
   el("dst_lang").value = config.dst_lang;
   el("model").value = config.model;
@@ -562,6 +581,111 @@ function fillForm(config) {
 
   updateSubtitleStylePreview();
   setLinkedAudioLabel(config.audio_override_path || "");
+  renderWorkflowSummary();
+}
+
+function formatWorkflowDatasetPreview(dataset) {
+  if (!dataset || typeof dataset !== "object") return "No dataset profile loaded.";
+  const lines = [];
+  if (dataset.id) lines.push(`dataset: ${dataset.id}`);
+  const files = Array.isArray(dataset.file_names)
+    ? dataset.file_names
+    : dataset.files && typeof dataset.files === "object"
+      ? Object.keys(dataset.files)
+      : [];
+  if (files.length) lines.push(`files: ${files.join(", ")}`);
+  if (typeof dataset.glossary_term_count === "number") lines.push(`glossary terms: ${dataset.glossary_term_count}`);
+  if (dataset.glossary_preview) lines.push(String(dataset.glossary_preview).split("\n").slice(0, 6).join("\n"));
+  else if (dataset.glossary_text) lines.push(String(dataset.glossary_text).split("\n").slice(0, 6).join("\n"));
+  return lines.join("\n\n") || "No dataset preview available.";
+}
+
+function getSelectedWorkflowProfile() {
+  const workflowId = el("workflow_profile")?.value || state.config?.workflow_profile || "en_to_zh_default";
+  return state.workflowProfiles.find((item) => item.id === workflowId) || null;
+}
+
+function applyWorkflowProfileSelection(profileId) {
+  const profile = state.workflowProfiles.find((item) => item.id === profileId);
+  if (!profile) return;
+  if (el("workflow_profile")) el("workflow_profile").value = profile.id;
+  if (el("src_lang")) el("src_lang").value = profile.src_lang || "";
+  if (el("dst_lang")) el("dst_lang").value = profile.dst_lang || "";
+  if (el("model")) el("model").value = profile.model || "";
+  if (el("prompt_profile")) el("prompt_profile").value = profile.prompt_profile || "";
+  if (el("dataset_profile")) el("dataset_profile").value = profile.dataset_profile || "";
+  if (el("subtitle_mode")) el("subtitle_mode").value = profile.subtitle_mode || "bilingual_source_reference";
+  if (el("source_reference_label")) el("source_reference_label").value = profile.source_reference_label || profile.src_lang || "";
+
+  const configDefaults = profile.config && typeof profile.config === "object" ? profile.config : {};
+  const styleDefaults = profile.style && typeof profile.style === "object" ? profile.style : {};
+  Object.entries(configDefaults).forEach(([key, value]) => {
+    const node = el(key);
+    if (!node) return;
+    if (node.type === "checkbox") {
+      node.checked = Boolean(value);
+    } else {
+      node.value = value ?? "";
+    }
+  });
+  Object.entries(styleDefaults).forEach(([key, value]) => {
+    const node = el(key);
+    if (!node) return;
+    node.value = value ?? "";
+  });
+
+  if (profile.prompt_preview && el("translation_prompt")) {
+    el("translation_prompt").value = profile.prompt_preview;
+  }
+  state.activePromptProfile = profile.prompt_preview || "";
+  state.activeDatasetProfile = profile.dataset_summary || null;
+  updateSubtitleStylePreview();
+  markConfigDirty();
+}
+
+function renderWorkflowProfiles() {
+  const select = el("workflow_profile");
+  if (!select) return;
+  const currentValue = select.value || state.config?.workflow_profile || DEFAULT_UI_CONFIG.workflow_profile;
+  select.innerHTML = "";
+  (state.workflowProfiles || []).forEach((profile) => {
+    const option = document.createElement("option");
+    option.value = profile.id;
+    option.textContent = profile.label || profile.id;
+    select.appendChild(option);
+  });
+  select.value = currentValue;
+}
+
+function renderWorkflowSummary() {
+  const profile = getSelectedWorkflowProfile();
+  const promptNode = el("workflowPromptPreview");
+  const datasetNode = el("workflowDatasetPreview");
+  const descriptionNode = el("workflowProfileDescription");
+  const pairNode = el("workflow_pair_preview");
+  const currentPromptProfile = el("prompt_profile")?.value || state.config?.prompt_profile || "";
+  const currentDatasetProfile = el("dataset_profile")?.value || state.config?.dataset_profile || "";
+  const profileOwnsPrompt = profile && profile.prompt_profile === currentPromptProfile;
+  const profileOwnsDataset = profile && profile.dataset_profile === currentDatasetProfile;
+  if (descriptionNode) {
+    descriptionNode.textContent = profile?.description || "Choose a workflow profile to load language-aware defaults.";
+  }
+  if (promptNode) {
+    const text = profileOwnsPrompt
+      ? (profile?.prompt_preview || state.activePromptProfile || el("translation_prompt")?.value || "")
+      : (el("translation_prompt")?.value || "");
+    promptNode.textContent = text ? text.slice(0, 900) : "No prompt loaded.";
+  }
+  if (datasetNode) {
+    const dataset = profileOwnsDataset ? (profile?.dataset_summary || state.activeDatasetProfile) : state.activeDatasetProfile;
+    datasetNode.textContent = formatWorkflowDatasetPreview(dataset);
+  }
+  if (pairNode) {
+    const src = el("src_lang")?.value || state.config?.src_lang || "";
+    const dst = el("dst_lang")?.value || state.config?.dst_lang || "";
+    const mode = el("subtitle_mode")?.value || state.config?.subtitle_mode || "";
+    pairNode.value = `${src} -> ${dst} / ${mode}`;
+  }
 }
 
 function fillFormIfClean(config) {
@@ -1044,6 +1168,16 @@ function renderRuntime(runtime, lastError) {
 function renderState(payload) {
   const safePayload = payload && typeof payload === "object" ? payload : {};
   const safeState = safePayload.state && typeof safePayload.state === "object" ? safePayload.state : {};
+  if (Array.isArray(safePayload.workflow_profiles)) {
+    state.workflowProfiles = safePayload.workflow_profiles;
+    renderWorkflowProfiles();
+  }
+  if (typeof safePayload.active_prompt_profile === "string") {
+    state.activePromptProfile = safePayload.active_prompt_profile;
+  }
+  if (safePayload.active_dataset_profile && typeof safePayload.active_dataset_profile === "object") {
+    state.activeDatasetProfile = safePayload.active_dataset_profile;
+  }
   state.runtime = safeState.runtime || {};
   const runtime = safeState.runtime || {};
   renderRuntime(runtime, safeState.last_error || null);
@@ -1060,6 +1194,7 @@ function renderState(payload) {
   renderProxyStatus();
   renderIdmStatus();
   renderYoutubeMeta();
+  renderWorkflowSummary();
 }
 
 async function testProxy() {
@@ -1110,7 +1245,15 @@ async function checkIdm() {
 
 function bootstrap() {
   fillForm(DEFAULT_UI_CONFIG);
-  renderState({ state: { runtime: {}, history: [], queue: [], phase_status: {} }, config: DEFAULT_UI_CONFIG, videos: [], projects: [] });
+  renderState({
+    state: { runtime: {}, history: [], queue: [], phase_status: {} },
+    config: DEFAULT_UI_CONFIG,
+    workflow_profiles: state.workflowProfiles,
+    active_prompt_profile: state.activePromptProfile,
+    active_dataset_profile: state.activeDatasetProfile,
+    videos: [],
+    projects: [],
+  });
   startPolling();
   fetch("/api/bootstrap")
     .then((res) => res.json())
@@ -1132,6 +1275,9 @@ function bootstrap() {
           last_error: null,
         },
         config: DEFAULT_UI_CONFIG,
+        workflow_profiles: state.workflowProfiles,
+        active_prompt_profile: state.activePromptProfile,
+        active_dataset_profile: state.activeDatasetProfile,
         videos: [],
         projects: [],
       });
@@ -1358,6 +1504,20 @@ function bindActions() {
   el("pickInputInlineBtn").addEventListener("click", pickInput);
   el("pickAudioBtn").addEventListener("click", pickAudio);
   el("pickAudioInlineBtn").addEventListener("click", pickAudio);
+  el("workflow_profile")?.addEventListener("change", (event) => applyWorkflowProfileSelection(event.target.value));
+  el("applyRussianWorkflowBtn")?.addEventListener("click", () => applyWorkflowProfileSelection("ru_to_zh_default"));
+  ["subtitle_mode", "prompt_profile", "dataset_profile", "source_reference_label"].forEach((id) => {
+    const node = el(id);
+    if (!node) return;
+    node.addEventListener("input", () => {
+      markConfigDirty();
+      renderWorkflowSummary();
+    });
+    node.addEventListener("change", () => {
+      markConfigDirty();
+      renderWorkflowSummary();
+    });
+  });
   el("previewBtn").addEventListener("click", () => runPipeline(60));
   el("downloadOnlyBtn").addEventListener("click", () => runDownload(false));
   el("downloadAndRunBtn").addEventListener("click", () => runDownload(true));

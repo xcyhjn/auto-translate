@@ -175,6 +175,7 @@
 
           <section class="workspace-card">
             <div class="tabs">
+              <button class="tab" data-panel="workflow">Workflow</button>
               <button class="tab active" data-panel="recognition">识别设置</button>
               <button class="tab" data-panel="translation">翻译设置</button>
               <button class="tab" data-panel="subtitle">字幕样式</button>
@@ -182,6 +183,45 @@
             </div>
 
             <div class="workspace-panels">
+              <section class="workspace-panel" data-panel="workflow">
+                <div class="section-head">
+                  <div>
+                    <h3>Workflow Profile</h3>
+                    <p>Choose a language workflow, subtitle output mode, prompt profile, and dataset profile.</p>
+                  </div>
+                  <button id="applyRussianWorkflowBtn" class="mini-btn" type="button">Russian Preset</button>
+                </div>
+                <div class="form-grid">
+                  <label><span>Workflow</span>
+                    <select id="workflow_profile"></select>
+                  </label>
+                  <label><span>Subtitle Mode</span>
+                    <select id="subtitle_mode">
+                      <option value="target_only">target_only</option>
+                      <option value="bilingual_source_reference">bilingual_source_reference</option>
+                      <option value="source_review">source_review</option>
+                    </select>
+                  </label>
+                  <label><span>Source Reference Label</span><input id="source_reference_label" type="text" /></label>
+                  <label><span>Prompt Profile</span><input id="prompt_profile" type="text" /></label>
+                  <label><span>Dataset Profile</span><input id="dataset_profile" type="text" /></label>
+                  <label><span>Active Pair</span><input id="workflow_pair_preview" type="text" readonly /></label>
+                </div>
+                <div class="workflow-summary-grid">
+                  <div class="workflow-summary-card">
+                    <h4>Profile Notes</h4>
+                    <p id="workflowProfileDescription"></p>
+                  </div>
+                  <div class="workflow-summary-card">
+                    <h4>Prompt Preview</h4>
+                    <pre id="workflowPromptPreview"></pre>
+                  </div>
+                  <div class="workflow-summary-card">
+                    <h4>Dataset Preview</h4>
+                    <pre id="workflowDatasetPreview"></pre>
+                  </div>
+                </div>
+              </section>
               <section class="workspace-panel active" data-panel="recognition">
                 <div class="section-head">
                   <div>

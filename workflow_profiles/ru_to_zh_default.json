@@ -1,0 +1,26 @@
+{
+  "id": "ru_to_zh_default",
+  "label": "Russian to Chinese",
+  "description": "Russian speech recognition with multilingual Whisper, Russian-aware translation guidance, and Chinese-first subtitle output.",
+  "src_lang": "ru",
+  "dst_lang": "zh-Hans",
+  "model": "large-v3",
+  "prompt_profile": "ru_zh_natural_subtitle",
+  "dataset_profile": "ru_zh/general",
+  "subtitle_mode": "target_only",
+  "source_reference_label": "ru",
+  "config": {
+    "asr_audio_mode": "whisper",
+    "asr_audio_gain_db": 6.0,
+    "asr_vad_mode": "auto",
+    "translation_chunk_size": 28,
+    "translation_retries": 4,
+    "repair_high_risk_spans": true,
+    "span_repair_max_spans": 24
+  },
+  "style": {
+    "en_font_name": "Arial",
+    "en_max_single_line_chars": 58,
+    "reference_mode": "hide_when_overflow"
+  }
+}

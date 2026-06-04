@@ -811,6 +811,14 @@ def write_resolved_glossary(output_dir: Path) -> Path | None:
     terms: dict[str, GlossaryTerm] = {}
     loaded_any = False
 
+    profile_path = output_dir / "00_profile_glossary.json"
+    if profile_path.exists():
+        loaded_any = True
+        payload = load_glossary_payload(profile_path)
+        for item in payload.get("terms", []):
+            if isinstance(item, dict):
+                merge_term_item(terms, item)
+
     youtube_path = output_dir / "00_glossary_auto.json"
     if youtube_path.exists():
         loaded_any = True

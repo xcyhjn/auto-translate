@@ -1,0 +1,23 @@
+{
+  "id": "en_to_zh_default",
+  "label": "English to Chinese",
+  "description": "Default English source workflow with Simplified Chinese subtitles and an optional source reference line.",
+  "src_lang": "en",
+  "dst_lang": "zh-Hans",
+  "model": "distil-large-v3",
+  "prompt_profile": "en_zh_natural_subtitle",
+  "dataset_profile": "en_zh/general",
+  "subtitle_mode": "bilingual_source_reference",
+  "source_reference_label": "en",
+  "config": {
+    "asr_audio_mode": "off",
+    "asr_audio_gain_db": 6.0,
+    "asr_vad_mode": "auto",
+    "translation_chunk_size": 24,
+    "translation_retries": 4
+  },
+  "style": {
+    "en_font_name": "Arial",
+    "reference_mode": "compact"
+  }
+}

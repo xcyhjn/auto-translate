@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "strategy": "ru_zh_seed_glossary",
+  "terms": [
+    {
+      "canonical": "XIU XIU",
+      "zh": "XIU XIU",
+      "type": "artist",
+      "policy": "preserve",
+      "priority": "hard",
+      "aliases": ["Xiu Xiu", "xiu xiu", "Ксю Ксю"],
+      "bad_aliases": ["Shu-shu", "Shu shu", "Hiu-hiu", "Hiu hiu", "舒舒", "休休", "咻咻", "Xiu-xiu"],
+      "sources": ["ru_zh_seed"]
+    },
+    {
+      "canonical": "A Promise",
+      "zh": "《A Promise》",
+      "type": "album",
+      "policy": "preserve",
+      "priority": "hard",
+      "aliases": ["альбом A Promise", "A Promise"],
+      "sources": ["ru_zh_seed"]
+    },
+    {
+      "canonical": "Санкт-Петербург",
+      "zh": "圣彼得堡",
+      "type": "place",
+      "policy": "translate",
+      "priority": "hard",
+      "aliases": ["Питер", "СПб"],
+      "sources": ["ru_zh_seed"]
+    },
+    {
+      "canonical": "Москва",
+      "zh": "莫斯科",
+      "type": "place",
+      "policy": "translate",
+      "priority": "hard",
+      "aliases": ["Москве", "Москву"],
+      "sources": ["ru_zh_seed"]
+    }
+  ]
+}

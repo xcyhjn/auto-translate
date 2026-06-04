@@ -793,6 +793,7 @@ def translate_segments(
     locked_segment_ids: set[int] | None = None,
     style_prompt_path: str | None = None,
     style_prompt_text: str | None = None,
+    glossary_text_override: str = "",
     progress_callback: TranslationProgressCallback | None = None,
 ) -> list[Segment]:
     if not enabled:
@@ -806,7 +807,9 @@ def translate_segments(
     if not dst_lang:
         raise ValueError("dst_lang is required when translation is enabled.")
 
-    glossary_text = load_glossary(glossary)
+    glossary_text = "\n\n".join(
+        item for item in [glossary_text_override.strip(), load_glossary(glossary)] if item.strip()
+    )
     loaded_style_prompt_text = load_style_prompt_text(style_prompt_path)
     style_prompt_text = "\n\n".join(
         item for item in [style_prompt_text or "", loaded_style_prompt_text] if item.strip()

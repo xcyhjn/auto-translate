@@ -1,0 +1,2 @@
+{"source_text":"Это альбом A Promise группы XIU XIU.","expected_contains":["《A Promise》","XIU XIU"],"forbidden_contains":["Промис","Ксю Ксю"]}
+{"source_text":"Он родился в Москве, но часто говорил о Петербурге.","expected_contains":["莫斯科"],"forbidden_contains":["Москве"]}

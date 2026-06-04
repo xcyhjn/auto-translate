@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "language": "ru",
+  "notes": [
+    "Prefer explicit src_lang=ru with multilingual Whisper models.",
+    "Keep е/ё variants normalized by context instead of blindly replacing them.",
+    "Review artist names and album titles before translation; Russian ASR may transliterate English names phonetically."
+  ],
+  "confusions": [
+    {
+      "wrong": "Ксю Ксю",
+      "canonical": "XIU XIU",
+      "note": "Artist name can be spoken or recognized phonetically."
+    },
+    {
+      "wrong": "апромис",
+      "canonical": "A Promise",
+      "note": "Album title may be phonetically transcribed in Cyrillic."
+    }
+  ]
+}
