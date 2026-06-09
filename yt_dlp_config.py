@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from yt_dlp.__init__ import parse_options
+
+def _load_parse_options():
+    try:
+        from yt_dlp.__init__ import parse_options
+    except ImportError:
+        return None
+    return parse_options
 
 
 def user_config_paths() -> list[Path]:
@@ -19,6 +25,10 @@ def ytdlp_auth_options_from_user_config() -> dict:
     """Return yt-dlp library options that this app must opt into explicitly."""
     config_paths = user_config_paths()
     if not config_paths:
+        return {}
+
+    parse_options = _load_parse_options()
+    if parse_options is None:
         return {}
 
     argv: list[str] = []

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Russian Subtitle Font Preview</title>
+    <style>
+      :root {
+        --bg: #f5f1ea;
+        --panel: #fffdf9;
+        --line: #ddd6cb;
+        --text: #20242b;
+        --muted: #6b7280;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+        background: linear-gradient(180deg, #f8f5ee 0%, var(--bg) 100%);
+        color: var(--text);
+      }
+      .wrap {
+        width: min(1500px, calc(100% - 48px));
+        margin: 0 auto;
+        padding: 36px 0 60px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 38px;
+      }
+      p.meta {
+        margin: 0 0 28px;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 22px 24px;
+      }
+      .name {
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .note {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 18px;
+      }
+      .ru {
+        font-size: 40px;
+        line-height: 1.25;
+        color: #21262d;
+        margin-bottom: 12px;
+      }
+      .zh {
+        font-size: 34px;
+        line-height: 1.3;
+        color: #70757f;
+      }
+      .tagline {
+        display: inline-block;
+        margin-top: 26px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: #eef3f8;
+        color: #3f4c5b;
+        font-size: 13px;
+      }
+      @media (max-width: 900px) {
+        .ru { font-size: 32px; }
+        .zh { font-size: 28px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Russian Subtitle Font Preview</h1>
+      <p class="meta">俄文参考层 + 中文主字幕联合预览。建议重点看：小尺寸清晰度、俄文字母辨识度、与中文主字幕是否打架。</p>
+      <div class="grid">
+        <section class="card">
+          <div class="name">Arial</div>
+          <div class="note">稳、通用、最像常见字幕方案</div>
+          <div class="ru" style="font-family: Arial, sans-serif;">Ребята, всем большой привет! Сегодня мы говорим про Xiu Xiu.</div>
+          <div class="zh" style="font-family: 'Maple Mono NF CN', 'Microsoft YaHei', sans-serif;">大家好，今天我们来聊 Xiu Xiu 这张专辑。</div>
+        </section>
+        <section class="card">
+          <div class="name">Segoe UI</div>
+          <div class="note">微软系界面字体，屏显稳定，气质偏现代</div>
+          <div class="ru" style="font-family: 'Segoe UI', sans-serif;">Ребята, всем большой привет! Сегодня мы говорим про Xiu Xiu.</div>
+          <div class="zh" style="font-family: 'Maple Mono NF CN', 'Microsoft YaHei', sans-serif;">大家好，今天我们来聊 Xiu Xiu 这张专辑。</div>
+        </section>
+        <section class="card">
+          <div class="name">Tahoma</div>
+          <div class="note">小字号清楚，字幕友好，但个性较弱</div>
+          <div class="ru" style="font-family: Tahoma, sans-serif;">Ребята, всем большой привет! Сегодня мы говорим про Xiu Xiu.</div>
+          <div class="zh" style="font-family: 'Maple Mono NF CN', 'Microsoft YaHei', sans-serif;">大家好，今天我们来聊 Xiu Xiu 这张专辑。</div>
+        </section>
+        <section class="card">
+          <div class="name">Verdana</div>
+          <div class="note">宽松、清楚，适合俄文参考层，但会更占宽度</div>
+          <div class="ru" style="font-family: Verdana, sans-serif;">Ребята, всем большой привет! Сегодня мы говорим про Xiu Xiu.</div>
+          <div class="zh" style="font-family: 'Maple Mono NF CN', 'Microsoft YaHei', sans-serif;">大家好，今天我们来聊 Xiu Xiu 这张专辑。</div>
+        </section>
+        <section class="card">
+          <div class="name">Trebuchet MS</div>
+          <div class="note">比 Arial 更有性格，读感不错</div>
+          <div class="ru" style="font-family: 'Trebuchet MS', sans-serif;">Ребята, всем большой привет! Сегодня мы говорим про Xiu Xiu.</div>
+          <div class="zh" style="font-family: 'Maple Mono NF CN', 'Microsoft YaHei', sans-serif;">大家好，今天我们来聊 Xiu Xiu 这张专辑。</div>
+        </section>
+        <section class="card">
+          <div class="name">Bahnschrift</div>
+          <div class="note">更硬朗、机械，适合冷感内容，不一定最像字幕</div>
+          <div class="ru" style="font-family: Bahnschrift, sans-serif;">Ребята, всем большой привет! Сегодня мы говорим про Xiu Xiu.</div>
+          <div class="zh" style="font-family: 'Maple Mono NF CN', 'Microsoft YaHei', sans-serif;">大家好，今天我们来聊 Xiu Xiu 这张专辑。</div>
+        </section>
+        <section class="card">
+          <div class="name">Calibri</div>
+          <div class="note">柔和、现代，但做字幕时存在感偏弱</div>
+          <div class="ru" style="font-family: Calibri, sans-serif;">Ребята, всем большой привет! Сегодня мы говорим про Xiu Xiu.</div>
+          <div class="zh" style="font-family: 'Maple Mono NF CN', 'Microsoft YaHei', sans-serif;">大家好，今天我们来聊 Xiu Xiu 这张专辑。</div>
+        </section>
+        <section class="card">
+          <div class="name">Georgia</div>
+          <div class="note">偏书卷气，适合正文，不太像典型视频字幕</div>
+          <div class="ru" style="font-family: Georgia, serif;">Ребята, всем большой привет! Сегодня мы говорим про Xiu Xiu.</div>
+          <div class="zh" style="font-family: 'Maple Mono NF CN', 'Microsoft YaHei', sans-serif;">大家好，今天我们来聊 Xiu Xiu 这张专辑。</div>
+        </section>
+      </div>
+      <div class="tagline">建议优先考虑：Arial / Segoe UI / Tahoma / Trebuchet MS</div>
+    </div>
+  </body>
+</html>

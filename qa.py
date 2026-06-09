@@ -83,6 +83,29 @@ class QaReport:
         return bool(self.errors)
 
 
+def qa_ass_entity_audit(audit_payload: dict | None) -> QaReport:
+    report = QaReport()
+    if not isinstance(audit_payload, dict):
+        return report
+    issues = audit_payload.get("issues")
+    if not isinstance(issues, list):
+        return report
+    for item in issues:
+        if not isinstance(item, dict):
+            continue
+        issue_type = str(item.get("issue_type") or "")
+        text = str(item.get("text") or "").strip()
+        if issue_type == "english_residue_in_chinese_layer" and text:
+            report.errors.append(
+                f"ASS entity audit: Chinese subtitle line still contains English residue '{text}'."
+            )
+        elif issue_type == "non_canonical_reference_name" and text:
+            report.warnings.append(
+                f"ASS entity audit: English reference line still contains non-canonical name '{text}'."
+            )
+    return report
+
+
 def max_internal_gap(segment: Segment) -> float:
     if not segment.words or len(segment.words) < 2:
         return 0.0
@@ -107,6 +130,8 @@ def is_chinese_target_language(dst_lang: str | None) -> bool:
 
 def has_translatable_alpha_text(text: str) -> bool:
     words = [word.casefold() for word in re.findall(r"[A-Za-z]{2,}", text or "")]
+    if re.search(r"[\u0400-\u052f]", text or ""):
+        return True
     if FIRST_PERSON_I_RE.search(text or ""):
         return True
     if len(words) < 2:
@@ -116,6 +141,19 @@ def has_translatable_alpha_text(text: str) -> bool:
     if any(word in TRANSLATABLE_FUNCTION_WORDS for word in words):
         return True
     return len(words) >= 7
+
+
+def find_entity_like_english_residue(text: str, *, dst_lang: str | None = None) -> list[str]:
+    if not is_chinese_target_language(dst_lang):
+        return []
+    if not contains_chinese(text):
+        return []
+    matches: list[str] = []
+    for match in re.finditer(r"\b[A-Z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*)+\b", text or ""):
+        candidate = match.group(0).strip()
+        if candidate:
+            matches.append(candidate)
+    return matches
 
 
 def contains_term(text: str, term: str) -> bool:
@@ -134,6 +172,13 @@ def contains_term_or_possessive(text: str, term: str) -> bool:
 
 def visible_length(text: str) -> int:
     return len(re.sub(r"\s+", "", text or ""))
+
+
+def reference_text_has_generated_ellipsis(text: str) -> bool:
+    normalized = normalize_inline_text(text)
+    if not normalized:
+        return False
+    return normalized.endswith("...") or normalized.endswith("\u2026")
 
 
 def line_length_severity(line_length: int, *, soft_limit: int, hard_limit: int) -> str | None:
@@ -316,6 +361,7 @@ def build_quality_metrics(
     zh_hard_max_cps: float = DEFAULT_ZH_HARD_MAX_CPS,
     zh_wrap_trigger_chars: int = 32,
     zh_max_lines: int = 2,
+    require_bound_zh: bool = True,
     sample_limit: int = 20,
 ) -> dict:
     require_chinese = is_chinese_target_language(dst_lang)
@@ -328,6 +374,7 @@ def build_quality_metrics(
             "target_without_chinese_count": 0,
             "text_pollution_count": 0,
             "short_english_leak_count": 0,
+            "entity_residue_count": 0,
             "untranslated_discourse_marker_count": 0,
             "literal_chinese_artifact_count": 0,
             "source_target_semantic_conflict_count": 0,
@@ -336,16 +383,24 @@ def build_quality_metrics(
             "target_without_chinese_ids": [],
             "text_pollution_samples": [],
             "short_english_leak_samples": [],
+            "entity_residue_samples": [],
             "untranslated_discourse_marker_samples": [],
             "literal_chinese_artifact_samples": [],
             "source_target_semantic_conflict_samples": [],
         },
         "display": {
             "empty_chinese_cue_count": 0,
+            "chinese_cue_count": 0,
+            "chinese_short_cue_count": 0,
+            "chinese_long_cue_count": 0,
+            "chinese_avg_duration": 0.0,
+            "chinese_short_cue_pct": 0.0,
             "chinese_line_too_long_count": 0,
             "chinese_line_soft_over_count": 0,
             "chinese_line_hard_over_count": 0,
             "english_line_too_long_count": 0,
+            "reference_hidden_count": 0,
+            "reference_ellipsis_count": 0,
             "chinese_cps_too_high_count": 0,
             "chinese_cps_soft_over_count": 0,
             "chinese_cps_hard_over_count": 0,
@@ -355,6 +410,8 @@ def build_quality_metrics(
             "chinese_line_soft_over_samples": [],
             "chinese_line_hard_over_samples": [],
             "english_line_too_long_samples": [],
+            "reference_hidden_samples": [],
+            "reference_ellipsis_samples": [],
             "chinese_cps_too_high_samples": [],
             "chinese_cps_soft_over_samples": [],
             "chinese_cps_hard_over_samples": [],
@@ -371,6 +428,7 @@ def build_quality_metrics(
             "hard_preserve_missing_samples": [],
         },
     }
+    zh_durations: list[float] = []
 
     def append_sample(values: list, value: object) -> None:
         if len(values) < sample_limit:
@@ -416,6 +474,18 @@ def build_quality_metrics(
                     "target_text": target_text,
                 },
             )
+        entity_like_residue = find_entity_like_english_residue(target_text, dst_lang=dst_lang)
+        if entity_like_residue:
+            metrics["translation"]["entity_residue_count"] += 1
+            append_sample(
+                metrics["translation"]["entity_residue_samples"],
+                {
+                    "segment_id": segment.id,
+                    "leaks": entity_like_residue,
+                    "source_text": source_text,
+                    "target_text": target_text,
+                },
+            )
         discourse_markers = find_untranslated_discourse_markers(target_text, dst_lang=dst_lang)
         if discourse_markers:
             metrics["translation"]["untranslated_discourse_marker_count"] += 1
@@ -457,11 +527,17 @@ def build_quality_metrics(
         zh_text = (cue.zh_text or "").strip()
         en_text = cue.en_text.strip()
         duration = max(cue.end - cue.start, 0.001)
-        if require_chinese and en_text and not zh_text:
+        if require_bound_zh and require_chinese and en_text and not zh_text:
             metrics["display"]["empty_chinese_cue_count"] += 1
             append_sample(metrics["display"]["empty_chinese_cue_indexes"], cue_index)
 
         if zh_text:
+            metrics["display"]["chinese_cue_count"] += 1
+            zh_durations.append(duration)
+            if duration <= 2.05:
+                metrics["display"]["chinese_short_cue_count"] += 1
+            if duration > 8.5:
+                metrics["display"]["chinese_long_cue_count"] += 1
             rendered_zh = wrap_chinese_text(
                 zh_text,
                 trigger_chars=zh_wrap_trigger_chars,
@@ -511,6 +587,12 @@ def build_quality_metrics(
                 append_sample(metrics["display"][sample_key], sample)
 
         if en_text:
+            if reference_text_has_generated_ellipsis(en_text):
+                metrics["display"]["reference_ellipsis_count"] += 1
+                append_sample(
+                    metrics["display"]["reference_ellipsis_samples"],
+                    {"cue_index": cue_index, "text": en_text},
+                )
             if len(en_text) > en_max_line_chars:
                 metrics["display"]["english_line_too_long_count"] += 1
                 append_sample(
@@ -524,6 +606,19 @@ def build_quality_metrics(
                     metrics["display"]["english_cps_too_high_samples"],
                     {"cue_index": cue_index, "cps": round(en_cps_value, 2), "text": en_text},
                 )
+        elif cue.rewrite_action == "reference_hidden":
+            metrics["display"]["reference_hidden_count"] += 1
+            append_sample(
+                metrics["display"]["reference_hidden_samples"],
+                {"cue_index": cue_index, "source_segment_id": cue.source_segment_id},
+            )
+
+    if zh_durations:
+        metrics["display"]["chinese_avg_duration"] = round(sum(zh_durations) / len(zh_durations), 3)
+        metrics["display"]["chinese_short_cue_pct"] = round(
+            100 * metrics["display"]["chinese_short_cue_count"] / len(zh_durations),
+            1,
+        )
 
     glossary_terms = load_glossary_terms(glossary_path)
     for segment in segments:
@@ -582,6 +677,8 @@ def build_quality_metrics(
         + metrics["translation"]["untranslated_discourse_marker_count"]
         + metrics["translation"]["source_target_semantic_conflict_count"]
         + metrics["display"]["empty_chinese_cue_count"]
+        + metrics["display"]["reference_hidden_count"]
+        + metrics["display"]["reference_ellipsis_count"]
         + metrics["display"]["chinese_line_hard_over_count"]
         + metrics["display"]["chinese_cps_hard_over_count"]
         + metrics["glossary"]["bad_alias_in_target_count"]
@@ -723,6 +820,7 @@ def qa_display_cues(
     zh_hard_max_cps: float = DEFAULT_ZH_HARD_MAX_CPS,
     zh_wrap_trigger_chars: int = 32,
     zh_max_lines: int = 2,
+    require_bound_zh: bool = True,
 ) -> QaReport:
     report = QaReport()
     previous_zh = ""
@@ -736,7 +834,7 @@ def qa_display_cues(
         source_zh_runs.setdefault(cue.source_segment_id, []).append(zh_text)
 
         duration = max(cue.end - cue.start, 0.001)
-        if require_chinese and en_text and not zh_text:
+        if require_bound_zh and require_chinese and en_text and not zh_text:
             report.errors.append(f"Display cue {index} has English text but empty Chinese text.")
         if require_chinese and zh_text and not contains_chinese(zh_text) and has_translatable_alpha_text(en_text):
             report.errors.append(f"Display cue {index} Chinese text contains no Chinese characters.")
@@ -802,6 +900,10 @@ def qa_display_cues(
                 )
 
         if en_text:
+            if reference_text_has_generated_ellipsis(en_text):
+                report.errors.append(
+                    f"Display cue {index} reference text appears ellipsized."
+                )
             en_line_length = len(en_text)
             if en_line_length > en_max_line_chars:
                 report.warnings.append(
@@ -812,6 +914,10 @@ def qa_display_cues(
                 report.warnings.append(
                     f"Display cue {index} English text is too fast: {en_cps:.1f} chars/sec > {en_max_cps:.1f}."
                 )
+        elif cue.rewrite_action == "reference_hidden":
+            report.errors.append(
+                f"Display cue {index} reference text was hidden by overflow handling."
+            )
 
         if previous_zh and zh_text and zh_text == previous_zh and en_text:
             report.warnings.append(

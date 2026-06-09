@@ -7,7 +7,7 @@
   "model": "large-v3",
   "prompt_profile": "ru_zh_natural_subtitle",
   "dataset_profile": "ru_zh/general",
-  "subtitle_mode": "target_only",
+  "subtitle_mode": "bilingual_source_reference",
   "source_reference_label": "ru",
   "config": {
     "asr_audio_mode": "whisper",
@@ -16,11 +16,20 @@
     "translation_chunk_size": 28,
     "translation_retries": 4,
     "repair_high_risk_spans": true,
-    "span_repair_max_spans": 24
+    "span_repair_max_spans": 24,
+    "subtitle_timing_mode": "dual_axis",
+    "zh_semantic_merge": true,
+    "zh_target_min_duration": 3.5,
+    "zh_target_max_duration": 7.5,
+    "zh_hard_max_duration": 8.5,
+    "zh_min_duration": 2.2
   },
   "style": {
-    "en_font_name": "Arial",
-    "en_max_single_line_chars": 58,
-    "reference_mode": "hide_when_overflow"
+    "en_font_name": "Huiwen-HKHei",
+    "en_font_size": 32,
+    "en_max_single_line_chars": 80,
+    "en_max_split_parts": 4,
+    "min_split_duration": 1.2,
+    "reference_mode": "full_split"
   }
 }

@@ -26,6 +26,43 @@ EN_SOFT_SPLIT_WORDS = {
     "as",
     "if",
 }
+RU_SOFT_SPLIT_PHRASES = (
+    "\u043f\u043e\u0442\u043e\u043c\u0443 \u0447\u0442\u043e",
+    "\u0447\u0442\u043e\u0431\u044b",
+    "\u043a\u043e\u0442\u043e\u0440\u044b\u0439",
+    "\u043a\u043e\u0442\u043e\u0440\u0430\u044f",
+    "\u043a\u043e\u0442\u043e\u0440\u043e\u0435",
+    "\u043a\u043e\u0442\u043e\u0440\u044b\u0435",
+    "\u043a\u043e\u0433\u0434\u0430",
+    "\u0435\u0441\u043b\u0438",
+    "\u0447\u0442\u043e",
+    "\u0433\u0434\u0435",
+    "\u043a\u0430\u043a",
+    "\u043d\u043e",
+    "\u0438",
+    "\u0430",
+)
+RU_TRAILING_FUNCTION_WORDS = {
+    "\u0438",
+    "\u0430",
+    "\u0432",
+    "\u0432\u043e",
+    "\u043d\u0430",
+    "\u043f\u043e",
+    "\u0441",
+    "\u0441\u043e",
+    "\u043a",
+    "\u0443",
+    "\u043e",
+    "\u043e\u0431",
+    "\u043e\u0442",
+    "\u0434\u043e",
+    "\u0437\u0430",
+    "\u043d\u043e",
+    "\u0447\u0442\u043e",
+    "\u0435\u0441\u043b\u0438",
+    "\u043a\u043e\u0433\u0434\u0430",
+}
 ZH_SOFT_SPLIT_WORDS = (
     "然后",
     "但是",
@@ -141,6 +178,24 @@ def normalize_english_reference_text(text: str) -> str:
     return capitalize_first_person_i(normalize_inline_text(text))
 
 
+def normalize_reference_text(text: str, *, lang: str | None = None) -> str:
+    normalized = normalize_inline_text(text)
+    if normalize_reference_lang(lang) == "en":
+        return capitalize_first_person_i(normalized)
+    return normalized
+
+
+def normalize_reference_lang(lang: str | None) -> str:
+    normalized = str(lang or "").strip().lower()
+    if normalized.startswith("ru"):
+        return "ru"
+    if normalized.startswith("en"):
+        return "en"
+    if normalized.startswith("zh"):
+        return "zh"
+    return normalized or "en"
+
+
 def visible_text_length(text: str) -> int:
     return len(re.sub(r"\s+", "", text or ""))
 
@@ -174,9 +229,17 @@ def compact_reference_text(text: str, max_chars: int) -> str:
     return " ".join(pieces) + "…"
 
 
+def reference_mode_value(style: BilingualSubtitleStyle) -> str:
+    return normalize_inline_text(style.reference_mode or "compact").lower()
+
+
+def should_full_split_reference(style: BilingualSubtitleStyle) -> bool:
+    return reference_mode_value(style) == "full_split"
+
+
 def apply_reference_mode_to_cue(cue: DisplayCue, style: BilingualSubtitleStyle) -> None:
-    mode = normalize_inline_text(style.reference_mode or "compact").lower()
-    if mode == "full":
+    mode = reference_mode_value(style)
+    if mode in {"full", "full_split"}:
         return
 
     max_chars = int(style.en_max_single_line_chars or 78)
@@ -372,6 +435,53 @@ def choose_english_split_index(words: list[str], max_chars: int) -> int:
     return min(candidates, key=lambda index: score_english_split(words, index, max_chars))
 
 
+def is_protected_title(text: str) -> bool:
+    normalized = normalize_inline_text(text).lower()
+    return "xiu xiu: the sent-down girl" in normalized
+
+
+def russian_word_key(word: str) -> str:
+    return re.sub(r"[^\w-]+", "", word or "", flags=re.UNICODE).lower()
+
+
+def russian_phrase_at(words: list[str], index: int) -> str:
+    one = russian_word_key(words[index]) if index < len(words) else ""
+    two = ""
+    if index + 1 < len(words):
+        two = f"{one} {russian_word_key(words[index + 1])}".strip()
+    if two in RU_SOFT_SPLIT_PHRASES:
+        return two
+    return one
+
+
+def score_russian_split(words: list[str], index: int, max_chars: int) -> float:
+    left = " ".join(words[:index]).strip()
+    right = " ".join(words[index:]).strip()
+    if not left or not right:
+        return 1_000_000
+
+    left_len = len(left)
+    right_len = len(right)
+    overflow = max(0, left_len - max_chars) + max(0, right_len - max_chars)
+    balance = abs(left_len - right_len)
+    previous_word = russian_word_key(words[index - 1])
+    next_phrase = russian_phrase_at(words, index)
+    punctuation_bonus = -30 if words[index - 1].rstrip().endswith((",", ";", ":", ".", "!", "?", "\u2014")) else 0
+    semantic_bonus = -22 if next_phrase in RU_SOFT_SPLIT_PHRASES else 0
+    dangling_penalty = 80 if previous_word in RU_TRAILING_FUNCTION_WORDS else 0
+    quote_penalty = 30 if left.count('"') % 2 or left.count("'") % 2 or left.count("\u00ab") != left.count("\u00bb") else 0
+    hyphen_penalty = 40 if words[index - 1].endswith("-") or words[index].startswith("-") else 0
+    return overflow * 100 + balance + punctuation_bonus + semantic_bonus + dangling_penalty + quote_penalty + hyphen_penalty
+
+
+def choose_russian_split_index(words: list[str], max_chars: int) -> int:
+    if len(words) <= 1:
+        return 1
+
+    candidates = range(1, len(words))
+    return min(candidates, key=lambda index: score_russian_split(words, index, max_chars))
+
+
 def split_english_text(text: str, max_chars: int, max_parts: int = 3) -> list[str]:
     text = normalize_inline_text(text)
     if english_fits_single_line(text, max_chars):
@@ -400,6 +510,45 @@ def split_english_text(text: str, max_chars: int, max_parts: int = 3) -> list[st
     if len(parts) == 1:
         return [text]
     return [part for part in parts if part]
+
+
+def split_russian_text(text: str, max_chars: int, max_parts: int = 4) -> list[str]:
+    text = normalize_inline_text(text)
+    if english_fits_single_line(text, max_chars):
+        return [text] if text else []
+    if is_protected_title(text):
+        return [text]
+
+    max_parts = max(1, int(max_parts or 4))
+    parts = [text]
+    while len(parts) < max_parts:
+        long_indexes = [
+            index
+            for index, part in enumerate(parts)
+            if not english_fits_single_line(part, max_chars) and len(part.split()) > 1
+        ]
+        if not long_indexes:
+            break
+
+        part_index = max(long_indexes, key=lambda index: len(parts[index]))
+        words = parts[part_index].split()
+        split_index = choose_russian_split_index(words, max_chars)
+        left = " ".join(words[:split_index]).strip()
+        right = " ".join(words[split_index:]).strip()
+        if not left or not right:
+            break
+        parts[part_index : part_index + 1] = [left, right]
+
+    if len(parts) == 1:
+        return [text]
+    return [part for part in parts if part]
+
+
+def split_reference_text(text: str, *, lang: str, max_chars: int, max_parts: int) -> list[str]:
+    reference_lang = normalize_reference_lang(lang)
+    if reference_lang == "ru":
+        return split_russian_text(text, max_chars, max_parts=max_parts)
+    return split_english_text(text, max_chars, max_parts=max_parts)
 
 
 def score_grouping_quality(groups: list[str], *, max_chars: int) -> float:
@@ -449,7 +598,7 @@ def count_adjacent_repeats(items: list[str]) -> int:
     return sum(1 for previous, current in zip(items, items[1:]) if previous and current and previous == current)
 
 
-def split_words_by_english_parts(words: list[Word], text_parts: list[str]) -> list[list[Word]]:
+def split_words_by_reference_parts(words: list[Word], text_parts: list[str]) -> list[list[Word]]:
     if not words or not text_parts:
         return []
 
@@ -466,6 +615,10 @@ def split_words_by_english_parts(words: list[Word], text_parts: list[str]) -> li
         remaining_words = remaining_words[target_count:]
 
     return [group for group in groups if group]
+
+
+def split_words_by_english_parts(words: list[Word], text_parts: list[str]) -> list[list[Word]]:
+    return split_words_by_reference_parts(words, text_parts)
 
 
 def split_chinese_for_parts(text: str, part_count: int) -> list[str]:
@@ -648,11 +801,13 @@ def split_segment_for_bilingual_ass(
     style: BilingualSubtitleStyle,
     *,
     split_long_source: bool = False,
+    reference_lang: str = "en",
 ) -> tuple[list[DisplayCue], dict]:
-    source_text = normalize_english_reference_text(segment.source_text)
+    source_text = normalize_reference_text(segment.reference_text or segment.source_text, lang=reference_lang)
     target_text = normalize_inline_text(segment.target_text or "")
     max_chars = int(style.en_max_single_line_chars or 78)
     max_parts = int(style.en_max_split_parts or 3)
+    split_long_source = split_long_source or should_full_split_reference(style)
 
     if not split_long_source or english_fits_single_line(source_text, max_chars):
         cues = [
@@ -672,7 +827,7 @@ def split_segment_for_bilingual_ass(
             apply_reference_mode_to_cue(cue, style)
         return cues, build_alignment_debug(segment, [source_text], [target_text or ""], cues, merged=False, style=style)
 
-    text_parts = split_english_text(source_text, max_chars, max_parts=max_parts)
+    text_parts = split_reference_text(source_text, lang=reference_lang, max_chars=max_chars, max_parts=max_parts)
     merged = False
     base_target_groups = max(1, len(split_by_meaning(target_text))) if target_text else 1
     max_allowed_groups = min(max_parts, max(len(text_parts), base_target_groups))
@@ -716,7 +871,7 @@ def split_segment_for_bilingual_ass(
 
     text_parts = chosen_english_parts
     zh_parts = chosen_zh_parts
-    word_groups = split_words_by_english_parts(segment.words, text_parts) if segment.words else []
+    word_groups = split_words_by_reference_parts(segment.words, text_parts) if segment.words else []
 
     split_segments: list[DisplayCue] = []
     for index, english_part in enumerate(text_parts):
@@ -786,11 +941,17 @@ def prepare_bilingual_ass_segments(
     style: BilingualSubtitleStyle,
     *,
     split_long_source: bool = False,
+    reference_lang: str = "en",
 ) -> tuple[list[DisplayCue], list[dict]]:
     prepared: list[DisplayCue] = []
     debug_rows: list[dict] = []
     for segment in segments:
-        cues, debug_row = split_segment_for_bilingual_ass(segment, style, split_long_source=split_long_source)
+        cues, debug_row = split_segment_for_bilingual_ass(
+            segment,
+            style,
+            split_long_source=split_long_source,
+            reference_lang=reference_lang,
+        )
         prepared.extend(cues)
         debug_rows.append(debug_row)
 
@@ -834,6 +995,7 @@ def build_alignment_debug(
         "end": segment.end,
         "duration": round(duration, 3),
         "source_text": segment.source_text,
+        "reference_text": segment.reference_text or segment.source_text,
         "target_text": segment.target_text or "",
         "english_groups": english_groups,
         "chinese_groups": chinese_groups,
@@ -894,15 +1056,16 @@ def write_bilingual_ass(
     style: BilingualSubtitleStyle | None = None,
     *,
     split_long_source: bool = False,
+    reference_lang: str = "en",
 ) -> list[dict]:
     ensure_parent(output_path)
     if style is None:
         style = BilingualSubtitleStyle()
-    zh_primary = ass_color(style.zh_primary_color, style.zh_primary_opacity, fallback="#FFFFFF")
-    zh_outline = ass_color(style.zh_outline_color, style.zh_outline_opacity, fallback="#141414")
+    zh_primary = ass_color(style.zh_primary_color, style.zh_primary_opacity, fallback="#FFF2A6")
+    zh_outline = ass_color(style.zh_outline_color, style.zh_outline_opacity, fallback="#202020")
     zh_shadow = ass_color(style.zh_shadow_color, style.zh_shadow_opacity, fallback="#000000")
-    zh_outline_width = clamp_float(style.zh_outline_width, 0.0, 12.0, 2.2)
-    zh_shadow_depth = clamp_float(style.zh_shadow_depth, 0.0, 12.0, 0.6)
+    zh_outline_width = clamp_float(style.zh_outline_width, 0.0, 12.0, 1.8)
+    zh_shadow_depth = clamp_float(style.zh_shadow_depth, 0.0, 12.0, 0.4)
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -915,14 +1078,19 @@ YCbCr Matrix: TV.709
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,0,0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
-Style: EnglishSmall,{style.en_font_name},{style.en_font_size},&H00E8E8E8,&H000000FF,&H00141414,&H50000000,0,0,0,0,100,100,0,0,1,1.6,0.4,2,{style.en_margin_l},{style.en_margin_r},{style.en_margin_v},1
+Style: EnglishSmall,{style.en_font_name},{style.en_font_size},&H00E8E8E8,&H000000FF,&H5A202020,&HA6000000,0,0,0,0,100,100,0,0,1,1.2,0.3,2,{style.en_margin_l},{style.en_margin_r},{style.en_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     lines: list[str] = [header.rstrip()]
-    cues, debug_rows = prepare_bilingual_ass_segments(segments, style, split_long_source=split_long_source)
+    cues, debug_rows = prepare_bilingual_ass_segments(
+        segments,
+        style,
+        split_long_source=split_long_source,
+        reference_lang=reference_lang,
+    )
     for cue in cues:
         start = format_ass_timestamp(cue.start)
         end = format_ass_timestamp(cue.end)
@@ -938,7 +1106,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             )
             lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{zh_text}")
 
-        en_text = escape_ass_text(normalize_english_reference_text(cue.en_text))
+        en_text = escape_ass_text(normalize_reference_text(cue.en_text, lang=reference_lang))
         if en_text:
             lines.append(f"Dialogue: 1,{start},{end},EnglishSmall,,0,0,0,,{en_text}")
 
@@ -954,11 +1122,11 @@ def write_zh_ass(
     ensure_parent(output_path)
     if style is None:
         style = BilingualSubtitleStyle()
-    zh_primary = ass_color(style.zh_primary_color, style.zh_primary_opacity, fallback="#FFFFFF")
-    zh_outline = ass_color(style.zh_outline_color, style.zh_outline_opacity, fallback="#141414")
+    zh_primary = ass_color(style.zh_primary_color, style.zh_primary_opacity, fallback="#FFF2A6")
+    zh_outline = ass_color(style.zh_outline_color, style.zh_outline_opacity, fallback="#202020")
     zh_shadow = ass_color(style.zh_shadow_color, style.zh_shadow_opacity, fallback="#000000")
-    zh_outline_width = clamp_float(style.zh_outline_width, 0.0, 12.0, 2.2)
-    zh_shadow_depth = clamp_float(style.zh_shadow_depth, 0.0, 12.0, 0.6)
+    zh_outline_width = clamp_float(style.zh_outline_width, 0.0, 12.0, 1.8)
+    zh_shadow_depth = clamp_float(style.zh_shadow_depth, 0.0, 12.0, 0.4)
 
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -1015,6 +1183,8 @@ def write_source_ass(
     segments: list[Segment],
     output_path: str | Path,
     style: BilingualSubtitleStyle | None = None,
+    *,
+    reference_lang: str = "en",
 ) -> list[dict]:
     ensure_parent(output_path)
     if style is None:
@@ -1030,18 +1200,23 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: SourceOnly,{style.en_font_name},{style.en_font_size},&H00E8E8E8,&H000000FF,&H00141414,&H50000000,0,0,0,0,100,100,0,0,1,1.6,0.4,2,{style.en_margin_l},{style.en_margin_r},{style.en_margin_v},1
+Style: SourceOnly,{style.en_font_name},{style.en_font_size},&H00E8E8E8,&H000000FF,&H5A202020,&HA6000000,0,0,0,0,100,100,0,0,1,1.2,0.3,2,{style.en_margin_l},{style.en_margin_r},{style.en_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     lines: list[str] = [header.rstrip()]
-    cues, debug_rows = prepare_bilingual_ass_segments(segments, style, split_long_source=False)
+    cues, debug_rows = prepare_bilingual_ass_segments(
+        segments,
+        style,
+        split_long_source=False,
+        reference_lang=reference_lang,
+    )
     for cue in cues:
         start = format_ass_timestamp(cue.start)
         end = format_ass_timestamp(cue.end)
-        source_text = escape_ass_text(normalize_english_reference_text(cue.en_text))
+        source_text = escape_ass_text(normalize_reference_text(cue.en_text, lang=reference_lang))
         if source_text:
             lines.append(f"Dialogue: 0,{start},{end},SourceOnly,,0,0,0,,{source_text}")
 

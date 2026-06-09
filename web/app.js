@@ -6,6 +6,10 @@ const state = {
   videos: [],
   audios: [],
   projects: [],
+  jobs: [],
+  activeJob: null,
+  inputListCollapsed: true,
+  expandedProjectPath: null,
   selectedVideo: null,
   selectedProject: null,
   selectedFilePath: null,
@@ -20,9 +24,29 @@ const state = {
   mediaInspectToken: 0,
   lastErrorPayload: null,
   runtime: null,
+  openaiRuntime: null,
+  flowControl: {
+    pause_requested: false,
+    paused: false,
+    pause_reason: "",
+    pause_stage: "",
+  },
   pollCount: 0,
   formDirty: false,
   configSaveState: "saved",
+  entityArtifacts: {
+    projectPath: null,
+    signature: "",
+    token: 0,
+    loading: false,
+    metrics: null,
+    reviewRows: [],
+    qaRows: [],
+    normalizedSegments: [],
+    decisions: null,
+    missing: [],
+    errors: [],
+  },
 };
 
 const DEFAULT_UI_CONFIG = {
@@ -46,6 +70,7 @@ const DEFAULT_UI_CONFIG = {
   translation_chunk_size: 24,
   translation_retries: 4,
   openai_base_url: "",
+  proxy_url: "",
   audio_override_path: "",
   preview_seconds: null,
   load_existing_segments: false,
@@ -55,6 +80,7 @@ const DEFAULT_UI_CONFIG = {
   span_repair_max_spans: 12,
   enable_ai_display_rewrite: false,
   display_rewrite_max_ai_segments: 12,
+  bootstrap_entity_decisions: "high_confidence_only",
   download_backend: "auto",
   idm_exe_path: "",
   idm_output_dir: "",
@@ -65,21 +91,21 @@ const DEFAULT_UI_CONFIG = {
   style: {
     zh_font_name: "Maple Mono NF CN",
     zh_font_size: 64,
-    zh_primary_color: "#FFFFFF",
+    zh_primary_color: "#FFF2A6",
     zh_primary_opacity: 100,
-    zh_outline_color: "#141414",
-    zh_outline_opacity: 100,
+    zh_outline_color: "#202020",
+    zh_outline_opacity: 45,
     zh_shadow_color: "#000000",
-    zh_shadow_opacity: 60,
-    zh_outline_width: 2.2,
-    zh_shadow_depth: 0.6,
+    zh_shadow_opacity: 35,
+    zh_outline_width: 1.8,
+    zh_shadow_depth: 0.4,
     zh_margin_l: 90,
     zh_margin_r: 90,
     zh_margin_v: 94,
     zh_wrap_trigger_chars: 32,
     zh_max_chars_per_line: 28,
     zh_max_lines: 2,
-    en_font_name: "Arial",
+    en_font_name: "Maple Mono NF CN",
     en_font_size: 40,
     en_margin_l: 80,
     en_margin_r: 100,
@@ -107,6 +133,7 @@ function normalizeUiConfig(config) {
 function syncLocalConfigFromForm() {
   state.config = normalizeUiConfig(readFormConfig());
   renderWorkflowSummary();
+  renderEntityReviewPanel();
 }
 
 function markConfigDirty() {
@@ -137,6 +164,19 @@ const phaseStatusLabels = {
   running: "进行中",
   complete: "已完成",
   error: "错误",
+};
+
+const ACTIVE_JOB_STATUSES = new Set(["queued", "running", "paused", "cancel_requested"]);
+
+const jobStatusLabels = {
+  queued: "排队中",
+  running: "运行中",
+  paused: "已暂停",
+  cancel_requested: "取消中",
+  succeeded: "已完成",
+  succeeded_with_qa_issues: "已完成，QA 有风险",
+  failed: "失败",
+  cancelled: "已取消",
 };
 
 const summaryLabels = {
@@ -207,6 +247,15 @@ function safeText(value) {
   return value || "";
 }
 
+function normalizeBootstrapMode(value) {
+  if (value === true) return "always";
+  if (value === false) return "off";
+  const normalized = String(value || "high_confidence_only").trim().toLowerCase();
+  return ["off", "always", "high_confidence_only"].includes(normalized)
+    ? normalized
+    : "high_confidence_only";
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replaceAll("&", "&amp;")
@@ -226,10 +275,38 @@ function setTaskButtonsDisabled(disabled) {
     const node = el(id);
     if (node) node.disabled = disabled;
   });
+  renderFlowControlButtons();
+  renderJobControls();
 }
 
 function taskIsBusy(runtime) {
   return !["idle", "complete", "error", "recovered_state"].includes(String(runtime?.stage_key || "idle"));
+}
+
+function jobIsActive(job = state.activeJob) {
+  return ACTIVE_JOB_STATUSES.has(String(job?.status || ""));
+}
+
+function renderFlowControlButtons() {
+  const pauseBtn = el("pauseFlowBtn");
+  const resumeBtn = el("resumeFlowBtn");
+  if (!pauseBtn || !resumeBtn) return;
+  const busy = taskIsBusy(state.runtime);
+  const flow = state.flowControl || {};
+  const waiting = Boolean(flow.pause_requested || flow.paused);
+  pauseBtn.disabled = !busy || waiting;
+  resumeBtn.disabled = !waiting;
+  resumeBtn.classList.toggle("hidden", !waiting);
+}
+
+function renderJobControls() {
+  const cancelBtn = el("cancelJobBtn");
+  if (!cancelBtn) return;
+  cancelBtn.disabled = !jobIsActive();
+}
+
+function scrollToWorkspaceDetails() {
+  el("workspaceDetails")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function findProjectForSelectedVideo() {
@@ -432,14 +509,14 @@ function updateSubtitleStylePreview() {
   const style = {
     fontName: el("zh_font_name")?.value || "Maple Mono NF CN",
     fontSize: clampNumber(el("zh_font_size")?.value, 24, 96, 64),
-    primaryColor: readColorField("zh_primary_color", "#FFFFFF"),
+    primaryColor: readColorField("zh_primary_color", "#FFF2A6"),
     primaryOpacity: readOpacityField("zh_primary_opacity", 100),
-    outlineColor: readColorField("zh_outline_color", "#141414"),
-    outlineOpacity: readOpacityField("zh_outline_opacity", 100),
+    outlineColor: readColorField("zh_outline_color", "#202020"),
+    outlineOpacity: readOpacityField("zh_outline_opacity", 45),
     shadowColor: readColorField("zh_shadow_color", "#000000"),
-    shadowOpacity: readOpacityField("zh_shadow_opacity", 60),
-    outlineWidth: clampNumber(el("zh_outline_width")?.value, 0, 12, 2.2),
-    shadowDepth: clampNumber(el("zh_shadow_depth")?.value, 0, 12, 0.6),
+    shadowOpacity: readOpacityField("zh_shadow_opacity", 35),
+    outlineWidth: clampNumber(el("zh_outline_width")?.value, 0, 12, 1.8),
+    shadowDepth: clampNumber(el("zh_shadow_depth")?.value, 0, 12, 0.4),
   };
   preview.style.fontFamily = `"${style.fontName}", "Microsoft YaHei", sans-serif`;
   preview.style.fontSize = `${Math.round(style.fontSize * 0.42)}px`;
@@ -469,6 +546,7 @@ function readFormConfig() {
     translation_chunk_size: Number(el("translation_chunk_size").value),
     translation_retries: Number(el("translation_retries").value),
     openai_base_url: el("openai_base_url").value,
+    proxy_url: el("proxy_url")?.value || "",
     audio_override_path: el("audio_override_path").value,
     preview_seconds: el("preview_seconds").value ? Number(el("preview_seconds").value) : null,
     load_existing_segments: el("load_existing_segments").checked,
@@ -478,6 +556,7 @@ function readFormConfig() {
     span_repair_max_spans: Number(el("span_repair_max_spans").value || 12),
     enable_ai_display_rewrite: el("enable_ai_display_rewrite").checked,
     display_rewrite_max_ai_segments: Number(el("display_rewrite_max_ai_segments").value || 12),
+    bootstrap_entity_decisions: normalizeBootstrapMode(el("bootstrap_entity_decisions")?.value),
     download_backend: el("download_backend").value,
     idm_exe_path: el("idm_exe_path").value,
     idm_output_dir: el("idm_output_dir").value,
@@ -488,14 +567,14 @@ function readFormConfig() {
     style: {
       zh_font_name: el("zh_font_name").value,
       zh_font_size: Number(el("zh_font_size").value),
-      zh_primary_color: readColorField("zh_primary_color", "#FFFFFF"),
+      zh_primary_color: readColorField("zh_primary_color", "#FFF2A6"),
       zh_primary_opacity: readOpacityField("zh_primary_opacity", 100),
-      zh_outline_color: readColorField("zh_outline_color", "#141414"),
-      zh_outline_opacity: readOpacityField("zh_outline_opacity", 100),
+      zh_outline_color: readColorField("zh_outline_color", "#202020"),
+      zh_outline_opacity: readOpacityField("zh_outline_opacity", 45),
       zh_shadow_color: readColorField("zh_shadow_color", "#000000"),
-      zh_shadow_opacity: readOpacityField("zh_shadow_opacity", 60),
-      zh_outline_width: Number(el("zh_outline_width").value || 2.2),
-      zh_shadow_depth: Number(el("zh_shadow_depth").value || 0.6),
+      zh_shadow_opacity: readOpacityField("zh_shadow_opacity", 35),
+      zh_outline_width: Number(el("zh_outline_width").value || 1.8),
+      zh_shadow_depth: Number(el("zh_shadow_depth").value || 0.4),
       zh_margin_l: Number(el("zh_margin_l").value),
       zh_margin_r: Number(el("zh_margin_r").value),
       zh_margin_v: Number(el("zh_margin_v").value),
@@ -538,6 +617,7 @@ function fillForm(config) {
   el("translation_chunk_size").value = config.translation_chunk_size;
   el("translation_retries").value = config.translation_retries;
   el("openai_base_url").value = config.openai_base_url || "";
+  if (el("proxy_url")) el("proxy_url").value = config.proxy_url || "";
   el("audio_override_path").value = config.audio_override_path || "";
   el("preview_seconds").value = config.preview_seconds ?? "";
   el("load_existing_segments").checked = Boolean(config.load_existing_segments);
@@ -547,6 +627,9 @@ function fillForm(config) {
   el("span_repair_max_spans").value = config.span_repair_max_spans ?? 12;
   el("enable_ai_display_rewrite").checked = Boolean(config.enable_ai_display_rewrite);
   el("display_rewrite_max_ai_segments").value = config.display_rewrite_max_ai_segments ?? 12;
+  if (el("bootstrap_entity_decisions")) {
+    el("bootstrap_entity_decisions").value = normalizeBootstrapMode(config.bootstrap_entity_decisions);
+  }
   el("download_backend").value = config.download_backend || "auto";
   el("idm_exe_path").value = config.idm_exe_path || "";
   el("idm_output_dir").value = config.idm_output_dir || "";
@@ -555,21 +638,21 @@ function fillForm(config) {
   const style = config.style || {};
   el("zh_font_name").value = style.zh_font_name || "Maple Mono NF CN";
   el("zh_font_size").value = style.zh_font_size ?? 64;
-  setColorField("zh_primary_color", style.zh_primary_color || "#FFFFFF", "#FFFFFF");
+  setColorField("zh_primary_color", style.zh_primary_color || "#FFF2A6", "#FFF2A6");
   setOpacityField("zh_primary_opacity", style.zh_primary_opacity ?? 100, 100);
-  setColorField("zh_outline_color", style.zh_outline_color || "#141414", "#141414");
-  setOpacityField("zh_outline_opacity", style.zh_outline_opacity ?? 100, 100);
+  setColorField("zh_outline_color", style.zh_outline_color || "#202020", "#202020");
+  setOpacityField("zh_outline_opacity", style.zh_outline_opacity ?? 45, 45);
   setColorField("zh_shadow_color", style.zh_shadow_color || "#000000", "#000000");
-  setOpacityField("zh_shadow_opacity", style.zh_shadow_opacity ?? 60, 60);
-  el("zh_outline_width").value = style.zh_outline_width ?? 2.2;
-  el("zh_shadow_depth").value = style.zh_shadow_depth ?? 0.6;
+  setOpacityField("zh_shadow_opacity", style.zh_shadow_opacity ?? 35, 35);
+  el("zh_outline_width").value = style.zh_outline_width ?? 1.8;
+  el("zh_shadow_depth").value = style.zh_shadow_depth ?? 0.4;
   el("zh_margin_l").value = style.zh_margin_l ?? 90;
   el("zh_margin_r").value = style.zh_margin_r ?? 90;
   el("zh_margin_v").value = style.zh_margin_v ?? 94;
   el("zh_wrap_trigger_chars").value = style.zh_wrap_trigger_chars ?? 32;
   el("zh_max_chars_per_line").value = style.zh_max_chars_per_line ?? 28;
   el("zh_max_lines").value = style.zh_max_lines ?? 2;
-  el("en_font_name").value = style.en_font_name || "Arial";
+  el("en_font_name").value = style.en_font_name || "Maple Mono NF CN";
   el("en_font_size").value = style.en_font_size ?? 40;
   el("en_margin_l").value = style.en_margin_l ?? 80;
   el("en_margin_r").value = style.en_margin_r ?? 100;
@@ -582,10 +665,12 @@ function fillForm(config) {
   updateSubtitleStylePreview();
   setLinkedAudioLabel(config.audio_override_path || "");
   renderWorkflowSummary();
+  renderOpenAiRuntimeStatus();
+  renderEntityReviewPanel();
 }
 
 function formatWorkflowDatasetPreview(dataset) {
-  if (!dataset || typeof dataset !== "object") return "No dataset profile loaded.";
+  if (!dataset || typeof dataset !== "object") return "未加载数据集 profile。";
   const lines = [];
   if (dataset.id) lines.push(`dataset: ${dataset.id}`);
   const files = Array.isArray(dataset.file_names)
@@ -597,12 +682,76 @@ function formatWorkflowDatasetPreview(dataset) {
   if (typeof dataset.glossary_term_count === "number") lines.push(`glossary terms: ${dataset.glossary_term_count}`);
   if (dataset.glossary_preview) lines.push(String(dataset.glossary_preview).split("\n").slice(0, 6).join("\n"));
   else if (dataset.glossary_text) lines.push(String(dataset.glossary_text).split("\n").slice(0, 6).join("\n"));
-  return lines.join("\n\n") || "No dataset preview available.";
+  return lines.join("\n\n") || "暂无数据集预览。";
 }
 
 function getSelectedWorkflowProfile() {
   const workflowId = el("workflow_profile")?.value || state.config?.workflow_profile || "en_to_zh_default";
   return state.workflowProfiles.find((item) => item.id === workflowId) || null;
+}
+
+function currentWorkflowFormValues() {
+  return {
+    workflow: el("workflow_profile")?.value || state.config?.workflow_profile || "",
+    src: el("src_lang")?.value || state.config?.src_lang || "",
+    dst: el("dst_lang")?.value || state.config?.dst_lang || "",
+    model: el("model")?.value || state.config?.model || "",
+    subtitleMode: el("subtitle_mode")?.value || state.config?.subtitle_mode || "",
+    sourceReferenceLabel: el("source_reference_label")?.value || state.config?.source_reference_label || "",
+    promptProfile: el("prompt_profile")?.value || state.config?.prompt_profile || "",
+    datasetProfile: el("dataset_profile")?.value || state.config?.dataset_profile || "",
+    bootstrapEntityDecisions: normalizeBootstrapMode(el("bootstrap_entity_decisions")?.value || state.config?.bootstrap_entity_decisions),
+    referenceFont: el("en_font_name")?.value || state.config?.style?.en_font_name || "",
+    referenceFontSize: el("en_font_size")?.value || state.config?.style?.en_font_size || "",
+    referenceLineLimit: el("en_max_single_line_chars")?.value || state.config?.style?.en_max_single_line_chars || "",
+    referenceSplitParts: el("en_max_split_parts")?.value || state.config?.style?.en_max_split_parts || "",
+    minSplitDuration: el("min_split_duration")?.value || state.config?.style?.min_split_duration || "",
+    referenceMode: el("reference_mode")?.value || state.config?.style?.reference_mode || "",
+  };
+}
+
+function buildWorkflowWarnings(values, profile) {
+  const warnings = [];
+  if (!profile && state.workflowProfiles.length) warnings.push("当前工作流 profile 元数据未加载。");
+  if (!state.workflowProfiles.length) warnings.push("工作流 profile 列表未加载，请先刷新后再保存配置。");
+  const isRussian = values.workflow === "ru_to_zh_default" || values.src === "ru" || values.sourceReferenceLabel === "ru";
+  if (isRussian) {
+    const styleOk =
+      values.referenceFont === "Huiwen-HKHei" &&
+      Number(values.referenceFontSize) === 32 &&
+      Number(values.referenceLineLimit) === 80 &&
+      Number(values.referenceSplitParts) === 4 &&
+      Number(values.minSplitDuration) === 1.2 &&
+      values.referenceMode === "full_split";
+    if (!styleOk) warnings.push("俄文参考层样式应为 Huiwen-HKHei / 32 / 80 / 4 / 1.2 / full_split。");
+    if (values.promptProfile && values.promptProfile.startsWith("en_")) warnings.push("俄文工作流当前使用了英文提示词 profile。");
+    if (values.datasetProfile && values.datasetProfile.startsWith("en_")) warnings.push("俄文工作流当前使用了英文数据集 profile。");
+  }
+  return warnings;
+}
+
+function renderEffectiveWorkflowSummary(profile) {
+  const root = el("effectiveWorkflowSummary");
+  if (!root) return;
+  const values = currentWorkflowFormValues();
+  const rows = [
+    ["工作流", `${profile?.label || values.workflow || "未选择"} (${values.workflow || "unknown"})`],
+    ["语言方向", `${values.src || "auto"} -> ${values.dst || "zh-Hans"}`],
+    ["识别模型", values.model || "未设置"],
+    ["字幕模式", values.subtitleMode || "未设置"],
+    ["参考层", `${values.referenceFont || "未设置"} / ${values.referenceFontSize || "-"} / ${values.referenceLineLimit || "-"} / ${values.referenceSplitParts || "-"} / ${values.minSplitDuration || "-"} / ${values.referenceMode || "-"}`],
+    ["提示词", values.promptProfile || "未设置"],
+    ["数据集", values.datasetProfile || "未设置"],
+    ["实体决策", values.bootstrapEntityDecisions || "high_confidence_only"],
+  ];
+  root.innerHTML = rows
+    .map(([label, value]) => `<div class="workflow-effective-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`)
+    .join("");
+
+  const warningNode = el("workflowWarningSummary");
+  if (!warningNode) return;
+  const warnings = buildWorkflowWarnings(values, profile);
+  warningNode.innerHTML = warnings.map((warning) => `<span class="workflow-warning-chip">${escapeHtml(warning)}</span>`).join("");
 }
 
 function applyWorkflowProfileSelection(profileId) {
@@ -659,6 +808,7 @@ function renderWorkflowProfiles() {
 
 function renderWorkflowSummary() {
   const profile = getSelectedWorkflowProfile();
+  renderEffectiveWorkflowSummary(profile);
   const promptNode = el("workflowPromptPreview");
   const datasetNode = el("workflowDatasetPreview");
   const descriptionNode = el("workflowProfileDescription");
@@ -668,13 +818,13 @@ function renderWorkflowSummary() {
   const profileOwnsPrompt = profile && profile.prompt_profile === currentPromptProfile;
   const profileOwnsDataset = profile && profile.dataset_profile === currentDatasetProfile;
   if (descriptionNode) {
-    descriptionNode.textContent = profile?.description || "Choose a workflow profile to load language-aware defaults.";
+    descriptionNode.textContent = profile?.description || "请选择一个工作流 profile，以加载语言方向、提示词、数据集和参考层默认值。";
   }
   if (promptNode) {
     const text = profileOwnsPrompt
       ? (profile?.prompt_preview || state.activePromptProfile || el("translation_prompt")?.value || "")
       : (el("translation_prompt")?.value || "");
-    promptNode.textContent = text ? text.slice(0, 900) : "No prompt loaded.";
+    promptNode.textContent = text ? text.slice(0, 900) : "未加载提示词。";
   }
   if (datasetNode) {
     const dataset = profileOwnsDataset ? (profile?.dataset_summary || state.activeDatasetProfile) : state.activeDatasetProfile;
@@ -686,6 +836,57 @@ function renderWorkflowSummary() {
     const mode = el("subtitle_mode")?.value || state.config?.subtitle_mode || "";
     pairNode.value = `${src} -> ${dst} / ${mode}`;
   }
+}
+
+function openaiSourceLabel(source) {
+  const labels = {
+    process_env: "进程环境变量",
+    user_env: "User 环境变量",
+    machine_env: "Machine 环境变量",
+    ui_config: "网页配置",
+    missing: "未检测到",
+  };
+  return labels[source] || source || "未知来源";
+}
+
+function renderOpenAiRuntimeStatus() {
+  const card = el("openaiRuntimeCard");
+  if (!card) return;
+  const runtime = state.openaiRuntime || {};
+  const apiKey = runtime.api_key || {};
+  const baseUrl = runtime.base_url || {};
+  const configuredBaseUrl = el("openai_base_url")?.value?.trim() || "";
+  const displayBaseUrl = configuredBaseUrl
+    ? { available: true, source: "ui_config", value: configuredBaseUrl, env_name: "openai_base_url" }
+    : baseUrl;
+  const apiKeyText = apiKey.available
+    ? `已检测到 · ${openaiSourceLabel(apiKey.source)} · ${apiKey.masked || "已隐藏"}`
+    : "未检测到";
+  const baseUrlText = displayBaseUrl.available
+    ? `${displayBaseUrl.source === "ui_config" ? "使用网页配置" : "已检测到"} · ${openaiSourceLabel(displayBaseUrl.source)} · ${displayBaseUrl.value || ""}`
+    : "未检测到，使用 OpenAI 官方默认地址";
+  const warning = apiKey.available
+    ? ""
+    : `<div class="openai-runtime-warning">高风险修复、AI 显示重写、OpenAI 翻译步骤需要 OPENAI_API_KEY。</div>`;
+  card.innerHTML = `
+    <div class="openai-runtime-head">
+      <div>
+        <strong>OpenAI 运行环境</strong>
+        <span>网页只显示状态；API Key 不会以明文返回前端。</span>
+      </div>
+      <button id="refreshOpenAiRuntimeBtn" type="button">重新检测</button>
+    </div>
+    <div class="openai-runtime-row ${apiKey.available ? "ok" : "missing"}">
+      <span>API Key</span>
+      <strong>${escapeHtml(apiKeyText)}</strong>
+    </div>
+    <div class="openai-runtime-row ${displayBaseUrl.available ? "ok" : "muted"}">
+      <span>Base URL</span>
+      <strong>${escapeHtml(baseUrlText)}</strong>
+    </div>
+    ${warning}
+  `;
+  el("refreshOpenAiRuntimeBtn")?.addEventListener("click", refreshOpenAiRuntimeStatus);
 }
 
 function fillFormIfClean(config) {
@@ -732,6 +933,9 @@ function renderMediaAlert() {
 }
 
 function humanRunStateLabel(stageKey, title) {
+  const flow = state.flowControl || {};
+  if (flow.paused) return "暂停中";
+  if (flow.pause_requested) return "等待暂停";
   if (title) return title;
   const fallbackMap = {
     idle: "等待中",
@@ -800,8 +1004,16 @@ function renderVideos(videos) {
   state.selectedVideoProjectPath = state.selectedVideoProject?.path || null;
   const root = el("videoList");
   root.innerHTML = "";
+  const toggleBtn = el("toggleInputListBtn");
+  if (toggleBtn) {
+    toggleBtn.textContent = state.inputListCollapsed ? "展开全部 Input" : "只显示当前 Input";
+  }
 
-  videos.forEach((video) => {
+  const visibleVideos = state.inputListCollapsed
+    ? videos.filter((video) => video.path === state.selectedVideo?.path).slice(0, 1)
+    : videos;
+
+  visibleVideos.forEach((video) => {
     const item = document.createElement("button");
     item.className = "video-item" + (state.selectedVideo?.path === video.path ? " active" : "");
     item.innerHTML = `
@@ -817,6 +1029,7 @@ function renderVideos(videos) {
       state.selectedMediaInfo = null;
       syncSelectedVideo(state.videos);
       renderVideos(state.videos);
+      scrollToWorkspaceDetails();
     });
     root.appendChild(item);
   });
@@ -869,6 +1082,82 @@ function renderQueue(queue) {
   });
   if (!queue || !queue.length) {
     root.innerHTML = `<div class="stage-item empty-card"><strong>队列为空</strong><div class="meta-row"><span>下载到队列或添加 Input 后会显示在这里。</span></div></div>`;
+  }
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function shortJobId(value) {
+  const id = String(value || "");
+  return id ? id.slice(0, 8) : "";
+}
+
+function jobStatusLabel(status) {
+  return jobStatusLabels[String(status || "")] || String(status || "未知");
+}
+
+function jobInputName(job) {
+  const input = String(job?.input_path || "");
+  return input ? input.split(/[\\/]/).pop() : "未记录输入";
+}
+
+function renderJobs(jobs, activeJob) {
+  const activeRoot = el("activeJobCard");
+  const listRoot = el("jobList");
+  if (!activeRoot || !listRoot) return;
+
+  const visibleJobs = Array.isArray(jobs) ? jobs.slice(0, 8) : [];
+  const active = activeJob && typeof activeJob === "object" ? activeJob : null;
+
+  if (active) {
+    const progress = Math.max(0, Math.min(100, Number(active.progress || 0)));
+    activeRoot.classList.remove("empty");
+    activeRoot.innerHTML = `
+      <div class="job-title-row">
+        <strong>${escapeHtml(jobInputName(active))}</strong>
+        <span class="job-status status-${escapeHtml(String(active.status || ""))}">${escapeHtml(jobStatusLabel(active.status))}</span>
+      </div>
+      <div class="job-progress">
+        <div class="job-progress-fill" style="width:${progress}%"></div>
+      </div>
+      <div class="job-meta-grid">
+        <div><span>阶段</span><strong>${escapeHtml(active.current_stage || "idle")}</strong></div>
+        <div><span>进度</span><strong>${progress}%</strong></div>
+        <div><span>任务 ID</span><strong>${escapeHtml(shortJobId(active.id))}</strong></div>
+        <div><span>更新</span><strong>${escapeHtml(formatDateTime(active.updated_at))}</strong></div>
+      </div>
+      ${active.output_dir ? `<div class="path-note">${escapeHtml(active.output_dir)}</div>` : ""}
+    `;
+  } else {
+    activeRoot.classList.add("empty");
+    activeRoot.innerHTML = `<strong>当前没有后端任务</strong><div class="meta-row"><span>启动流程后，worker 的真实状态会显示在这里。</span></div>`;
+  }
+
+  listRoot.innerHTML = "";
+  visibleJobs.forEach((job) => {
+    const node = document.createElement("div");
+    node.className = "job-item" + (active?.id && active.id === job.id ? " active" : "");
+    node.innerHTML = `
+      <div class="job-title-row">
+        <strong>${escapeHtml(jobInputName(job))}</strong>
+        <span class="job-status status-${escapeHtml(String(job.status || ""))}">${escapeHtml(jobStatusLabel(job.status))}</span>
+      </div>
+      <div class="meta-row">
+        <span>${escapeHtml(shortJobId(job.id))}</span>
+        <span>${Math.max(0, Math.min(100, Number(job.progress || 0)))}%</span>
+      </div>
+      <div class="path-note">${escapeHtml(job.current_stage || "")}${job.updated_at ? ` · ${escapeHtml(formatDateTime(job.updated_at))}` : ""}</div>
+    `;
+    listRoot.appendChild(node);
+  });
+
+  if (!visibleJobs.length) {
+    listRoot.innerHTML = `<div class="stage-item empty-card"><strong>暂无历史任务</strong><div class="meta-row"><span>后端 JobStore 记录会在任务创建后出现在这里。</span></div></div>`;
   }
 }
 
@@ -963,6 +1252,342 @@ function renderPhaseStatus(phaseStatus) {
   renderChunkPanel(phaseStatus?.translation);
 }
 
+function getProjectFile(project, name) {
+  return (project?.files || []).find((file) => file.name === name) || null;
+}
+
+const ENTITY_ARTIFACT_FILES = {
+  metrics: "07i_entity_metrics.json",
+  review: "06f_entity_review.tsv",
+  qa: "07h_entity_qa.tsv",
+  normalized: "06g_entity_normalized_segments.json",
+  decisions: "00_entity_decisions.json",
+};
+
+function projectEntitySignature(project) {
+  return Object.values(ENTITY_ARTIFACT_FILES)
+    .map((name) => {
+      const file = getProjectFile(project, name);
+      return `${name}:${file?.mtime_ts || 0}:${file?.size || 0}`;
+    })
+    .join("|");
+}
+
+function parseTsv(content) {
+  const lines = String(content || "").replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.length);
+  if (!lines.length) return [];
+  const headers = lines[0].split("\t");
+  return lines.slice(1).map((line) => {
+    const values = line.split("\t");
+    return headers.reduce((row, header, index) => {
+      row[header] = values[index] ?? "";
+      return row;
+    }, {});
+  });
+}
+
+async function fetchOutputFileContent(file) {
+  if (!file?.path) return "";
+  const response = await fetch(`/api/file?path=${encodeURIComponent(file.path)}`);
+  const payload = await response.json();
+  if (!response.ok || payload.error) {
+    throw new Error(payload.error || `${file.name} failed to load`);
+  }
+  return payload.content || "";
+}
+
+async function fetchJsonArtifact(file) {
+  const content = await fetchOutputFileContent(file);
+  return JSON.parse(content || "{}");
+}
+
+async function fetchTsvArtifact(file) {
+  return parseTsv(await fetchOutputFileContent(file));
+}
+
+function countRows(rows) {
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+function renderMetricCards(summary) {
+  const metrics = [
+    ["决策数", summary?.entity_decision_count ?? 0],
+    ["改动分段", summary?.segments_changed ?? 0],
+    ["参考文本修正", summary?.reference_text_replacements ?? 0],
+    ["译文修正", summary?.target_text_replacements ?? 0],
+    ["ASS 问题", summary?.ass_issue_count ?? 0],
+    ["译文残留实体", summary?.target_entity_residue_count ?? 0],
+  ];
+  return metrics
+    .map(
+      ([label, value]) => `
+        <div class="entity-metric">
+          <span>${label}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function renderEntityTypeCounts(metrics) {
+  const counts = metrics?.entity_type_counts || {};
+  const entries = Object.entries(counts).filter(([, value]) => Number(value) > 0);
+  if (!entries.length) return `<span class="entity-chip muted">暂无分类决策</span>`;
+  return entries
+    .map(([type, value]) => `<span class="entity-chip">${escapeHtml(type)} <strong>${escapeHtml(value)}</strong></span>`)
+    .join("");
+}
+
+function renderEntityTable({ rows, columns, emptyText, limit = 8 }) {
+  const visibleRows = (rows || []).slice(0, limit);
+  if (!visibleRows.length) {
+    return `<div class="entity-empty">${escapeHtml(emptyText)}</div>`;
+  }
+  return `
+    <div class="entity-table-wrap">
+      <table class="entity-table">
+        <thead>
+          <tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${visibleRows
+            .map(
+              (row) => `
+                <tr>
+                  ${columns.map((column) => `<td>${escapeHtml(row[column.key] || "")}</td>`).join("")}
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+    ${(rows || []).length > visibleRows.length ? `<div class="entity-table-note">当前显示 ${visibleRows.length} / ${rows.length} 行；打开 TSV 可查看完整审阅列表。</div>` : ""}
+  `;
+}
+
+function referenceRowsFromSegments(segments) {
+  return (segments || [])
+    .filter((segment) => segment && typeof segment === "object")
+    .filter((segment) => segment.reference_text || segment.source_text || segment.target_text)
+    .map((segment) => ({
+      segment_id: segment.id ?? "",
+      source_text: segment.source_text || "",
+      reference_text: segment.reference_text || "[使用 source_text]",
+      target_text: segment.target_text || "",
+    }));
+}
+
+function renderEntityReviewPanel() {
+  const panel = el("entityReviewPanel");
+  if (!panel) return;
+  const project = state.selectedProject;
+  const artifacts = state.entityArtifacts;
+  const bootstrapMode = normalizeBootstrapMode(state.config?.bootstrap_entity_decisions);
+
+  if (!project) {
+    panel.innerHTML = `
+      <div class="entity-panel-head">
+        <div>
+          <h4>实体审阅</h4>
+          <p>选择一个项目后，可查看实体指标、审阅行、QA 行和标准化参考文本。</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  if (artifacts.loading && artifacts.projectPath === project.path) {
+    panel.innerHTML = `
+      <div class="entity-panel-head">
+        <div>
+          <h4>实体审阅</h4>
+          <p>正在从 ${escapeHtml(project.name)} 读取实体产物。</p>
+        </div>
+      </div>
+      <div class="entity-loading">正在读取项目产物...</div>
+    `;
+    return;
+  }
+
+  const summary = artifacts.metrics?.summary || {};
+  const missing = artifacts.missing || [];
+  const errors = artifacts.errors || [];
+  const decisions = artifacts.decisions;
+  const decisionEntities = Array.isArray(decisions?.entities) ? decisions.entities.length : 0;
+  const decisionsState = getProjectFile(project, "00_entity_decisions.json")
+    ? `${decisionEntities} 条项目决策`
+    : "无项目决策文件";
+  const referenceRows = referenceRowsFromSegments(artifacts.normalizedSegments);
+
+  panel.innerHTML = `
+    <div class="entity-panel-head">
+      <div>
+        <h4>实体审阅</h4>
+        <p>选中项目：${escapeHtml(project.name)}</p>
+      </div>
+      <div class="entity-status-stack">
+        <span class="entity-status">实体决策引导：${escapeHtml(bootstrapMode)}</span>
+        <span class="entity-status ${getProjectFile(project, "00_entity_decisions.json") ? "ok" : "muted"}">${escapeHtml(decisionsState)}</span>
+      </div>
+    </div>
+
+    <div class="entity-metrics-grid">
+      ${artifacts.metrics ? renderMetricCards(summary) : `<div class="entity-empty wide">07i_entity_metrics.json 暂未生成。</div>`}
+    </div>
+
+    <div class="entity-type-row">
+      ${renderEntityTypeCounts(artifacts.metrics)}
+    </div>
+
+    ${
+      missing.length || errors.length
+        ? `<div class="entity-alert">${[...missing.map((name) => `${name} 缺失`), ...errors].map(escapeHtml).join(" · ")}</div>`
+        : ""
+    }
+
+    <div class="entity-sections">
+      <section class="entity-section">
+        <div class="entity-section-head">
+          <h5>实体审阅 TSV</h5>
+          <span>${countRows(artifacts.reviewRows)} 行</span>
+        </div>
+        ${renderEntityTable({
+          rows: artifacts.reviewRows,
+          columns: [
+            { key: "segment_id", label: "分段" },
+            { key: "candidate", label: "候选实体" },
+            { key: "entity_type", label: "类型" },
+            { key: "reference_text", label: "参考文本" },
+            { key: "target_text", label: "译文" },
+            { key: "reason", label: "原因" },
+          ],
+          emptyText: "06f_entity_review.tsv 中未找到实体审阅行。",
+        })}
+      </section>
+
+      <section class="entity-section">
+        <div class="entity-section-head">
+          <h5>实体 QA TSV</h5>
+          <span>${countRows(artifacts.qaRows)} 行</span>
+        </div>
+        ${renderEntityTable({
+          rows: artifacts.qaRows,
+          columns: [
+            { key: "issue_type", label: "问题" },
+            { key: "segment_id", label: "分段" },
+            { key: "entity_type", label: "类型" },
+            { key: "layer", label: "层" },
+            { key: "text", label: "文本" },
+            { key: "line_text", label: "行文本" },
+          ],
+          emptyText: "07h_entity_qa.tsv 中未找到实体 QA 行。",
+        })}
+      </section>
+
+      <section class="entity-section wide">
+        <div class="entity-section-head">
+          <h5>参考文本对照</h5>
+          <span>${referenceRows.length} 段</span>
+        </div>
+        ${renderEntityTable({
+          rows: referenceRows,
+          columns: [
+            { key: "segment_id", label: "分段" },
+            { key: "source_text", label: "原始源文本" },
+            { key: "reference_text", label: "标准化参考文本" },
+            { key: "target_text", label: "译文" },
+          ],
+          emptyText: "06g_entity_normalized_segments.json 中未找到 reference_text 行。",
+          limit: 6,
+        })}
+      </section>
+    </div>
+  `;
+}
+
+async function loadEntityArtifactsForProject(project) {
+  const token = state.entityArtifacts.token + 1;
+  const files = {
+    metrics: getProjectFile(project, ENTITY_ARTIFACT_FILES.metrics),
+    review: getProjectFile(project, ENTITY_ARTIFACT_FILES.review),
+    qa: getProjectFile(project, ENTITY_ARTIFACT_FILES.qa),
+    normalized: getProjectFile(project, ENTITY_ARTIFACT_FILES.normalized),
+    decisions: getProjectFile(project, ENTITY_ARTIFACT_FILES.decisions),
+  };
+  state.entityArtifacts = {
+    projectPath: project?.path || null,
+    signature: projectEntitySignature(project),
+    token,
+    loading: true,
+    metrics: null,
+    reviewRows: [],
+    qaRows: [],
+    normalizedSegments: [],
+    decisions: null,
+    missing: Object.entries(files).filter(([, file]) => !file).map(([name]) => ENTITY_ARTIFACT_FILES[name]),
+    errors: [],
+  };
+  renderEntityReviewPanel();
+
+  const nextArtifacts = { ...state.entityArtifacts, loading: false, errors: [] };
+  const guarded = async (key, loader) => {
+    if (!files[key]) return;
+    try {
+      return await loader(files[key]);
+    } catch (error) {
+      nextArtifacts.errors.push(`${files[key].name}: ${error.message || error}`);
+      return null;
+    }
+  };
+
+  const [metrics, reviewRows, qaRows, normalized, decisions] = await Promise.all([
+    guarded("metrics", fetchJsonArtifact),
+    guarded("review", fetchTsvArtifact),
+    guarded("qa", fetchTsvArtifact),
+    guarded("normalized", fetchJsonArtifact),
+    guarded("decisions", fetchJsonArtifact),
+  ]);
+
+  if (state.entityArtifacts.token !== token) return;
+  nextArtifacts.metrics = metrics || null;
+  nextArtifacts.reviewRows = reviewRows || [];
+  nextArtifacts.qaRows = qaRows || [];
+  nextArtifacts.normalizedSegments = Array.isArray(normalized?.segments) ? normalized.segments : [];
+  nextArtifacts.decisions = decisions || null;
+  nextArtifacts.signature = projectEntitySignature(project);
+  state.entityArtifacts = nextArtifacts;
+  renderEntityReviewPanel();
+}
+
+function refreshEntityArtifactsForSelectedProject() {
+  const project = state.selectedProject;
+  if (!project) {
+    state.entityArtifacts = {
+      projectPath: null,
+      signature: "",
+      token: state.entityArtifacts.token + 1,
+      loading: false,
+      metrics: null,
+      reviewRows: [],
+      qaRows: [],
+      normalizedSegments: [],
+      decisions: null,
+      missing: [],
+      errors: [],
+    };
+    renderEntityReviewPanel();
+    return;
+  }
+  const signature = projectEntitySignature(project);
+  if (state.entityArtifacts.projectPath === project.path && state.entityArtifacts.signature === signature) {
+    renderEntityReviewPanel();
+    return;
+  }
+  loadEntityArtifactsForProject(project);
+}
+
 function openFile(path, name) {
   state.selectedFilePath = path;
   const matchedProject = state.projects.find((project) => project.files.some((file) => file.path === path)) || null;
@@ -1005,20 +1630,28 @@ function syncSelectedProject(projects) {
   const preferredPath = state.selectedFileProjectPath || state.selectedProject?.path;
   const matched = projects.find((project) => project.path === preferredPath);
   state.selectedProject = matched || projects[0];
+  if (!projects.some((project) => project.path === state.expandedProjectPath)) {
+    state.expandedProjectPath = state.selectedProject?.path || null;
+  }
 }
 
 function renderProjects(projects) {
   state.projects = projects;
   syncSelectedProject(projects);
+  refreshEntityArtifactsForSelectedProject();
   const list = el("projectList");
   list.innerHTML = "";
 
   projects.forEach((project) => {
     const wrapper = document.createElement("div");
-    wrapper.className = "project-item" + (state.selectedProject?.path === project.path ? " active" : "");
+    const expanded = state.expandedProjectPath === project.path;
+    wrapper.className =
+      "project-item" +
+      (state.selectedProject?.path === project.path ? " active" : "") +
+      (expanded ? " expanded" : " collapsed");
     wrapper.innerHTML = `
       <div><strong>${project.name}</strong></div>
-      <div class="meta-row"><span>${project.files.length} files</span></div>
+      <div class="meta-row"><span>${project.files.length} files</span><span>${expanded ? "收起" : "展开"}</span></div>
       <div class="path-note">${project.path}</div>
     `;
 
@@ -1034,6 +1667,7 @@ function renderProjects(projects) {
       `;
       fileNode.addEventListener("click", (event) => {
         event.stopPropagation();
+        state.expandedProjectPath = project.path;
         openFile(file.path, file.name);
         renderProjects(state.projects);
       });
@@ -1043,12 +1677,19 @@ function renderProjects(projects) {
     wrapper.addEventListener("click", () => {
       state.selectedProject = project;
       state.selectedFileProjectPath = project.path;
+      state.expandedProjectPath = project.path;
+      refreshEntityArtifactsForSelectedProject();
       renderProjects(state.projects);
+      scrollToWorkspaceDetails();
     });
 
-    wrapper.appendChild(fileList);
+    if (expanded) wrapper.appendChild(fileList);
     list.appendChild(wrapper);
   });
+
+  if (!projects.length) {
+    list.innerHTML = `<div class="stage-item empty-card"><strong>暂无输出项目</strong><div class="meta-row"><span>运行流程后，项目产物会显示在这里。</span></div></div>`;
+  }
 }
 
 function renderErrorCard(lastError) {
@@ -1076,12 +1717,13 @@ function renderProxyStatus() {
   }
 
   card.className = `proxy-status-card ${proxy.ok ? "proxy-ok" : "proxy-bad"}`;
+  const modeLabel = proxy.mode === "proxy" ? "代理模式" : "直连模式";
   card.innerHTML = `
     <div class="proxy-status-head">
-      <strong>${proxy.ok ? "代理检测通过" : "代理检测失败"}</strong>
+      <strong>${proxy.ok ? "网络检测通过" : "网络检测失败"}</strong>
       <span>${proxy.checked_at || ""}</span>
     </div>
-    <div class="proxy-status-meta">代理：${proxy.proxy_url || "未设置"}</div>
+    <div class="proxy-status-meta">${modeLabel}：${proxy.proxy_url || "未设置，直接访问 YouTube"}</div>
     <div class="proxy-status-list">
       ${(proxy.results || [])
         .map((item) => {
@@ -1130,6 +1772,21 @@ function renderYoutubeMeta() {
     return;
   }
 
+  if (meta.error) {
+    card.className = "proxy-status-card proxy-bad";
+    card.innerHTML = `
+      <div class="proxy-status-head">
+        <strong>YouTube 获取失败</strong>
+        <span>${escapeHtml(meta.mode || "")}</span>
+      </div>
+      <div class="proxy-status-meta">${escapeHtml(meta.error)}</div>
+    `;
+    cover.classList.add("hidden");
+    cover.removeAttribute("src");
+    info.textContent = meta.error;
+    return;
+  }
+
   card.className = "proxy-status-card proxy-ok";
   card.innerHTML = `
     <div class="proxy-status-head">
@@ -1156,7 +1813,13 @@ function renderYoutubeMeta() {
 function renderRuntime(runtime, lastError) {
   const title = humanRunStateLabel(runtime?.stage_key, runtime?.title);
   const progress = Math.max(0, Math.min(100, Number(runtime?.overall_progress || 0)));
-  const description = runtime?.recovery?.message || lastError?.message || runtime?.description || "等待开始新的任务。";
+  const flow = state.flowControl || {};
+  const flowDescription = flow.paused
+    ? `已在安全检查点暂停${flow.pause_stage ? `：${flow.pause_stage}` : ""}。点击“继续翻译”恢复。`
+    : flow.pause_requested
+      ? "已收到暂停请求；ASR/FFmpeg 等不可安全中断步骤会在当前步骤结束后暂停。"
+      : "";
+  const description = flowDescription || runtime?.recovery?.message || lastError?.message || runtime?.description || "等待开始新的任务。";
   setRunState(title);
   el("currentStageLabel").textContent = `当前阶段：${title}`;
   el("currentStageDescription").textContent = description;
@@ -1168,6 +1831,12 @@ function renderRuntime(runtime, lastError) {
 function renderState(payload) {
   const safePayload = payload && typeof payload === "object" ? payload : {};
   const safeState = safePayload.state && typeof safePayload.state === "object" ? safePayload.state : {};
+  if (Array.isArray(safePayload.jobs)) {
+    state.jobs = safePayload.jobs;
+  }
+  if (Object.prototype.hasOwnProperty.call(safePayload, "active_job")) {
+    state.activeJob = safePayload.active_job || null;
+  }
   if (Array.isArray(safePayload.workflow_profiles)) {
     state.workflowProfiles = safePayload.workflow_profiles;
     renderWorkflowProfiles();
@@ -1178,6 +1847,15 @@ function renderState(payload) {
   if (safePayload.active_dataset_profile && typeof safePayload.active_dataset_profile === "object") {
     state.activeDatasetProfile = safePayload.active_dataset_profile;
   }
+  if (safePayload.flow_control && typeof safePayload.flow_control === "object") {
+    state.flowControl = {
+      ...state.flowControl,
+      ...safePayload.flow_control,
+    };
+  }
+  if (safePayload.openai_runtime && typeof safePayload.openai_runtime === "object") {
+    state.openaiRuntime = safePayload.openai_runtime;
+  }
   state.runtime = safeState.runtime || {};
   const runtime = safeState.runtime || {};
   renderRuntime(runtime, safeState.last_error || null);
@@ -1185,8 +1863,19 @@ function renderState(payload) {
   renderStageFeed(safeState.history || []);
   renderQueue(safeState.queue || []);
   renderPhaseStatus(safeState.phase_status || {});
+  renderJobs(state.jobs, state.activeJob);
   if (safePayload.projects) renderProjects(safePayload.projects);
-  if (safePayload.videos) renderVideos(safePayload.videos);
+  if (safePayload.videos) {
+    const incomingVideos = Array.isArray(safePayload.videos) ? safePayload.videos : [];
+    const previousPaths = new Set((state.videos || []).map((video) => video.path));
+    const newVideos = incomingVideos.filter((video) => previousPaths.size && !previousPaths.has(video.path));
+    if (newVideos.length) {
+      state.selectedVideo = newVideos[newVideos.length - 1];
+      state.selectedMediaInfo = null;
+      state.inputListCollapsed = true;
+    }
+    renderVideos(incomingVideos);
+  }
   state.selectedVideoProject = findProjectForSelectedVideo();
   state.selectedVideoProjectPath = state.selectedVideoProject?.path || null;
   fillFormIfClean(safePayload.config || state.config || DEFAULT_UI_CONFIG);
@@ -1195,11 +1884,115 @@ function renderState(payload) {
   renderIdmStatus();
   renderYoutubeMeta();
   renderWorkflowSummary();
+  renderOpenAiRuntimeStatus();
+}
+
+function renderStateIfUseful(payload) {
+  if (!payload || typeof payload !== "object") return;
+  const hasActiveJob = Object.prototype.hasOwnProperty.call(payload, "active_job");
+  if (payload.state || payload.jobs || hasActiveJob || payload.projects || payload.videos || payload.config) {
+    renderState(payload);
+  }
+}
+
+async function pauseFlow() {
+  const pauseBtn = el("pauseFlowBtn");
+  if (pauseBtn) pauseBtn.disabled = true;
+  try {
+    const response = await fetch("/api/pause", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "user_requested" }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) {
+      showToast(payload?.error || "暂停请求失败");
+      return;
+    }
+    state.flowControl = { ...state.flowControl, ...(payload.flow_control || {}) };
+    renderState(payload);
+    showToast("已请求暂停，会在安全检查点生效");
+  } catch (error) {
+    showToast(`暂停请求失败：${error.message || error}`);
+  } finally {
+    renderFlowControlButtons();
+  }
+}
+
+async function resumeFlow() {
+  const resumeBtn = el("resumeFlowBtn");
+  if (resumeBtn) resumeBtn.disabled = true;
+  try {
+    const response = await fetch("/api/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) {
+      showToast(payload?.error || "继续翻译失败");
+      return;
+    }
+    state.flowControl = { ...state.flowControl, ...(payload.flow_control || {}) };
+    renderState(payload);
+    showToast("已继续翻译");
+  } catch (error) {
+    showToast(`继续翻译失败：${error.message || error}`);
+  } finally {
+    renderFlowControlButtons();
+  }
+}
+
+async function cancelCurrentJob() {
+  const cancelBtn = el("cancelJobBtn");
+  if (cancelBtn) cancelBtn.disabled = true;
+  try {
+    const response = await fetch("/api/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) {
+      showToast(payload?.error || "取消任务失败");
+      return;
+    }
+    renderState(payload);
+    showToast("已请求取消当前任务");
+  } catch (error) {
+    showToast(`取消任务失败：${error.message || error}`);
+  } finally {
+    renderJobControls();
+  }
+}
+
+async function refreshOpenAiRuntimeStatus() {
+  const button = el("refreshOpenAiRuntimeBtn");
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch("/api/state");
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload) {
+      showToast(payload?.error || "OpenAI 运行环境检测失败");
+      return;
+    }
+    renderState(payload);
+    showToast("OpenAI 运行环境已重新检测");
+  } catch (error) {
+    showToast(`OpenAI 运行环境检测失败：${error.message || error}`);
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 async function testProxy() {
   el("testProxyBtn").disabled = true;
   try {
+    await fetch("/api/save-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(readFormConfig()),
+    }).catch(() => null);
     const response = await fetch("/api/proxy/status");
     const payload = await response.json();
     state.proxyStatus = payload.proxy || null;
@@ -1241,6 +2034,16 @@ async function checkIdm() {
   } finally {
     el("checkIdmBtn").disabled = false;
   }
+}
+
+function refreshBootstrap() {
+  return fetch("/api/bootstrap")
+    .then((res) => res.json())
+    .then((payload) => {
+      renderState(payload);
+      return payload;
+    })
+    .catch(() => null);
 }
 
 function bootstrap() {
@@ -1354,6 +2157,7 @@ function bindActions() {
       if (!payload.ok) return;
       state.selectedVideo = payload.video;
       state.selectedMediaInfo = null;
+      state.inputListCollapsed = true;
       renderState(payload);
       showToast("Input 已添加");
     } catch (error) {
@@ -1399,14 +2203,24 @@ function bindActions() {
     fetch("/api/youtube-meta", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, config: readFormConfig() }),
     })
       .then((res) => res.json())
       .then((payload) => {
-        if (!payload.ok) return;
+        if (!payload.ok) {
+          state.youtubeMeta = { error: payload.error || "YouTube 信息获取失败", mode: state.proxyStatus?.mode || "" };
+          renderYoutubeMeta();
+          showToast(payload.error || "YouTube 信息获取失败");
+          return;
+        }
         state.youtubeMeta = { ...(payload.meta || {}), output_dir: payload.output_dir, output_path: payload.output_path, info_path: payload.info_path, info_text: payload.info_text, cover_path: payload.cover_path };
         renderYoutubeMeta();
         showToast("信息已获取");
+      })
+      .catch((error) => {
+        state.youtubeMeta = { error: error.message || String(error), mode: state.proxyStatus?.mode || "" };
+        renderYoutubeMeta();
+        showToast(`YouTube 信息获取失败：${error.message || error}`);
       });
   };
 
@@ -1416,14 +2230,24 @@ function bindActions() {
     fetch("/api/youtube-cover", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, config: readFormConfig() }),
     })
       .then((res) => res.json())
       .then((payload) => {
-        if (!payload.ok) return;
+        if (!payload.ok) {
+          state.youtubeMeta = { error: payload.error || "YouTube 封面获取失败", mode: state.proxyStatus?.mode || "" };
+          renderYoutubeMeta();
+          showToast(payload.error || "YouTube 封面获取失败");
+          return;
+        }
         state.youtubeMeta = { ...(payload.meta || {}), output_dir: payload.output_dir, output_path: payload.output_path, info_path: payload.info_path, cover_path: payload.cover_path, cover_1280x960_path: payload.cover_1280x960_path };
         renderYoutubeMeta();
         showToast("封面已获取");
+      })
+      .catch((error) => {
+        state.youtubeMeta = { error: error.message || String(error), mode: state.proxyStatus?.mode || "" };
+        renderYoutubeMeta();
+        showToast(`YouTube 封面获取失败：${error.message || error}`);
       });
   };
 
@@ -1445,6 +2269,7 @@ function bindActions() {
   };
 
   const scanInput = () => {
+    const previousPaths = new Set((state.videos || []).map((video) => video.path));
     fetch("/api/scan-input", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1452,6 +2277,13 @@ function bindActions() {
     })
       .then((res) => res.json())
       .then((payload) => {
+        const incomingVideos = Array.isArray(payload.videos) ? payload.videos : [];
+        const newVideos = incomingVideos.filter((video) => !previousPaths.has(video.path));
+        if (newVideos.length) {
+          state.selectedVideo = newVideos[newVideos.length - 1];
+          state.selectedMediaInfo = null;
+          state.inputListCollapsed = true;
+        }
         renderState(payload);
         showToast("已扫描 input");
       });
@@ -1476,7 +2308,12 @@ function bindActions() {
     })
       .then((res) => res.json())
       .then((payload) => {
-        if (!payload.ok) showToast(payload.error || "下载任务启动失败");
+        if (!payload.ok) {
+          showToast(payload.error || "下载任务启动失败");
+          return;
+        }
+        renderStateIfUseful(payload);
+        refreshBootstrap();
       })
       .catch((error) => showToast(`下载任务启动失败：${error.message || error}`));
   };
@@ -1495,7 +2332,12 @@ function bindActions() {
     })
       .then((res) => res.json())
       .then((payload) => {
-        if (!payload.ok) showToast(payload.error || "流程启动失败");
+        if (!payload.ok) {
+          showToast(payload.error || "流程启动失败");
+          return;
+        }
+        renderStateIfUseful(payload);
+        refreshBootstrap();
       })
       .catch((error) => showToast(`流程启动失败：${error.message || error}`));
   };
@@ -1518,7 +2360,11 @@ function bindActions() {
       renderWorkflowSummary();
     });
   });
+  el("openai_base_url")?.addEventListener("input", renderOpenAiRuntimeStatus);
   el("previewBtn").addEventListener("click", () => runPipeline(60));
+  el("pauseFlowBtn")?.addEventListener("click", pauseFlow);
+  el("resumeFlowBtn")?.addEventListener("click", resumeFlow);
+  el("cancelJobBtn")?.addEventListener("click", cancelCurrentJob);
   el("downloadOnlyBtn").addEventListener("click", () => runDownload(false));
   el("downloadAndRunBtn").addEventListener("click", () => runDownload(true));
   el("testProxyBtn").addEventListener("click", testProxy);
@@ -1528,6 +2374,10 @@ function bindActions() {
   el("rebuildPaddedCoverBtn").addEventListener("click", rebuildPaddedCover);
   el("openInputBtn").addEventListener("click", openInput);
   el("scanInputBtn").addEventListener("click", scanInput);
+  el("toggleInputListBtn")?.addEventListener("click", () => {
+    state.inputListCollapsed = !state.inputListCollapsed;
+    renderVideos(state.videos);
+  });
   el("openYoutubeOutputBtn").addEventListener("click", () => {
     const outputDir = state.youtubeMeta?.output_path || state.youtubeMeta?.output_dir || null;
     if (!outputDir) return;
@@ -1586,6 +2436,8 @@ function bindActions() {
       .then((res) => res.json())
       .then((payload) => {
         if (!payload.ok) return;
+        renderStateIfUseful(payload);
+        refreshBootstrap();
         showToast("已开始按当前双语 ASS 重新烧录");
       });
   });
@@ -1600,6 +2452,8 @@ function bindActions() {
       .then((res) => res.json())
       .then((payload) => {
         if (!payload.ok) return;
+        renderStateIfUseful(payload);
+        refreshBootstrap();
         showToast("已开始重新烧录");
       });
   });
@@ -1637,25 +2491,25 @@ function bindActions() {
 }
 
 function bindSubtitleStyleControls() {
-  syncColorInputs("zh_primary_color", "#FFFFFF");
-  syncColorInputs("zh_outline_color", "#141414");
+  syncColorInputs("zh_primary_color", "#FFF2A6");
+  syncColorInputs("zh_outline_color", "#202020");
   syncColorInputs("zh_shadow_color", "#000000");
   syncOpacityInput("zh_primary_opacity", 100);
-  syncOpacityInput("zh_outline_opacity", 100);
-  syncOpacityInput("zh_shadow_opacity", 60);
+  syncOpacityInput("zh_outline_opacity", 45);
+  syncOpacityInput("zh_shadow_opacity", 35);
   ["zh_font_name", "zh_font_size", "zh_outline_width", "zh_shadow_depth"].forEach((id) => {
     const node = el(id);
     if (node) node.addEventListener("input", updateSubtitleStylePreview);
   });
   el("resetZhColorBtn").addEventListener("click", () => {
-    setColorField("zh_primary_color", "#FFFFFF", "#FFFFFF");
+    setColorField("zh_primary_color", "#FFF2A6", "#FFF2A6");
     setOpacityField("zh_primary_opacity", 100, 100);
-    setColorField("zh_outline_color", "#141414", "#141414");
-    setOpacityField("zh_outline_opacity", 100, 100);
+    setColorField("zh_outline_color", "#202020", "#202020");
+    setOpacityField("zh_outline_opacity", 45, 45);
     setColorField("zh_shadow_color", "#000000", "#000000");
-    setOpacityField("zh_shadow_opacity", 60, 60);
-    el("zh_outline_width").value = 2.2;
-    el("zh_shadow_depth").value = 0.6;
+    setOpacityField("zh_shadow_opacity", 35, 35);
+    el("zh_outline_width").value = 1.8;
+    el("zh_shadow_depth").value = 0.4;
     updateSubtitleStylePreview();
     markConfigDirty();
   });

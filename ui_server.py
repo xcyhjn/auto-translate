@@ -6,11 +6,14 @@ import math
 import os
 import re
 import shutil
+import subprocess
+import sys
 import time
 import threading
 import traceback
 import unicodedata
 import uuid
+import socket
 from datetime import datetime, timezone
 from dataclasses import asdict
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -20,9 +23,11 @@ from urllib.parse import parse_qs, unquote, urlparse
 import httpx
 
 from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, check_idm
+from .job_store import JobStore, ACTIVE_STATUSES
 from .models import BilingualSubtitleStyle
 from .media import normalize_asr_audio_mode, normalize_asr_vad_mode, probe_media
 from .pipeline_core import build_output_slug, burn_subtitle, create_safe_ass_copy, run_pipeline, write_json
+from .pipeline_runner import compute_output_dir
 from .qa import qa_final_ass_file
 from .qa_outputs import build_blocker_report
 from .glossary import write_youtube_glossary
@@ -52,8 +57,13 @@ STATE_SNAPSHOT_PATH = BASE_DIR / "ui_server_state.json"
 SERVER_VERSION = "20260519-stability1"
 SERVER_PORT = int(os.environ.get("AUTOSUB_UI_PORT", "8777"))
 DEFAULT_HTTP_PROXY = "http://127.0.0.1:7890"
+JOB_STORE = JobStore()
 STATE_SNAPSHOT_VERSION = 1
 STATE_STALE_TIMEOUT_SECONDS = 30 * 60
+OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
+OPENAI_BASE_URL_ENV = "OPENAI_BASE_URL"
+OPENAI_BASE_URL_ALIASES = ("OPENAI_API_BASE",)
+OPENAI_RUNTIME_INJECTIONS: dict[str, dict] = {}
 
 DEFAULT_CONFIG = {
     "workflow_profile": DEFAULT_WORKFLOW_PROFILE,
@@ -71,6 +81,12 @@ DEFAULT_CONFIG = {
     "dataset_profile": "en_zh/general",
     "subtitle_mode": "bilingual_source_reference",
     "source_reference_label": "en",
+    "subtitle_timing_mode": "bound",
+    "zh_semantic_merge": False,
+    "zh_target_min_duration": 3.5,
+    "zh_target_max_duration": 7.5,
+    "zh_hard_max_duration": 8.5,
+    "zh_min_duration": 2.2,
     "translation_prompt": (
         "Prioritize faithful meaning over literal wording. Preserve casual spoken tone, "
         "hesitation, intimacy, jokes, sarcasm, and implied meaning when present. Translate "
@@ -82,6 +98,7 @@ DEFAULT_CONFIG = {
     "translation_chunk_size": 24,
     "translation_retries": 4,
     "openai_base_url": "",
+    "proxy_url": "",
     "audio_override_path": "",
     "load_existing_segments": False,
     "force_retranslate_existing_segments": False,
@@ -91,6 +108,7 @@ DEFAULT_CONFIG = {
     "span_repair_max_spans": 12,
     "enable_ai_display_rewrite": False,
     "display_rewrite_max_ai_segments": 12,
+    "bootstrap_entity_decisions": "high_confidence_only",
     "download_backend": "auto",
     "idm_exe_path": "",
     "idm_output_dir": str(INPUT_DIR),
@@ -127,6 +145,7 @@ STAGE_META = {
     "timing_start": {"title": "时间轴优化", "description": "正在优化字幕切分和时间轴。", "overall_progress": 61},
     "timing_complete": {"title": "时间轴优化", "description": "时间轴优化完成。", "overall_progress": 68},
     "translation_start": {"title": "翻译中", "description": "正在分块翻译字幕。", "overall_progress": 72},
+    "zh_reading_groups_complete": {"title": "中文阅读轴", "description": "已按语义建立中文字幕阅读轴。", "overall_progress": 73},
     "translation_chunk_start": {"title": "翻译中", "description": "正在分块翻译字幕。", "overall_progress": 76},
     "translation_chunk_complete": {"title": "翻译中", "description": "分块翻译已返回结果。", "overall_progress": 82},
     "translation_complete": {"title": "翻译中", "description": "翻译完成。", "overall_progress": 88},
@@ -253,6 +272,14 @@ STATE = {
 }
 STATE_LOCK = threading.RLock()
 STATE_SNAPSHOT_LOCK = threading.Lock()
+FLOW_CONTROL = {
+    "pause_requested": False,
+    "paused": False,
+    "pause_reason": "",
+    "pause_stage": "",
+    "updated_at": "",
+}
+FLOW_CONTROL_CONDITION = threading.Condition()
 LAST_STATE_SNAPSHOT_AT = 0.0
 INITIAL_INPUT_SNAPSHOT: set[str] = set()
 
@@ -277,6 +304,76 @@ def read_state_timestamp(value: object) -> float:
 def capture_state_snapshot() -> dict:
     with STATE_LOCK:
         return copy.deepcopy(STATE)
+
+
+def capture_flow_control_snapshot() -> dict:
+    with FLOW_CONTROL_CONDITION:
+        return copy.deepcopy(FLOW_CONTROL)
+
+
+def reset_flow_control() -> None:
+    with FLOW_CONTROL_CONDITION:
+        FLOW_CONTROL.update(
+            {
+                "pause_requested": False,
+                "paused": False,
+                "pause_reason": "",
+                "pause_stage": "",
+                "updated_at": utc_now_iso(),
+            }
+        )
+        FLOW_CONTROL_CONDITION.notify_all()
+
+
+def request_pause(reason: str = "user_requested") -> dict:
+    with FLOW_CONTROL_CONDITION:
+        FLOW_CONTROL["pause_requested"] = True
+        FLOW_CONTROL["paused"] = False
+        FLOW_CONTROL["pause_reason"] = reason or "user_requested"
+        FLOW_CONTROL["updated_at"] = utc_now_iso()
+        FLOW_CONTROL_CONDITION.notify_all()
+        return copy.deepcopy(FLOW_CONTROL)
+
+
+def resume_flow() -> dict:
+    with FLOW_CONTROL_CONDITION:
+        FLOW_CONTROL["pause_requested"] = False
+        FLOW_CONTROL["paused"] = False
+        FLOW_CONTROL["pause_reason"] = ""
+        FLOW_CONTROL["pause_stage"] = ""
+        FLOW_CONTROL["updated_at"] = utc_now_iso()
+        FLOW_CONTROL_CONDITION.notify_all()
+        return copy.deepcopy(FLOW_CONTROL)
+
+
+def wait_if_paused(stage: str, payload: dict | None = None) -> None:
+    with FLOW_CONTROL_CONDITION:
+        if not FLOW_CONTROL["pause_requested"]:
+            return
+        FLOW_CONTROL["paused"] = True
+        FLOW_CONTROL["pause_stage"] = stage
+        FLOW_CONTROL["updated_at"] = utc_now_iso()
+        FLOW_CONTROL_CONDITION.notify_all()
+    append_history(
+        "flow_paused",
+        {
+            "stage": stage,
+            "pause_reason": capture_flow_control_snapshot().get("pause_reason", ""),
+            **(payload or {}),
+        },
+    )
+    while True:
+        with FLOW_CONTROL_CONDITION:
+            if not FLOW_CONTROL["pause_requested"]:
+                FLOW_CONTROL["paused"] = False
+                FLOW_CONTROL["pause_stage"] = ""
+                FLOW_CONTROL["updated_at"] = utc_now_iso()
+                break
+            FLOW_CONTROL_CONDITION.wait(timeout=1.0)
+        with STATE_LOCK:
+            if STATE.get("running"):
+                touch_task_activity_locked()
+    append_history("flow_resumed", {"stage": stage})
 
 
 def build_state_snapshot_payload() -> dict:
@@ -461,9 +558,10 @@ def normalize_config(config: dict) -> dict:
     incoming = dict(config or {})
     base = apply_workflow_profile({**DEFAULT_CONFIG, **incoming}, DEFAULT_CONFIG)
     normalized = {**base, **incoming}
-    style = normalized.get("style") if isinstance(normalized.get("style"), dict) else {}
+    base_style = base.get("style") if isinstance(base.get("style"), dict) else {}
+    incoming_style = incoming.get("style") if isinstance(incoming.get("style"), dict) else {}
     normalized["style"] = {
-        key: style.get(key, default_value)
+        key: incoming_style.get(key, base_style.get(key, default_value))
         for key, default_value in STYLE_DEFAULTS.items()
     }
     normalized["device"] = str(normalized.get("device") or DEFAULT_CONFIG["device"]).strip().lower()
@@ -491,12 +589,29 @@ def normalize_config(config: dict) -> dict:
     )
     normalized["load_existing_segments"] = bool(normalized.get("load_existing_segments", False))
     normalized["subtitle_mode"] = normalize_subtitle_mode(normalized.get("subtitle_mode"))
+    normalized["subtitle_timing_mode"] = str(normalized.get("subtitle_timing_mode") or "bound").strip().lower()
+    if normalized["subtitle_timing_mode"] not in {"bound", "dual_axis"}:
+        normalized["subtitle_timing_mode"] = "bound"
+    normalized["zh_semantic_merge"] = bool(normalized.get("zh_semantic_merge", False))
+    for key in ("zh_target_min_duration", "zh_target_max_duration", "zh_hard_max_duration", "zh_min_duration"):
+        try:
+            normalized[key] = float(normalized.get(key, DEFAULT_CONFIG[key]))
+        except (TypeError, ValueError):
+            normalized[key] = DEFAULT_CONFIG[key]
+    bootstrap_setting = normalized.get("bootstrap_entity_decisions", DEFAULT_CONFIG["bootstrap_entity_decisions"])
+    if isinstance(bootstrap_setting, bool):
+        normalized["bootstrap_entity_decisions"] = "always" if bootstrap_setting else "off"
+    else:
+        normalized["bootstrap_entity_decisions"] = str(bootstrap_setting or DEFAULT_CONFIG["bootstrap_entity_decisions"]).strip().lower()
+        if normalized["bootstrap_entity_decisions"] not in {"off", "always", "high_confidence_only"}:
+            normalized["bootstrap_entity_decisions"] = DEFAULT_CONFIG["bootstrap_entity_decisions"]
     normalized["workflow_profile"] = str(normalized.get("workflow_profile") or DEFAULT_WORKFLOW_PROFILE)
     normalized["prompt_profile"] = str(normalized.get("prompt_profile") or "").strip()
     normalized["dataset_profile"] = str(normalized.get("dataset_profile") or "").strip()
     normalized["source_reference_label"] = str(
         normalized.get("source_reference_label") or normalized.get("src_lang") or "source"
     ).strip()
+    normalized["proxy_url"] = normalize_proxy_url(normalized.get("proxy_url"))
     return normalized
 
 
@@ -511,6 +626,146 @@ def write_config(config: dict) -> None:
     temp_path = CONFIG_PATH.with_name(f".{CONFIG_PATH.name}.{uuid.uuid4().hex}.tmp")
     temp_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
     temp_path.replace(CONFIG_PATH)
+
+
+def read_windows_environment_value(name: str, scope: str) -> str:
+    if os.name != "nt":
+        return ""
+    try:
+        import winreg
+    except ImportError:
+        return ""
+
+    if scope == "user_env":
+        root = winreg.HKEY_CURRENT_USER
+        sub_key = "Environment"
+    elif scope == "machine_env":
+        root = winreg.HKEY_LOCAL_MACHINE
+        sub_key = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+    else:
+        return ""
+
+    try:
+        with winreg.OpenKey(root, sub_key) as key:
+            value, _ = winreg.QueryValueEx(key, name)
+    except OSError:
+        return ""
+    return str(value or "").strip()
+
+
+def resolve_env_value(name: str, aliases: tuple[str, ...] = ()) -> dict:
+    names = (name, *aliases)
+    for env_name in names:
+        value = str(os.environ.get(env_name) or "").strip()
+        if value:
+            return {"available": True, "name": name, "env_name": env_name, "value": value, "source": "process_env"}
+    for source in ("user_env", "machine_env"):
+        for env_name in names:
+            value = read_windows_environment_value(env_name, source)
+            if value:
+                return {"available": True, "name": name, "env_name": env_name, "value": value, "source": source}
+    return {"available": False, "name": name, "env_name": name, "value": "", "source": "missing"}
+
+
+def mask_openai_key(value: str) -> str:
+    key = str(value or "").strip()
+    if not key:
+        return ""
+    if len(key) <= 12:
+        return f"{key[:3]}..."
+    return f"{key[:6]}...{key[-4:]}"
+
+
+def apply_openai_injection_origin(canonical_name: str, info: dict, injected: bool) -> tuple[dict, bool]:
+    origin = OPENAI_RUNTIME_INJECTIONS.get(canonical_name)
+    if not origin or info.get("source") != "process_env":
+        return info, injected
+    display_info = {
+        **info,
+        "source": origin.get("source", info.get("source")),
+        "env_name": origin.get("env_name", info.get("env_name")),
+    }
+    return display_info, bool(origin.get("injected", injected))
+
+
+def ensure_openai_runtime_env_loaded() -> dict:
+    statuses: dict[str, dict] = {}
+
+    key_info = resolve_env_value(OPENAI_API_KEY_ENV)
+    key_injected = False
+    if key_info["available"] and not str(os.environ.get(OPENAI_API_KEY_ENV) or "").strip():
+        os.environ[OPENAI_API_KEY_ENV] = key_info["value"]
+        key_injected = True
+    if key_info["available"] and (
+        key_info["source"] != "process_env" or OPENAI_API_KEY_ENV not in OPENAI_RUNTIME_INJECTIONS
+    ):
+        OPENAI_RUNTIME_INJECTIONS[OPENAI_API_KEY_ENV] = {
+            "source": key_info["source"],
+            "env_name": key_info["env_name"],
+            "injected": key_injected,
+        }
+    key_status_info, key_status_injected = apply_openai_injection_origin(OPENAI_API_KEY_ENV, key_info, key_injected)
+    statuses["api_key"] = build_openai_api_key_status(key_status_info, key_status_injected)
+
+    base_info = resolve_env_value(OPENAI_BASE_URL_ENV, OPENAI_BASE_URL_ALIASES)
+    base_injected = False
+    if base_info["available"] and not str(os.environ.get(OPENAI_BASE_URL_ENV) or "").strip():
+        os.environ[OPENAI_BASE_URL_ENV] = base_info["value"]
+        base_injected = True
+    if base_info["available"] and (
+        base_info["source"] != "process_env" or OPENAI_BASE_URL_ENV not in OPENAI_RUNTIME_INJECTIONS
+    ):
+        OPENAI_RUNTIME_INJECTIONS[OPENAI_BASE_URL_ENV] = {
+            "source": base_info["source"],
+            "env_name": base_info["env_name"],
+            "injected": base_injected,
+        }
+    base_status_info, base_status_injected = apply_openai_injection_origin(OPENAI_BASE_URL_ENV, base_info, base_injected)
+    statuses["base_url"] = build_openai_base_url_status(base_status_info, base_status_injected)
+    return statuses
+
+
+def build_openai_api_key_status(info: dict, injected: bool = False) -> dict:
+    value = str(info.get("value") or "").strip()
+    return {
+        "available": bool(info.get("available")),
+        "source": str(info.get("source") or "missing"),
+        "env_name": str(info.get("env_name") or OPENAI_API_KEY_ENV),
+        "masked": mask_openai_key(value),
+        "length": len(value),
+        "injected": bool(injected),
+    }
+
+
+def build_openai_base_url_status(info: dict, injected: bool = False, *, config_base_url: str | None = None) -> dict:
+    configured = str(config_base_url or "").strip()
+    if configured:
+        return {
+            "available": True,
+            "source": "ui_config",
+            "env_name": "openai_base_url",
+            "value": configured,
+            "injected": False,
+        }
+    return {
+        "available": bool(info.get("available")),
+        "source": str(info.get("source") or "missing"),
+        "env_name": str(info.get("env_name") or OPENAI_BASE_URL_ENV),
+        "value": str(info.get("value") or "").strip(),
+        "injected": bool(injected),
+    }
+
+
+def build_openai_runtime_status(config: dict | None = None) -> dict:
+    runtime = ensure_openai_runtime_env_loaded()
+    if config and str(config.get("openai_base_url") or "").strip():
+        base_info = resolve_env_value(OPENAI_BASE_URL_ENV, OPENAI_BASE_URL_ALIASES)
+        runtime["base_url"] = build_openai_base_url_status(
+            base_info,
+            bool(runtime.get("base_url", {}).get("injected")),
+            config_base_url=str(config.get("openai_base_url") or "").strip(),
+        )
+    return runtime
 
 
 def resolve_manifest_input_video(manifest: dict) -> Path:
@@ -548,6 +803,49 @@ def strip_ansi_codes(text: str) -> str:
     return cleaned.replace("\r", "").strip()
 
 
+def normalize_proxy_url(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw.lower() in {"none", "off", "direct", "disable", "disabled"}:
+        return ""
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    return raw
+
+
+def proxy_host_port(proxy_url: str) -> tuple[str, int] | None:
+    try:
+        parsed = urlparse(proxy_url)
+        host = parsed.hostname
+        port = parsed.port
+        if not host or not port:
+            return None
+        return host, int(port)
+    except Exception:
+        return None
+
+
+def can_connect_to_proxy(proxy_url: str, *, timeout: float = 1.5) -> bool:
+    target = proxy_host_port(proxy_url)
+    if not target:
+        return False
+    try:
+        with socket.create_connection(target, timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def configured_proxy_url(config: dict | None = None) -> str:
+    if config is not None:
+        return normalize_proxy_url(config.get("proxy_url"))
+    try:
+        return normalize_proxy_url(read_config().get("proxy_url"))
+    except Exception:
+        return ""
+
+
 def build_user_facing_error_message(exc: Exception) -> str:
     raw_message = strip_ansi_codes(str(exc))
     lowered = raw_message.lower()
@@ -571,6 +869,12 @@ def build_user_facing_error_message(exc: Exception) -> str:
     if "rate limit" in lowered or "429" in lowered:
         return "翻译接口触发了上游限流。请稍后重试，或调小 chunk size / 降低并发使用频率。"
 
+    if "sign in to confirm" in lowered or "not a bot" in lowered or "cookies" in lowered:
+        return (
+            "YouTube 要求登录验证或浏览器 cookies。请先在浏览器里登录 YouTube，"
+            "再确认 yt-dlp 配置里的 cookies-from-browser 可用；也可以在 UI 里填写可用代理后重试。"
+        )
+
     if "unable to download api page" in lowered or "unable to download webpage" in lowered:
         return "无法访问视频页面。请检查代理、网络连通性或目标链接是否仍可访问。"
 
@@ -589,6 +893,7 @@ def build_user_facing_error_message(exc: Exception) -> str:
 
 
 def set_state_error(message: str, traceback_text: str) -> None:
+    reset_flow_control()
     with STATE_LOCK:
         STATE["running"] = False
         STATE["current_stage"] = "error"
@@ -632,9 +937,12 @@ def cleanup_partial_downloads(before_paths: set[Path]) -> None:
 
 
 def ensure_proxy_environment() -> None:
+    proxy_url = normalize_proxy_url(os.environ.get("AUTOSUB_PROXY_URL"))
+    if not proxy_url:
+        return
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
         if not os.environ.get(key):
-            os.environ[key] = DEFAULT_HTTP_PROXY
+            os.environ[key] = proxy_url
 
 
 def normalize_lookup_text(value: str) -> str:
@@ -713,13 +1021,7 @@ def list_audio_files() -> list[dict]:
 
 
 def get_proxy_url() -> str:
-    return (
-        os.environ.get("HTTPS_PROXY")
-        or os.environ.get("https_proxy")
-        or os.environ.get("HTTP_PROXY")
-        or os.environ.get("http_proxy")
-        or DEFAULT_HTTP_PROXY
-    )
+    return configured_proxy_url()
 
 
 def inspect_video(path: str) -> dict:
@@ -769,21 +1071,26 @@ def resolve_input_video_path(path_or_name: str) -> Path:
 def test_proxy_connection() -> dict:
     proxy_url = get_proxy_url()
     started_at = datetime.now(timezone.utc)
-    targets = [
-        ("proxy", "http://127.0.0.1:7890"),
-        ("youtube", "https://www.youtube.com"),
-    ]
+    targets = []
+    if proxy_url:
+        targets.append(("proxy", proxy_url))
+    targets.append(("youtube", "https://www.youtube.com"))
     results = []
 
     for name, url in targets:
         entry = {"name": name, "url": url, "ok": False}
         try:
             if name == "proxy":
-                response = httpx.get(url, timeout=5.0)
+                if not can_connect_to_proxy(proxy_url):
+                    raise ConnectionError(f"Proxy is not listening: {proxy_url}")
+                entry["ok"] = True
+                entry["status_code"] = "listening"
+                results.append(entry)
+                continue
             else:
-                transport = httpx.HTTPTransport(proxy=proxy_url)
                 with httpx.Client(
-                    transport=transport,
+                    proxy=proxy_url or None,
+                    trust_env=not bool(proxy_url),
                     timeout=10.0,
                     follow_redirects=True,
                     headers={"User-Agent": "autosub-zh-ui-probe"},
@@ -802,6 +1109,7 @@ def test_proxy_connection() -> dict:
         "ok": overall_ok,
         "checked_at": checked_at,
         "proxy_url": proxy_url,
+        "mode": "proxy" if proxy_url else "direct",
         "results": results,
     }
 
@@ -866,17 +1174,214 @@ def read_output_tree() -> list[dict]:
     return projects
 
 
+def stage_title(stage: str) -> str:
+    meta = STAGE_META.get(stage) or {}
+    return str(meta.get("title") or stage or "stage")
+
+
+def stage_description(stage: str, payload: dict | None = None) -> str:
+    meta = STAGE_META.get(stage) or {}
+    payload = payload or {}
+    if stage == "error":
+        return str(payload.get("message") or meta.get("description") or "Task failed.")
+    return str(meta.get("description") or payload.get("message") or "")
+
+
+def build_jobs_payload() -> dict:
+    try:
+        jobs = JOB_STORE.list_jobs(limit=30)
+        active_job = JOB_STORE.get_active_job() or (jobs[0] if jobs else None)
+        return {"jobs": jobs, "active_job": active_job}
+    except Exception as exc:
+        append_error_log(f"[job_store] failed to read jobs: {exc}")
+        return {"jobs": [], "active_job": None}
+
+
+def build_flow_control_from_jobs() -> dict | None:
+    job = JOB_STORE.get_active_job()
+    if not job:
+        return None
+    status = str(job.get("status") or "")
+    return {
+        "pause_requested": status == "paused",
+        "paused": status == "paused",
+        "pause_reason": "user_requested" if status == "paused" else "",
+        "pause_stage": str(job.get("current_stage") or ""),
+        "updated_at": str(job.get("updated_at") or ""),
+    }
+
+
+def build_compatible_state_from_jobs() -> dict | None:
+    job = JOB_STORE.get_active_job()
+    if not job:
+        return None
+    events = JOB_STORE.get_events(str(job["id"]), limit=120)
+    phase_status = default_phase_status()
+    history = []
+    last_error = job.get("error") if isinstance(job.get("error"), dict) else None
+    for event in events:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        stage = str(event.get("stage") or "")
+        try:
+            update_phase_status_for_snapshot(phase_status, stage, payload)
+        except Exception:
+            pass
+        history.append(
+            {
+                "stage": stage,
+                "title": stage_title(stage),
+                "description": stage_description(stage, payload),
+                "summary": summarize_payload(payload),
+                "created_at": event.get("created_at"),
+                "job_id": job.get("id"),
+            }
+        )
+        if stage == "error" and not last_error:
+            last_error = {
+                "message": str(payload.get("message") or event.get("message") or "Task failed."),
+                "traceback": str(payload.get("traceback") or ""),
+            }
+    status = str(job.get("status") or "")
+    current_stage = str(job.get("current_stage") or "idle")
+    running = status in ACTIVE_STATUSES
+    runtime = {
+        "stage_key": current_stage,
+        "title": stage_title(current_stage),
+        "description": stage_description(current_stage, last_error or {}),
+        "overall_progress": finite_int(job.get("progress"), 0),
+        "task_id": str(job.get("id") or ""),
+        "job_id": str(job.get("id") or ""),
+        "job_status": status,
+    }
+    if status == "succeeded_with_qa_issues":
+        runtime["stage_key"] = "complete"
+        runtime["title"] = "完成（QA 有风险）"
+        runtime["description"] = "产物已生成，但 QA 报告存在错误或警告。"
+        runtime["overall_progress"] = 100
+    elif status == "succeeded":
+        runtime["stage_key"] = "complete"
+        runtime["title"] = STAGE_META["complete"]["title"]
+        runtime["description"] = STAGE_META["complete"]["description"]
+        runtime["overall_progress"] = 100
+    elif status == "failed":
+        runtime["stage_key"] = "error"
+        runtime["title"] = STAGE_META["error"]["title"]
+        runtime["description"] = str((last_error or {}).get("message") or "Task failed.")
+        runtime["overall_progress"] = 100
+    elif status == "cancelled":
+        runtime["stage_key"] = "complete"
+        runtime["title"] = "已取消"
+        runtime["description"] = "任务已取消。"
+        runtime["overall_progress"] = 100
+    manifest_path = str(job.get("manifest_path") or "")
+    last_manifest = None
+    if manifest_path and Path(manifest_path).exists():
+        try:
+            last_manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        except Exception:
+            last_manifest = {"manifest_path": manifest_path}
+    return {
+        "running": running,
+        "current_stage": runtime["stage_key"],
+        "runtime": runtime,
+        "history": history,
+        "last_manifest": last_manifest,
+        "last_error": last_error,
+        "queue": capture_state_snapshot().get("queue", []),
+        "phase_status": phase_status,
+        "task_id": str(job.get("id") or "") if running else "",
+        "task_started_at": str(job.get("started_at") or ""),
+        "task_updated_at": str(job.get("updated_at") or ""),
+        "last_heartbeat_at": str(job.get("updated_at") or ""),
+        "stale_task": False,
+        "stale_reason": "",
+        "recovery": None,
+        "restored_from_snapshot": False,
+    }
+
+
+def update_phase_status_for_snapshot(phase_status: dict, stage: str, payload: dict) -> None:
+    with STATE_LOCK:
+        original = STATE.get("phase_status")
+        try:
+            STATE["phase_status"] = phase_status
+            update_phase_status(stage, payload)
+        finally:
+            STATE["phase_status"] = original
+
+
+def create_pipeline_job(video_path: str, config: dict) -> dict:
+    JOB_STORE.initialize()
+    if JOB_STORE.has_active_job():
+        raise RuntimeError("task already running")
+    resolved_path = str(resolve_input_video_path(video_path))
+    normalized_config = normalize_config(config)
+    output_dir = compute_output_dir(resolved_path, OUTPUT_DIR)
+    job = JOB_STORE.create_job(
+        input_path=resolved_path,
+        output_dir=str(output_dir),
+        workflow_profile=str(normalized_config.get("workflow_profile") or ""),
+        config=normalized_config,
+    )
+    JOB_STORE.upsert_artifact(job["id"], "effective_config", output_dir / "00_effective_config.json", status="planned")
+    return job
+
+
+def start_worker_process() -> None:
+    JOB_STORE.initialize()
+    existing = []
+    try:
+        import subprocess as _subprocess
+
+        result = _subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process -Filter \"Name = 'python.exe'\" | "
+                "Where-Object { $_.CommandLine -like '*autosub_zh.worker_service*' } | "
+                "Select-Object -ExpandProperty ProcessId",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        existing = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    except Exception:
+        existing = []
+    if existing:
+        return
+    log_dir = BASE_DIR / "runtime"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stdout = open(log_dir / "worker_stdout.log", "a", encoding="utf-8")
+    stderr = open(log_dir / "worker_stderr.log", "a", encoding="utf-8")
+    subprocess.Popen(
+        [sys.executable, "-m", "autosub_zh.worker_service"],
+        cwd=str(BASE_DIR.parent),
+        stdout=stdout,
+        stderr=stderr,
+        stdin=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+
+
 def build_bootstrap_payload(*, include_collections: bool) -> dict:
     reconcile_runtime_state()
+    config = read_config()
+    job_payload = build_jobs_payload()
     payload = {
         "server_version": SERVER_VERSION,
-        "state": capture_state_snapshot(),
+        "state": build_compatible_state_from_jobs() or capture_state_snapshot(),
+        "flow_control": build_flow_control_from_jobs() or capture_flow_control_snapshot(),
+        "jobs": job_payload["jobs"],
+        "active_job": job_payload["active_job"],
+        "openai_runtime": build_openai_runtime_status(config),
     }
     if include_collections:
         payload["videos"] = list_input_videos()
         payload["audios"] = list_audio_files()
         payload["projects"] = read_output_tree()
-        config = read_config()
         payload["config"] = config
         payload["workflow_profiles"] = list_workflow_profiles()
         payload["active_prompt_profile"] = load_prompt_profile(config.get("prompt_profile"))
@@ -922,6 +1427,11 @@ def enqueue_video(video: dict) -> None:
 
 
 def is_busy() -> bool:
+    try:
+        if JOB_STORE.has_active_job():
+            return True
+    except Exception:
+        pass
     reconcile_runtime_state()
     with STATE_LOCK:
         return bool(STATE["running"])
@@ -937,6 +1447,7 @@ def try_begin_task(stage_key: str, title: str, description: str, *, overall_prog
         reconcile_runtime_state()
         if STATE["running"]:
             return False
+        reset_flow_control()
         now_ts = time.time()
         STATE["running"] = True
         STATE["current_stage"] = stage_key
@@ -963,6 +1474,7 @@ def try_begin_task(stage_key: str, title: str, description: str, *, overall_prog
 
 
 def reset_runtime_state() -> None:
+    reset_flow_control()
     STATE["running"] = False
     STATE["current_stage"] = "idle"
     STATE["runtime"] = default_runtime_meta()
@@ -1056,6 +1568,12 @@ def finite_int(value: object, default: int = 0) -> int:
 
 def update_runtime_meta(stage: str, payload: dict) -> None:
     meta = STAGE_META.get(stage, {"title": stage, "description": "", "overall_progress": 0})
+    if stage == "flow_pause_requested":
+        meta = {"title": "等待暂停", "description": "已收到暂停请求，将在下一个安全检查点暂停。", "overall_progress": finite_int(STATE["runtime"].get("overall_progress"), 0)}
+    elif stage == "flow_paused":
+        meta = {"title": "暂停中", "description": "流程已在安全检查点暂停，等待继续翻译。", "overall_progress": finite_int(STATE["runtime"].get("overall_progress"), 0)}
+    elif stage == "flow_resumed":
+        meta = {"title": "继续翻译", "description": "流程已恢复，继续执行后续步骤。", "overall_progress": finite_int(STATE["runtime"].get("overall_progress"), 0)}
     runtime = STATE["runtime"]
     runtime["stage_key"] = stage
     runtime["title"] = meta["title"]
@@ -1551,6 +2069,7 @@ def append_history(stage: str, payload: dict) -> None:
         STATE["history"] = STATE["history"][-120:]
         update_phase_status(stage, payload)
         if stage == "complete":
+            reset_flow_control()
             STATE["current_stage"] = "complete"
             STATE["running"] = False
             STATE["task_id"] = ""
@@ -1655,8 +2174,8 @@ def migrate_legacy_youtube_assets(video_id: str, target_dir: Path) -> None:
             pass
 
 
-def youtube_assets_job(url: str, *, download_cover_only: bool = False) -> dict:
-    meta = fetch_youtube_meta(url, proxy_url=get_proxy_url())
+def youtube_assets_job(url: str, *, download_cover_only: bool = False, proxy_url: str | None = None) -> dict:
+    meta = fetch_youtube_meta(url, proxy_url=normalize_proxy_url(proxy_url))
     output_dir = resolve_youtube_output_dir(meta.title)
     migrate_legacy_youtube_assets(meta.video_id, output_dir)
     save_youtube_meta(output_dir, meta)
@@ -1664,7 +2183,7 @@ def youtube_assets_job(url: str, *, download_cover_only: bool = False) -> dict:
     cover_path = None
     padded_cover_path = ""
     if download_cover_only:
-        cover_path = ensure_cover(meta, output_dir, proxy_url=get_proxy_url())
+        cover_path = ensure_cover(meta, output_dir, proxy_url=normalize_proxy_url(proxy_url))
         padded_cover_path = str(ensure_padded_cover(output_dir))
     manifest = {
         "input_url": url,
@@ -1680,8 +2199,8 @@ def youtube_assets_job(url: str, *, download_cover_only: bool = False) -> dict:
     return manifest
 
 
-def youtube_info_job(url: str) -> dict:
-    meta = fetch_youtube_info(url, proxy_url=get_proxy_url())
+def youtube_info_job(url: str, *, proxy_url: str | None = None) -> dict:
+    meta = fetch_youtube_info(url, proxy_url=normalize_proxy_url(proxy_url))
     output_dir = resolve_youtube_output_dir(meta.title)
     migrate_legacy_youtube_assets(meta.video_id, output_dir)
     save_youtube_meta(output_dir, meta)
@@ -1744,6 +2263,7 @@ def learn_style_job(project_path: str) -> dict:
 
 def execute_pipeline_job(video_path: str, config: dict, task_id: str | None = None) -> None:
     task_id = task_id or current_task_id()
+    ensure_openai_runtime_env_loaded()
     style_config = dict(config.get("style") or {})
     if "en_max_words_per_line" in style_config and "en_max_single_line_chars" not in style_config:
         style_config["en_max_single_line_chars"] = max(50, int(style_config.pop("en_max_words_per_line") or 12) * 6)
@@ -1785,11 +2305,19 @@ def execute_pipeline_job(video_path: str, config: dict, task_id: str | None = No
             span_repair_max_spans=int(config.get("span_repair_max_spans", 12) or 12),
             enable_ai_display_rewrite=bool(config.get("enable_ai_display_rewrite", False)),
             display_rewrite_max_ai_segments=int(config.get("display_rewrite_max_ai_segments", 12) or 12),
+            bootstrap_entity_decisions=config.get("bootstrap_entity_decisions", "high_confidence_only"),
             subtitle_mode=config.get("subtitle_mode", "bilingual_source_reference"),
             source_reference_label=config.get("source_reference_label", ""),
             dataset_profile=config.get("dataset_profile", ""),
             bilingual_style=style,
+            subtitle_timing_mode=config.get("subtitle_timing_mode", "bound"),
+            zh_semantic_merge=bool(config.get("zh_semantic_merge", False)),
+            zh_target_min_duration=float(config.get("zh_target_min_duration", 3.5) or 3.5),
+            zh_target_max_duration=float(config.get("zh_target_max_duration", 7.5) or 7.5),
+            zh_hard_max_duration=float(config.get("zh_hard_max_duration", 8.5) or 8.5),
+            zh_min_duration=float(config.get("zh_min_duration", 2.2) or 2.2),
             callback=lambda stage, payload: append_history(stage, {**payload, "task_id": task_id}),
+            control_callback=lambda stage, payload=None: wait_if_paused(stage, {**(payload or {}), "task_id": task_id}),
         )
         append_error_log(
             f"[run_pipeline_job:complete] video_path={video_path}\n"
@@ -1891,6 +2419,7 @@ def reburn_from_ass_job(project_path: str, task_id: str | None = None) -> dict:
             "task_id": task_id,
         },
     )
+    wait_if_paused("burn_start", {"project_path": str(project_dir), "task_id": task_id})
     safe_ass_path = create_safe_ass_copy(ass_path)
     burn_subtitle(
         input_video,
@@ -1965,7 +2494,7 @@ def build_download_config(config: dict) -> DownloadConfig:
     return DownloadConfig.from_ui_config(
         config,
         input_dir=INPUT_DIR,
-        proxy_url=get_proxy_url(),
+        proxy_url=configured_proxy_url(config),
     )
 
 
@@ -1983,6 +2512,7 @@ def download_and_optionally_run_job(url: str, config: dict, run_after_download: 
     task_id = current_task_id()
     try:
         append_history("download_start", {"url": url, "task_id": task_id})
+        wait_if_paused("download_start", {"url": url, "task_id": task_id})
 
         video = download_video_from_url(url, config, task_id)
         enqueue_video(video)
@@ -2146,7 +2676,7 @@ class UIServerHandler(SimpleHTTPRequestHandler):
             payload = json.loads(raw.decode("utf-8")) if raw else {}
 
             if parsed.path == "/api/save-config":
-                config = {**read_config(), **payload}
+                config = normalize_config({**read_config(), **payload})
                 write_config(config)
                 self._json_response({"ok": True, "config": config})
                 return
@@ -2183,7 +2713,13 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 if not url:
                     self._json_response({"ok": False, "error": "url required"}, status=400)
                     return
-                manifest = youtube_info_job(url)
+                config = normalize_config({**read_config(), **payload.get("config", {})})
+                try:
+                    manifest = youtube_info_job(url, proxy_url=configured_proxy_url(config))
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response({"ok": False, "error": build_user_facing_error_message(exc)}, status=502)
+                    return
                 self._json_response({"ok": True, **manifest})
                 return
 
@@ -2192,7 +2728,13 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 if not url:
                     self._json_response({"ok": False, "error": "url required"}, status=400)
                     return
-                manifest = youtube_assets_job(url, download_cover_only=True)
+                config = normalize_config({**read_config(), **payload.get("config", {})})
+                try:
+                    manifest = youtube_assets_job(url, download_cover_only=True, proxy_url=configured_proxy_url(config))
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response({"ok": False, "error": build_user_facing_error_message(exc)}, status=502)
+                    return
                 self._json_response({"ok": True, **manifest})
                 return
 
@@ -2217,10 +2759,58 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 )
                 return
 
+            if parsed.path == "/api/pause":
+                active_job = JOB_STORE.get_active_job()
+                if active_job:
+                    JOB_STORE.pause_job(str(active_job["id"]))
+                    response = build_bootstrap_payload(include_collections=False)
+                    response["ok"] = True
+                    self._json_response(response)
+                    return
+                if not is_busy():
+                    self._json_response({"ok": False, "error": "no running task", "flow_control": capture_flow_control_snapshot()}, status=409)
+                    return
+                flow_control = request_pause(str(payload.get("reason") or "user_requested"))
+                append_history(
+                    "flow_pause_requested",
+                    {
+                        "pause_reason": flow_control.get("pause_reason", ""),
+                        "task_id": current_task_id(),
+                    },
+                )
+                self._json_response({"ok": True, "flow_control": flow_control, "state": capture_state_snapshot()})
+                return
+
+            if parsed.path == "/api/resume":
+                active_job = JOB_STORE.get_active_job()
+                if active_job:
+                    JOB_STORE.resume_job(str(active_job["id"]))
+                    start_worker_process()
+                    response = build_bootstrap_payload(include_collections=False)
+                    response["ok"] = True
+                    self._json_response(response)
+                    return
+                flow_control = resume_flow()
+                self._json_response({"ok": True, "flow_control": flow_control, "state": capture_state_snapshot()})
+                return
+
+            if parsed.path == "/api/cancel":
+                active_job = JOB_STORE.get_active_job()
+                if not active_job:
+                    self._json_response({"ok": False, "error": "no running task"}, status=409)
+                    return
+                JOB_STORE.cancel_job(str(active_job["id"]))
+                response = build_bootstrap_payload(include_collections=False)
+                response["ok"] = True
+                self._json_response(response)
+                return
+
             if parsed.path == "/api/download-video":
                 config = {**read_config(), **payload.get("config", {})}
                 url = payload["url"]
                 run_after_download = bool(payload.get("run_after_download"))
+                if run_after_download:
+                    ensure_openai_runtime_env_loaded()
                 if not try_begin_task("downloading", "下载视频", "正在拉取视频资源。", overall_progress=4):
                     self._json_response({"ok": False, "error": "task already running"}, status=409)
                     return
@@ -2236,16 +2826,18 @@ class UIServerHandler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/run":
                 config = {**read_config(), **payload.get("config", {})}
                 resolved_video_path = str(resolve_input_video_path(payload["video_path"]))
-                if not try_begin_task("starting", "准备中", "正在初始化任务。", overall_progress=1):
-                    self._json_response({"ok": False, "error": "task already running"}, status=409)
+                ensure_openai_runtime_env_loaded()
+                try:
+                    job = create_pipeline_job(resolved_video_path, config)
+                except RuntimeError as exc:
+                    self._json_response({"ok": False, "error": str(exc)}, status=409)
                     return
-                thread = threading.Thread(
-                    target=execute_pipeline_job,
-                    args=(resolved_video_path, config, current_task_id()),
-                    daemon=True,
-                )
-                thread.start()
-                self._json_response({"ok": True})
+                start_worker_process()
+                response = build_bootstrap_payload(include_collections=False)
+                response["ok"] = True
+                response["job_id"] = job["id"]
+                response["job"] = job
+                self._json_response(response)
                 return
 
             if parsed.path == "/api/reburn-from-ass":
@@ -2302,6 +2894,11 @@ def main() -> None:
     INITIAL_INPUT_SNAPSHOT = {str(item.resolve()) for item in iter_input_video_files(INPUT_DIR)}
     restore_state_from_snapshot()
     ensure_proxy_environment()
+    try:
+        if JOB_STORE.has_active_job():
+            start_worker_process()
+    except Exception as exc:
+        append_error_log(f"[worker] failed to start worker for active job: {exc}")
     server = ReusableThreadingHTTPServer(("127.0.0.1", SERVER_PORT), UIServerHandler)
     print(f"UI server running at http://127.0.0.1:{SERVER_PORT}")
     server.serve_forever()

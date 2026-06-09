@@ -10,8 +10,16 @@ if (Test-Path $cudaBin) {
     }
 }
 
-$env:HTTP_PROXY = 'http://127.0.0.1:7890'
-$env:HTTPS_PROXY = 'http://127.0.0.1:7890'
+if ($env:AUTOSUB_PROXY_URL) {
+    $env:HTTP_PROXY = $env:AUTOSUB_PROXY_URL
+    $env:HTTPS_PROXY = $env:AUTOSUB_PROXY_URL
+}
+else {
+    Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue
+    Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
+    Remove-Item Env:http_proxy -ErrorAction SilentlyContinue
+    Remove-Item Env:https_proxy -ErrorAction SilentlyContinue
+}
 $preferredPort = if ($env:AUTOSUB_UI_PORT) { [int]$env:AUTOSUB_UI_PORT } else { 8777 }
 
 function Test-PythonInterpreter {
@@ -157,7 +165,7 @@ Write-Host "Starting Autosub UI server..." -ForegroundColor Cyan
 Write-Host "Project root: $projectRoot" -ForegroundColor DarkGray
 Write-Host "Python: $pythonCommand $($pythonArgs -join ' ')" -ForegroundColor DarkGray
 Write-Host "CUDA bin in PATH: $((($env:PATH -split ';') -contains $cudaBin))" -ForegroundColor DarkGray
-Write-Host "HTTP_PROXY: $env:HTTP_PROXY" -ForegroundColor DarkGray
+Write-Host "Proxy: $(if ($env:AUTOSUB_PROXY_URL) { $env:AUTOSUB_PROXY_URL } else { 'direct' })" -ForegroundColor DarkGray
 Write-Host "Open http://127.0.0.1:$serverPort" -ForegroundColor Green
 
 if ($pythonCommand -eq 'py') {

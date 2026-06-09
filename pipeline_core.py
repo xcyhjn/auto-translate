@@ -15,6 +15,7 @@ from .asr import transcribe_audio
 from .bilingual_postprocess import postprocess_bilingual_segments
 from .difficult_spans import detect_difficult_spans
 from .display_rewrite import rewrite_display_segments
+from .entity_normalization import audit_ass_entities, build_entity_metrics, build_entity_review_rows, normalize_entities
 from .glossary import (
     apply_glossary_alias_corrections,
     apply_translate_policy_corrections,
@@ -34,11 +35,12 @@ from .media import (
     suggest_hwaccel_decoder,
 )
 from .models import BilingualSubtitleStyle, Segment
-from .qa import build_quality_metrics, qa_check, qa_difficult_spans, qa_display_cues, qa_final_ass_file, qa_glossary_consistency
+from .qa import build_quality_metrics, qa_ass_entity_audit, qa_check, qa_difficult_spans, qa_display_cues, qa_final_ass_file, qa_glossary_consistency
 from .qa_outputs import (
     build_blocker_report,
     build_display_qa_rows,
     build_editor_review_rows,
+    build_entity_qa_rows,
     build_glossary_qa_rows,
     write_tsv,
 )
@@ -54,9 +56,20 @@ from .timing import refine_timing
 from .translate import load_glossary, translate_segments
 from .style_rules import load_style_prompt_text
 from .workflow_profiles import load_dataset_glossary_terms, load_dataset_profile, write_dataset_profile_assets, build_subtitle_output_plan
+from .zh_reading_axis import (
+    ZhReadingAxisConfig,
+    build_zh_display_cues,
+    build_zh_reading_groups,
+    reading_groups_to_segments,
+    save_zh_reading_groups,
+    source_reference_cues_from_segments,
+    write_dual_axis_ass,
+    write_zh_ass_from_display_cues,
+)
 
 
 StageCallback = Callable[[str, dict], None]
+ControlCallback = Callable[[str, dict | None], None]
 
 VIDEO_ENCODER = "h264_nvenc"
 VIDEO_ENCODER_FALLBACK = "libx264"
@@ -129,6 +142,41 @@ def empty_span_translation_report() -> dict:
         },
         "results": [],
     }
+
+
+def load_span_translation_checkpoint(
+    path: Path,
+    expected_segments: list[Segment],
+) -> tuple[list[Segment], set[int]] | None:
+    if not path.exists():
+        return None
+    try:
+        checkpoint_segments = load_segments(path)
+    except Exception:
+        return None
+    if [segment.id for segment in checkpoint_segments] != [segment.id for segment in expected_segments]:
+        return None
+    locked_ids = {
+        segment.id
+        for segment in checkpoint_segments
+        if segment.target_text and segment.target_text.strip()
+    }
+    return checkpoint_segments, locked_ids
+
+
+def translated_segments_match_timing_mode(path: Path, *, dual_axis_mode: bool) -> bool:
+    if not path.exists():
+        return False
+    if not dual_axis_mode:
+        return True
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    return str(summary.get("timing_mode") or "").strip().lower() == "dual_axis"
 
 
 def write_dataset_glossary_bundle(
@@ -306,6 +354,11 @@ def emit(callback: StageCallback | None, stage: str, payload: dict) -> None:
         callback(stage, payload)
 
 
+def checkpoint(control_callback: ControlCallback | None, stage: str, payload: dict | None = None) -> None:
+    if control_callback:
+        control_callback(stage, payload or {})
+
+
 def finite_float(value: object, default: float = 0.0) -> float:
     try:
         parsed = float(value)
@@ -412,11 +465,19 @@ def run_pipeline(
     span_repair_max_spans: int = 12,
     enable_ai_display_rewrite: bool = False,
     display_rewrite_max_ai_segments: int = 12,
+    bootstrap_entity_decisions: str | bool = "high_confidence_only",
     subtitle_mode: str = "bilingual_source_reference",
     source_reference_label: str = "",
     dataset_profile: str = "",
     bilingual_style: BilingualSubtitleStyle | None = None,
+    subtitle_timing_mode: str = "bound",
+    zh_semantic_merge: bool = False,
+    zh_target_min_duration: float = 3.5,
+    zh_target_max_duration: float = 7.5,
+    zh_hard_max_duration: float = 8.5,
+    zh_min_duration: float = 2.2,
     callback: StageCallback | None = None,
+    control_callback: ControlCallback | None = None,
 ) -> dict:
     input_path = Path(input_path)
     output_root = Path(output_root)
@@ -424,6 +485,7 @@ def run_pipeline(
     output_dir = resolve_output_dir(input_path, output_root)
     translated_json_path = output_dir / "05_translated_segments.json"
     timed_json_path = output_dir / "03_timed_source_segments.json"
+    zh_reading_groups_path = output_dir / "04b_zh_reading_groups.json"
     style_prompt_path = output_dir / "06d_style_rewrite_prompt.txt"
     learned_style_prompt = load_style_prompt_text(style_prompt_path)
     translation_prompt = str(translation_prompt or "").strip()
@@ -433,6 +495,19 @@ def run_pipeline(
     processing_video_path = input_path
     auto_glossary_path = ensure_project_glossary(output_dir)
     effective_style = bilingual_style if bilingual_style is not None else BilingualSubtitleStyle()
+    dual_axis_mode = (
+        str(subtitle_timing_mode or "").strip().lower() == "dual_axis"
+        and bool(zh_semantic_merge)
+        and str(src_lang or "").strip().lower().startswith("ru")
+    )
+    zh_axis_config = ZhReadingAxisConfig(
+        target_min_duration=float(zh_target_min_duration or 3.5),
+        target_max_duration=float(zh_target_max_duration or 7.5),
+        hard_max_duration=float(zh_hard_max_duration or 8.5),
+        min_duration=float(zh_min_duration or 2.2),
+        zh_max_cps=18.0,
+    )
+    source_axis_segments: list[Segment] = []
     dataset_bundle = load_dataset_profile(dataset_profile)
     dataset_assets = write_dataset_profile_assets(dataset_profile, output_dir) if dataset_profile else {}
     dataset_glossary_json_path, dataset_glossary_prompt_path = (
@@ -459,9 +534,11 @@ def run_pipeline(
         },
     )
 
+    checkpoint(control_callback, "probe_media", {"path": str(input_path)})
     input_probe = probe_media(input_path)
     input_duration = safe_duration_seconds(input_probe.duration)
     if audio_override_path:
+        checkpoint(control_callback, "merge_audio_start", {"video_path": str(input_path), "audio_path": str(audio_override_path)})
         merged_video_path = output_dir / "00a_merged_with_external_audio.mp4"
         emit(
             callback,
@@ -502,6 +579,7 @@ def run_pipeline(
             },
         )
 
+    checkpoint(control_callback, "probe_media", {"path": str(processing_video_path)})
     probe = probe_media(processing_video_path)
     probe_duration = safe_duration_seconds(probe.duration)
     write_json(output_dir / "00_media_probe.json", asdict(probe))
@@ -523,8 +601,15 @@ def run_pipeline(
             "请先为该视频附加外部 MP3，再启动流程。"
         )
 
-    if load_existing_segments and not force_retranslate_existing_segments and translated_json_path.exists():
+    if (
+        load_existing_segments
+        and not force_retranslate_existing_segments
+        and translated_segments_match_timing_mode(translated_json_path, dual_axis_mode=dual_axis_mode)
+        and (not dual_axis_mode or timed_json_path.exists())
+    ):
+        checkpoint(control_callback, "load_existing_segments", {"path": str(translated_json_path)})
         translated_segments = load_segments(translated_json_path)
+        source_axis_segments = load_segments(timed_json_path) if dual_axis_mode and timed_json_path.exists() else translated_segments
         postprocess_stats = postprocess_bilingual_segments(translated_segments)
         source_repair_report = repair_source_segments(translated_segments, get_glossary_json_path(output_dir))
         save_segments_payload(
@@ -579,7 +664,9 @@ def run_pipeline(
         )
     else:
         if (load_existing_segments or force_retranslate_existing_segments) and timed_json_path.exists():
+            checkpoint(control_callback, "timing_start", {"reused": True, "path": str(timed_json_path)})
             timed_segments = load_segments(timed_json_path)
+            source_axis_segments = timed_segments
             source_repair_report = repair_source_segments(timed_segments, get_glossary_json_path(output_dir))
             alias_stats = apply_glossary_alias_corrections(timed_segments, get_glossary_json_path(output_dir))
             save_segments_payload(
@@ -642,6 +729,7 @@ def run_pipeline(
                     "duration_seconds": probe_duration,
                 },
             )
+            checkpoint(control_callback, "extract_audio_start", {"input_path": str(processing_video_path)})
             audio_path = extract_audio(
                 processing_video_path,
                 work_dir=output_dir,
@@ -674,6 +762,7 @@ def run_pipeline(
                 asr_vad_filter = asr_audio_mode_normalized == "off"
             if asr_audio_mode_normalized != "off":
                 enhanced_audio_path = output_dir / "01b_audio_asr_enhanced.wav"
+                checkpoint(control_callback, "enhance_audio_start", {"path": str(enhanced_audio_path)})
 
                 def on_enhance_progress(progress_payload: dict) -> None:
                     payload = dict(progress_payload)
@@ -731,6 +820,7 @@ def run_pipeline(
                     "vad_filter": asr_vad_filter,
                 },
             )
+            checkpoint(control_callback, "asr_start", {"audio_path": str(asr_input_path)})
             raw_segments = transcribe_audio(
                 asr_input_path,
                 model_name=model,
@@ -765,6 +855,7 @@ def run_pipeline(
                     "glossary_path": str(auto_glossary_path) if auto_glossary_path else "",
                 },
             )
+            checkpoint(control_callback, "asr_complete", {"path": str(output_dir / "02_asr_raw_segments.json")})
 
             emit(
                 callback,
@@ -773,7 +864,9 @@ def run_pipeline(
                     "segment_count": len(raw_segments),
                 },
             )
+            checkpoint(control_callback, "timing_start", {"segment_count": len(raw_segments)})
             timed_segments = refine_timing(raw_segments, style=effective_style)
+            source_axis_segments = timed_segments
             source_repair_report = repair_source_segments(timed_segments, get_glossary_json_path(output_dir))
             alias_stats = apply_glossary_alias_corrections(timed_segments, get_glossary_json_path(output_dir))
             save_segments_payload(
@@ -824,16 +917,57 @@ def run_pipeline(
                 "chunk_size": translation_chunk_size,
             },
         )
+        checkpoint(control_callback, "translation_start", {"segment_count": len(timed_segments)})
         glossary_json_path = get_glossary_json_path(output_dir)
-        locked_translation_ids, terminology_report = apply_terminology_short_circuit(
-            timed_segments,
-            glossary_json_path,
-        )
+        if dual_axis_mode:
+            zh_groups = build_zh_reading_groups(timed_segments, config=zh_axis_config)
+            save_zh_reading_groups(
+                zh_groups,
+                zh_reading_groups_path,
+                input_file=str(input_path),
+                summary={
+                    "stage": "zh_reading_groups",
+                    "source_segment_count": len(timed_segments),
+                    "timing_mode": "dual_axis",
+                },
+            )
+            translation_segments = reading_groups_to_segments(zh_groups)
+            locked_translation_ids: set[int] = set()
+            terminology_report = empty_terminology_report(len(translation_segments))
+            write_json(output_dir / "05b_terminology_actions.json", terminology_report)
+            span_translation_report = empty_span_translation_report()
+            save_segments_payload(
+                translation_segments,
+                output_dir / "05a_span_translated_segments.json",
+                input_file=str(input_path),
+                summary=span_translation_report["summary"],
+            )
+            write_stage_json(
+                output_dir / "05a_span_translation_report.json",
+                span_translation_report,
+                input_path=input_path,
+                segment_count=len(translation_segments),
+            )
+            emit(
+                callback,
+                "zh_reading_groups_complete",
+                {
+                    "path": str(zh_reading_groups_path),
+                    "group_count": len(translation_segments),
+                    "source_segment_count": len(timed_segments),
+                },
+            )
+        else:
+            translation_segments = timed_segments
+            locked_translation_ids, terminology_report = apply_terminology_short_circuit(
+                translation_segments,
+                glossary_json_path,
+            )
         write_stage_json(
             output_dir / "05b_terminology_actions.json",
             terminology_report,
             input_path=input_path,
-            segment_count=len(timed_segments),
+            segment_count=len(translation_segments),
         )
         emit(
             callback,
@@ -843,58 +977,86 @@ def run_pipeline(
                 **terminology_report["summary"],
             },
         )
-        source_spans_path = output_dir / "04a_source_spans.json"
-        source_spans_for_translation = (
-            json.loads(source_spans_path.read_text(encoding="utf-8"))
-            if source_spans_path.exists()
-            else detect_source_spans(timed_segments)
-        )
-        span_translated_ids, span_translation_report = translate_source_spans(
-            timed_segments,
-            source_spans_for_translation,
-            src_lang=src_lang,
-            dst_lang=dst_lang,
-            glossary_text=(
-                "\n\n".join(
-                    item
-                    for item in [
-                        dataset_bundle.get("glossary_text", ""),
-                        load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
-                    ]
-                    if item.strip()
+        if not dual_axis_mode:
+            source_spans_path = output_dir / "04a_source_spans.json"
+            source_spans_for_translation = (
+                json.loads(source_spans_path.read_text(encoding="utf-8"))
+                if source_spans_path.exists()
+                else detect_source_spans(translation_segments)
+            )
+            span_checkpoint = (
+                load_span_translation_checkpoint(output_dir / "05a_span_translated_segments.json", translation_segments)
+                if (load_existing_segments or force_retranslate_existing_segments)
+                else None
+            )
+            if span_checkpoint:
+                translation_segments, span_translated_ids = span_checkpoint
+                span_translation_report_path = output_dir / "05a_span_translation_report.json"
+                span_translation_report = (
+                    json.loads(span_translation_report_path.read_text(encoding="utf-8"))
+                    if span_translation_report_path.exists()
+                    else empty_span_translation_report()
                 )
-            ),
-            model=translation_model,
-            style_prompt_text=style_prompt_for_translation,
-            base_url=openai_base_url,
-            max_retries=translation_retries,
-            locked_ids=locked_translation_ids,
-            progress_callback=lambda stage, progress: emit(callback, stage, progress),
-        )
-        locked_translation_ids.update(span_translated_ids)
-        save_segments_payload(
-            timed_segments,
-            output_dir / "05a_span_translated_segments.json",
-            input_file=str(input_path),
-            summary=span_translation_report["summary"],
-        )
-        write_stage_json(
-            output_dir / "05a_span_translation_report.json",
-            span_translation_report,
-            input_path=input_path,
-            segment_count=len(timed_segments),
-        )
-        emit(
-            callback,
-            "span_translation_done",
-            {
-                "segments_path": str(output_dir / "05a_span_translated_segments.json"),
-                "report_path": str(output_dir / "05a_span_translation_report.json"),
-                **span_translation_report["summary"],
-            },
-        )
+                emit(
+                    callback,
+                    "span_translation_done",
+                    {
+                        "segments_path": str(output_dir / "05a_span_translated_segments.json"),
+                        "report_path": str(output_dir / "05a_span_translation_report.json"),
+                        "reused": True,
+                        **span_translation_report.get("summary", {}),
+                    },
+                )
+            else:
+                span_translated_ids, span_translation_report = translate_source_spans(
+                    translation_segments,
+                    source_spans_for_translation,
+                    src_lang=src_lang,
+                    dst_lang=dst_lang,
+                    glossary_text=(
+                        "\n\n".join(
+                            item
+                            for item in [
+                                dataset_bundle.get("glossary_text", ""),
+                                load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
+                            ]
+                            if item.strip()
+                        )
+                    ),
+                    model=translation_model,
+                    style_prompt_text=style_prompt_for_translation,
+                    base_url=openai_base_url,
+                    max_retries=translation_retries,
+                    locked_ids=locked_translation_ids,
+                    progress_callback=lambda stage, progress: (
+                        checkpoint(control_callback, stage, progress),
+                        emit(callback, stage, progress),
+                    ),
+                )
+            locked_translation_ids.update(span_translated_ids)
+            save_segments_payload(
+                translation_segments,
+                output_dir / "05a_span_translated_segments.json",
+                input_file=str(input_path),
+                summary=span_translation_report["summary"],
+            )
+            write_stage_json(
+                output_dir / "05a_span_translation_report.json",
+                span_translation_report,
+                input_path=input_path,
+                segment_count=len(translation_segments),
+            )
+            emit(
+                callback,
+                "span_translation_done",
+                {
+                    "segments_path": str(output_dir / "05a_span_translated_segments.json"),
+                    "report_path": str(output_dir / "05a_span_translation_report.json"),
+                    **span_translation_report["summary"],
+                },
+            )
         translated_segments = translate_segments(
-            timed_segments,
+            translation_segments,
             src_lang=src_lang,
             dst_lang=dst_lang,
             glossary=str(auto_glossary_path) if auto_glossary_path else None,
@@ -908,7 +1070,13 @@ def run_pipeline(
             locked_segment_ids=locked_translation_ids,
             style_prompt_text=style_prompt_for_translation,
             glossary_text_override=dataset_bundle.get("glossary_text", ""),
-            progress_callback=lambda stage, progress: emit(callback, stage, progress),
+            progress_callback=lambda stage, progress: (
+                checkpoint(control_callback, stage, progress),
+                emit(callback, stage, progress),
+            ),
+            checkpoint_path=str(translated_json_path),
+            checkpoint_input_file=str(input_path),
+            resume_from_checkpoint=bool(load_existing_segments and not force_retranslate_existing_segments),
         )
         glossary_json_path = get_glossary_json_path(output_dir)
         alias_stats = apply_glossary_alias_corrections(translated_segments, glossary_json_path)
@@ -919,6 +1087,7 @@ def run_pipeline(
             input_file=str(input_path),
             summary={
                 "stage": "translated_segments",
+                "timing_mode": "dual_axis" if dual_axis_mode else "bound",
                 "alias_corrections": alias_stats,
                 "translate_policy_corrections": translate_policy_stats,
             },
@@ -960,6 +1129,7 @@ def run_pipeline(
             },
         )
 
+    checkpoint(control_callback, "display_rewrite_start", {"segment_count": len(translated_segments)})
     display_rewrite_report = rewrite_display_segments(
         translated_segments,
         effective_style,
@@ -1007,6 +1177,58 @@ def run_pipeline(
         },
     )
 
+    checkpoint(control_callback, "entity_normalization_start", {"segment_count": len(translated_segments)})
+    entity_report = normalize_entities(
+        translated_segments,
+        project_dir=output_dir,
+        bootstrap_project_decisions=bootstrap_entity_decisions,
+    )
+    save_segments_payload(
+        translated_segments,
+        output_dir / "06g_entity_normalized_segments.json",
+        input_file=str(input_path),
+        summary={
+            "stage": "entity_normalized_segments",
+            "entity_normalization": entity_report["summary"],
+        },
+    )
+    write_stage_json(
+        output_dir / "06e_entity_decisions.json",
+        entity_report,
+        input_path=input_path,
+        segment_count=len(translated_segments),
+    )
+    write_tsv(
+        output_dir / "06f_entity_review.tsv",
+        ["segment_id", "candidate", "entity_type", "source_text", "reference_text", "target_text", "reason"],
+        build_entity_review_rows(
+            translated_segments,
+            project_dir=output_dir,
+            glossary_path=get_glossary_json_path(output_dir),
+        ),
+    )
+    if entity_report["summary"]["segments_changed"]:
+        save_segments_payload(
+            translated_segments,
+            translated_json_path,
+            input_file=str(input_path),
+            summary={
+                "stage": "translated_segments",
+                "display_rewrite": display_rewrite_report["summary"],
+                "translate_policy_corrections": translate_policy_stats,
+                "entity_normalization": entity_report["summary"],
+            },
+        )
+        write_srt(translated_segments, output_dir / plan.translated_srt_name)
+    emit(
+        callback,
+        "entity_normalization_complete",
+        {
+            "path": str(output_dir / "06e_entity_decisions.json"),
+            **entity_report["summary"],
+        },
+    )
+
     difficult_spans_initial = detect_difficult_spans(
         translated_segments,
         zh_max_cps=18.0,
@@ -1039,6 +1261,7 @@ def run_pipeline(
     }
     repair_candidate_count = int(difficult_spans_initial["summary"].get("needs_ai_repair_count") or 0)
     if repair_high_risk_spans and repair_candidate_count > 0:
+        checkpoint(control_callback, "span_repair_start", {"candidate_count": repair_candidate_count})
         span_repair_report = repair_difficult_spans(
             translated_segments,
             difficult_spans_initial,
@@ -1060,7 +1283,10 @@ def run_pipeline(
             max_retries=translation_retries,
             max_spans=span_repair_max_spans,
             min_severity="medium",
-            progress_callback=lambda stage, progress: emit(callback, stage, progress),
+            progress_callback=lambda stage, progress: (
+                checkpoint(control_callback, stage, progress),
+                emit(callback, stage, progress),
+            ),
         )
         span_repair_report["summary"]["enabled"] = True
         glossary_json_path = get_glossary_json_path(output_dir)
@@ -1110,23 +1336,75 @@ def run_pipeline(
         },
     )
 
+    checkpoint(control_callback, "ass_write_start", {"subtitle_mode": plan.subtitle_mode})
     assert_no_target_text_pollution(translated_segments, dst_lang=dst_lang)
     report = qa_check(translated_segments, dst_lang=dst_lang)
     ass_path = output_dir / plan.ass_name
-    if plan.subtitle_mode == "target_only":
+    if dual_axis_mode and plan.subtitle_mode in {"target_only", "bilingual_source_reference"}:
+        zh_display_cues = build_zh_display_cues(
+            translated_segments,
+            style=effective_style,
+            config=zh_axis_config,
+        )
+        source_cues = (
+            source_reference_cues_from_segments(source_axis_segments, reference_lang=src_lang)
+            if plan.subtitle_mode == "bilingual_source_reference"
+            else []
+        )
+        if plan.subtitle_mode == "target_only":
+            write_zh_ass_from_display_cues(zh_display_cues, ass_path, style=effective_style)
+            alignment_debug = [
+                {
+                    "mode": "dual_axis_target_only",
+                    "zh_cue_count": len(zh_display_cues),
+                    "source_segment_count": len(source_axis_segments),
+                }
+            ]
+        else:
+            alignment_debug = write_dual_axis_ass(
+                source_cues,
+                zh_display_cues,
+                ass_path,
+                style=effective_style,
+                reference_lang=src_lang,
+            )
+        display_cues = [*zh_display_cues, *source_cues]
+    elif plan.subtitle_mode == "target_only":
         write_zh_ass(translated_segments, ass_path, style=effective_style)
-        display_cues, alignment_debug = prepare_bilingual_ass_segments(translated_segments, effective_style)
+        display_cues, alignment_debug = prepare_bilingual_ass_segments(
+            translated_segments,
+            effective_style,
+            reference_lang=src_lang,
+        )
         for cue in display_cues:
             cue.en_text = ""
     elif plan.subtitle_mode == "source_review":
-        alignment_debug = write_source_ass(translated_segments, ass_path, style=effective_style)
-        display_cues, _ = prepare_bilingual_ass_segments(translated_segments, effective_style)
+        alignment_debug = write_source_ass(
+            translated_segments,
+            ass_path,
+            style=effective_style,
+            reference_lang=src_lang,
+        )
+        display_cues, _ = prepare_bilingual_ass_segments(
+            translated_segments,
+            effective_style,
+            reference_lang=src_lang,
+        )
         for cue in display_cues:
             cue.zh_text = ""
         skip_burn = True
     else:
-        alignment_debug = write_bilingual_ass(translated_segments, ass_path, style=effective_style)
-        display_cues, _ = prepare_bilingual_ass_segments(translated_segments, effective_style)
+        alignment_debug = write_bilingual_ass(
+            translated_segments,
+            ass_path,
+            style=effective_style,
+            reference_lang=src_lang,
+        )
+        display_cues, _ = prepare_bilingual_ass_segments(
+            translated_segments,
+            effective_style,
+            reference_lang=src_lang,
+        )
     if plan.ass_name != plan.legacy_ass_name:
         legacy_ass_path = output_dir / plan.legacy_ass_name
         legacy_ass_path.write_text(ass_path.read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
@@ -1137,10 +1415,19 @@ def run_pipeline(
         en_max_line_chars=effective_style.en_max_single_line_chars,
         zh_wrap_trigger_chars=effective_style.zh_wrap_trigger_chars,
         zh_max_lines=effective_style.zh_max_lines,
+        require_bound_zh=not dual_axis_mode,
     )
     final_ass_report = qa_final_ass_file(
         ass_path,
         dst_lang=dst_lang,
+    )
+    ass_entity_audit = audit_ass_entities(ass_path, project_dir=output_dir)
+    ass_entity_report = qa_ass_entity_audit(ass_entity_audit)
+    write_stage_json(
+        output_dir / "08b_ass_entity_audit.json",
+        ass_entity_audit,
+        input_path=input_path,
+        segment_count=len(translated_segments),
     )
     glossary_json_path = get_glossary_json_path(output_dir)
     glossary_report = qa_glossary_consistency(
@@ -1157,11 +1444,14 @@ def run_pipeline(
         en_max_line_chars=effective_style.en_max_single_line_chars,
         zh_wrap_trigger_chars=effective_style.zh_wrap_trigger_chars,
         zh_max_lines=effective_style.zh_max_lines,
+        require_bound_zh=not dual_axis_mode,
     )
     report.errors.extend(display_report.errors)
     report.errors.extend(final_ass_report.errors)
     report.errors.extend(glossary_report.errors)
     report.errors.extend(difficult_span_report.errors)
+    report.errors.extend(ass_entity_report.errors)
+    report.warnings.extend(ass_entity_report.warnings)
     report.warnings.extend(display_report.warnings)
     report.warnings.extend(final_ass_report.warnings)
     report.warnings.extend(glossary_report.warnings)
@@ -1180,7 +1470,7 @@ def run_pipeline(
     )
     write_tsv(
         output_dir / "07d_editor_review.tsv",
-        ["segment_id", "severity", "risk_type", "risk_score", "source_text", "target_text", "note"],
+        ["segment_id", "severity", "risk_type", "risk_score", "source_text", "reference_text", "target_text", "note"],
         build_editor_review_rows(translated_segments, difficult_spans_final, display_rewrite_report, quality_metrics),
     )
     write_tsv(
@@ -1211,6 +1501,17 @@ def run_pipeline(
             zh_wrap_trigger_chars=effective_style.zh_wrap_trigger_chars,
             zh_max_lines=effective_style.zh_max_lines,
         ),
+    )
+    write_tsv(
+        output_dir / "07h_entity_qa.tsv",
+        ["issue_type", "segment_id", "entity_type", "layer", "style", "start", "end", "text", "canonical_en", "canonical_native", "line_text"],
+        build_entity_qa_rows(ass_entity_audit, quality_metrics),
+    )
+    write_stage_json(
+        output_dir / "07i_entity_metrics.json",
+        build_entity_metrics(entity_report, ass_entity_audit, quality_metrics),
+        input_path=input_path,
+        segment_count=len(translated_segments),
     )
     write_stage_json(
         output_dir / "07g_final_ass_qa.json",
@@ -1257,6 +1558,7 @@ def run_pipeline(
         )
 
     if skip_burn:
+        checkpoint(control_callback, "complete", {"skip_burn": True})
         manifest = {
             "input_video": str(input_path),
             "output_root": str(output_root),
@@ -1277,6 +1579,7 @@ def run_pipeline(
                 "03_glossary_resolved_prompt.txt" if (output_dir / "03_glossary_resolved_prompt.txt").exists() else None,
                 plan.source_srt_name,
                 "04a_source_spans.json",
+                "04b_zh_reading_groups.json" if (output_dir / "04b_zh_reading_groups.json").exists() else None,
                 "05a_span_translated_segments.json",
                 "05a_span_translation_report.json",
                 "05b_terminology_actions.json",
@@ -1284,6 +1587,9 @@ def run_pipeline(
                 plan.translated_srt_name,
                 "06b_display_rewritten_segments.json",
                 "06c_display_rewrite_report.json",
+                "06e_entity_decisions.json",
+                "06f_entity_review.tsv",
+                "06g_entity_normalized_segments.json",
                 "07_qa_report.json",
                 "07a_quality_metrics.json",
                 "07b_difficult_spans_initial.json",
@@ -1293,6 +1599,10 @@ def run_pipeline(
                 "07e_glossary_qa.tsv",
                 "07f_display_qa.tsv",
                 "07g_final_ass_qa.json",
+                "07h_entity_qa.tsv",
+                "07i_entity_metrics.json",
+                "08b_ass_entity_audit.json",
+                "00_entity_decisions.json" if (output_dir / "00_entity_decisions.json").exists() else None,
                 plan.ass_name,
                 plan.legacy_ass_name if plan.ass_name != plan.legacy_ass_name else None,
                 plan.alignment_debug_name,
@@ -1306,6 +1616,8 @@ def run_pipeline(
             "source_srt_name": plan.source_srt_name,
             "translated_srt_name": plan.translated_srt_name,
         }
+        manifest["ass_path"] = str(ass_path)
+        manifest["output_video"] = ""
         manifest["files"] = [item for item in manifest["files"] if item]
         write_json(output_dir / plan.manifest_name, manifest)
         if plan.manifest_name != "10_manifest_bilingual.json":
@@ -1334,6 +1646,7 @@ def run_pipeline(
             "hwaccel": "pending",
         },
     )
+    checkpoint(control_callback, "burn_start", {"path": str(output_video_path)})
     burn_plan = burn_subtitle(
         processing_video_path,
         safe_ass_path,
@@ -1377,6 +1690,7 @@ def run_pipeline(
             "03b_source_repair_report.json",
             plan.source_srt_name,
             "04a_source_spans.json",
+            "04b_zh_reading_groups.json" if (output_dir / "04b_zh_reading_groups.json").exists() else None,
             "05a_span_translated_segments.json",
             "05a_span_translation_report.json",
             "05b_terminology_actions.json",
@@ -1384,6 +1698,9 @@ def run_pipeline(
             plan.translated_srt_name,
             "06b_display_rewritten_segments.json",
             "06c_display_rewrite_report.json",
+            "06e_entity_decisions.json",
+            "06f_entity_review.tsv",
+            "06g_entity_normalized_segments.json",
             "07_qa_report.json",
             "07a_quality_metrics.json",
             "07b_difficult_spans_initial.json",
@@ -1393,6 +1710,9 @@ def run_pipeline(
             "07e_glossary_qa.tsv",
             "07f_display_qa.tsv",
             "07g_final_ass_qa.json",
+            "07h_entity_qa.tsv",
+            "07i_entity_metrics.json",
+            "08b_ass_entity_audit.json",
             plan.ass_name,
             plan.legacy_ass_name if plan.ass_name != plan.legacy_ass_name else None,
             plan.alignment_debug_name,
@@ -1400,6 +1720,7 @@ def run_pipeline(
             "00_glossary_auto.json" if (output_dir / "00_glossary_auto.json").exists() else None,
             "00_glossary_prompt.txt" if (output_dir / "00_glossary_prompt.txt").exists() else None,
             "00_glossary_review.tsv" if (output_dir / "00_glossary_review.tsv").exists() else None,
+            "00_entity_decisions.json" if (output_dir / "00_entity_decisions.json").exists() else None,
             "02_terms_from_asr.json" if (output_dir / "02_terms_from_asr.json").exists() else None,
             "03_glossary_resolved.json" if (output_dir / "03_glossary_resolved.json").exists() else None,
             "03_glossary_resolved_prompt.txt" if (output_dir / "03_glossary_resolved_prompt.txt").exists() else None,
@@ -1414,6 +1735,8 @@ def run_pipeline(
         "source_srt_name": plan.source_srt_name,
         "translated_srt_name": plan.translated_srt_name,
     }
+    manifest["ass_path"] = str(ass_path)
+    manifest["output_video"] = str(output_video_path)
     manifest["files"] = [item for item in manifest["files"] if item]
     write_json(output_dir / plan.manifest_name, manifest)
     if plan.manifest_name != "10_manifest_bilingual.json":

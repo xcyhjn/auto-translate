@@ -20,6 +20,7 @@ def segment_to_dict(segment: Segment) -> dict:
         "end": segment.end,
         "source_text": segment.source_text,
         "target_text": segment.target_text,
+        "reference_text": segment.reference_text,
         "confidence": segment.confidence,
         "source": segment.source,
         "words": [
@@ -50,6 +51,7 @@ def segment_from_dict(payload: dict) -> Segment:
         end=float(payload["end"]),
         source_text=str(payload.get("source_text", "")),
         target_text=payload.get("target_text"),
+        reference_text=payload.get("reference_text"),
         words=words,
         confidence=payload.get("confidence"),
         source=str(payload.get("source", "asr")),

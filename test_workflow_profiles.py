@@ -18,9 +18,18 @@ def test_load_russian_workflow_profile_defaults() -> None:
     assert profile.src_lang == "ru"
     assert profile.dst_lang == "zh-Hans"
     assert profile.model == "large-v3"
-    assert profile.subtitle_mode == "target_only"
+    assert profile.subtitle_mode == "bilingual_source_reference"
     assert profile.prompt_profile == "ru_zh_natural_subtitle"
     assert profile.dataset_profile == "ru_zh/general"
+    assert profile.style["en_font_name"] == "Huiwen-HKHei"
+    assert profile.style["en_font_size"] == 32
+    assert profile.style["reference_mode"] == "full_split"
+    assert profile.style["en_max_single_line_chars"] == 80
+    assert profile.style["en_max_split_parts"] == 4
+    assert profile.style["min_split_duration"] == 1.2
+    assert profile.config["subtitle_timing_mode"] == "dual_axis"
+    assert profile.config["zh_semantic_merge"] is True
+    assert profile.config["zh_hard_max_duration"] == 8.5
 
 
 def test_apply_profile_replaces_base_defaults_but_preserves_user_override() -> None:
@@ -45,6 +54,9 @@ def test_apply_profile_replaces_base_defaults_but_preserves_user_override() -> N
     assert config["src_lang"] == "ru"
     assert config["model"] == "large-v3"
     assert config["translation_chunk_size"] == 12
+    assert config["subtitle_timing_mode"] == "dual_axis"
+    assert config["zh_semantic_merge"] is True
+    assert config["style"]["reference_mode"] == "full_split"
     assert "Russian-to-Simplified-Chinese" in config["translation_prompt"]
 
 

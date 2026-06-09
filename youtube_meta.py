@@ -199,7 +199,7 @@ def safe_project_slug(text: str, fallback: str = "video") -> str:
 
 def download_cover(url: str, output_path: Path, *, proxy_url: str | None = None) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with httpx.Client(timeout=60.0, proxy=proxy_url, follow_redirects=True) as client:
+    with httpx.Client(timeout=60.0, proxy=proxy_url or None, trust_env=not bool(proxy_url), follow_redirects=True) as client:
         response = client.get(url)
         response.raise_for_status()
         output_path.write_bytes(response.content)

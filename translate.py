@@ -5,10 +5,12 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from typing import Callable
 
 from .models import Segment
+from .segment_io import save_segments_payload
 from .style_rules import build_style_guidance, load_style_prompt_text
 from .text_quality import (
     TRANSLATABLE_DISCOURSE_MARKERS,
@@ -338,6 +340,8 @@ def is_leak_part_of_source_proper_phrase(leak: str, source_text: str) -> bool:
 
 def has_translatable_alpha_text(text: str) -> bool:
     words = [word.casefold() for word in re.findall(r"[A-Za-z]{2,}", text or "")]
+    if re.search(r"[\u0400-\u052f]", text or ""):
+        return True
     if FIRST_PERSON_I_RE.search(text or ""):
         return True
     if len(words) < 2:
@@ -462,6 +466,17 @@ def build_translation_prompt(
 
     glossary_block = glossary_text or "No glossary provided."
     style_guidance = build_style_guidance(style_prompt_text)
+    reading_axis_mode = any(segment.source == "zh_reading_group" for segment in chunk)
+    reading_axis_guidance = ""
+    if reading_axis_mode:
+        reading_axis_guidance = (
+            "\nChinese reading-axis mode:\n"
+            "- Each input item is already a semantic reading group, not a raw ASR fragment.\n"
+            "- Translate one group into one complete, natural Chinese subtitle.\n"
+            "- You may compress repetitions and absorb fillers for readability, while preserving meaning, tone, names, numbers, and intent.\n"
+            "- Do not mechanically mirror the source's tiny ASR cuts.\n"
+            "- Do not split one group into multiple output IDs; return exactly one target_text per group ID.\n"
+        )
     return (
         "You are a professional subtitle translator.\n"
         f"Translate subtitles from {src_lang or 'auto-detected source language'} "
@@ -482,6 +497,7 @@ def build_translation_prompt(
         "- Translate each input ID as its own on-screen subtitle; do not omit it or merge its meaning into another ID.\n"
         "- Do not split, truncate, or rearrange technical words, names, commands, paths, or identifiers.\n"
         "- Treat every word/token in the source as atomic; never break a word into pieces for layout.\n\n"
+        f"{reading_axis_guidance}\n"
         "- Use the surrounding context only to resolve pronouns, terminology, and continuity.\n"
         "- Return translations only for Input JSON items; never return context item IDs.\n\n"
         "ASMR / whisper subtitle guidance:\n"
@@ -529,6 +545,29 @@ def build_translation_schema() -> dict:
     }
 
 
+def request_translation_with_chat_completions(
+    client,
+    *,
+    model: str,
+    prompt: str,
+) -> str:
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": "Return valid JSON only."},
+            {
+                "role": "user",
+                "content": (
+                    f"{prompt}\n\n"
+                    'Return compact JSON in this exact shape: {"translations":[{"id":1,"target_text":"..."}]}'
+                ),
+            },
+        ],
+        response_format={"type": "json_object"},
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
 def translate_chunk_with_openai(
     chunk: list[Segment],
     *,
@@ -556,7 +595,7 @@ def translate_chunk_with_openai(
             "OPENAI_API_KEY is not set. Set it before using --translate-provider openai."
         )
 
-    client_kwargs = {"timeout": 600.0}
+    client_kwargs = {"timeout": 30.0}
     if base_url:
         # 如果你使用 GPTCodePlan 这类中转站，就在这里把 base_url 传给 SDK。
         client_kwargs["base_url"] = base_url
@@ -587,7 +626,42 @@ def translate_chunk_with_openai(
     raw_text = ""
     last_error: Exception | None = None
     attempt_logs: list[TranslationAttemptLog] = []
-    for attempt in range(max_retries + 1):
+    payload = None
+    if base_url:
+        chat_logs: list[TranslationAttemptLog] = []
+        for chat_attempt in range(max_retries + 1):
+            try:
+                raw_text = request_translation_with_chat_completions(
+                    client,
+                    model=model,
+                    prompt=prompt,
+                )
+                payload = parse_json_payload(raw_text)
+                break
+            except Exception as chat_exc:
+                last_error = chat_exc
+                wait_seconds, retry_category = classify_retry(chat_exc, chat_attempt, max_retries)
+                chat_logs.append(
+                    TranslationAttemptLog(
+                        attempt=chat_attempt + 1,
+                        error_type=retry_category,
+                        message=short_error_message(chat_exc),
+                        retry_after_seconds=wait_seconds if chat_attempt < max_retries else 0.0,
+                    )
+                )
+                if chat_attempt >= max_retries:
+                    chat_log_lines = "\n".join(
+                        f"attempt {item.attempt}: [{item.error_type}] {item.message}"
+                        for item in chat_logs
+                    )
+                    raise RuntimeError(
+                        "OpenAI chat translation failed after retries.\n"
+                        f"chat_attempt_logs:\n{chat_log_lines}\n"
+                        f"last_raw_output:\n{raw_text}"
+                    ) from last_error
+                time.sleep(wait_seconds)
+
+    for attempt in range(max_retries + 1) if payload is None else []:
         try:
             # OpenAI 的 Responses 接口更适合做文本生成。
             # 这里使用 Structured Outputs，让返回值严格对齐 JSON Schema。
@@ -623,12 +697,44 @@ def translate_chunk_with_openai(
                     f"attempt {item.attempt}: [{item.error_type}] {item.message}"
                     for item in attempt_logs
                 )
-                raise RuntimeError(
-                    "OpenAI translation failed after retries.\n"
-                    f"attempt_logs:\n{log_lines}\n"
-                    f"last_raw_output:\n{raw_text}"
-                ) from last_error
+                chat_logs: list[TranslationAttemptLog] = []
+                for chat_attempt in range(max_retries + 1):
+                    try:
+                        raw_text = request_translation_with_chat_completions(
+                            client,
+                            model=model,
+                            prompt=prompt,
+                        )
+                        payload = parse_json_payload(raw_text)
+                        break
+                    except Exception as chat_exc:
+                        last_error = chat_exc
+                        wait_seconds, retry_category = classify_retry(chat_exc, chat_attempt, max_retries)
+                        chat_logs.append(
+                            TranslationAttemptLog(
+                                attempt=chat_attempt + 1,
+                                error_type=retry_category,
+                                message=short_error_message(chat_exc),
+                                retry_after_seconds=wait_seconds if chat_attempt < max_retries else 0.0,
+                            )
+                        )
+                        if chat_attempt >= max_retries:
+                            chat_log_lines = "\n".join(
+                                f"attempt {item.attempt}: [{item.error_type}] {item.message}"
+                                for item in chat_logs
+                            )
+                            raise RuntimeError(
+                                "OpenAI translation failed after retries.\n"
+                                f"attempt_logs:\n{log_lines}\n"
+                                f"chat_fallback_attempt_logs:\n{chat_log_lines}\n"
+                                f"last_raw_output:\n{raw_text}"
+                            ) from last_error
+                        time.sleep(wait_seconds)
+                break
             time.sleep(wait_seconds)
+
+    if payload is None:
+        raise RuntimeError("OpenAI translation failed without a parsed payload.")
 
     translations: dict[int, str] = {}
     if isinstance(payload, dict):
@@ -795,6 +901,9 @@ def translate_segments(
     style_prompt_text: str | None = None,
     glossary_text_override: str = "",
     progress_callback: TranslationProgressCallback | None = None,
+    checkpoint_path: str | None = None,
+    checkpoint_input_file: str = "",
+    resume_from_checkpoint: bool = True,
 ) -> list[Segment]:
     if not enabled:
         for segment in segments:
@@ -818,7 +927,39 @@ def translate_segments(
     resolved_base_url = resolve_openai_base_url(openai_base_url)
     locked_segment_ids = locked_segment_ids or set()
     chunks = chunk_segments_with_indexes(segments, chunk_size)
+    checkpoint_target = Path(checkpoint_path) if checkpoint_path else None
+    checkpoint_meta_path = (
+        checkpoint_target.with_name(f"{checkpoint_target.stem}.incremental_checkpoint{checkpoint_target.suffix}")
+        if checkpoint_target
+        else None
+    )
+    completed_chunks: set[int] = set()
+    if resume_from_checkpoint and checkpoint_target and checkpoint_target.exists() and checkpoint_meta_path and checkpoint_meta_path.exists():
+        try:
+            from .segment_io import load_segments
+
+            checkpoint_segments = load_segments(checkpoint_target)
+            if [segment.id for segment in checkpoint_segments] == [segment.id for segment in segments]:
+                segments = checkpoint_segments
+                checkpoint_payload = json.loads(checkpoint_meta_path.read_text(encoding="utf-8"))
+                completed_chunks = {int(value) for value in checkpoint_payload.get("completed_chunks", [])}
+                chunks = chunk_segments_with_indexes(segments, chunk_size)
+        except Exception:
+            completed_chunks = set()
+
     for chunk_index, (start_index, end_index, chunk) in enumerate(chunks, start=1):
+        if chunk_index in completed_chunks and all((segment.target_text or "").strip() for segment in chunk):
+            if progress_callback:
+                progress_callback(
+                    "translation_chunk_complete",
+                    {
+                        "chunk_index": chunk_index,
+                        "chunk_total": len(chunks),
+                        "segment_count": len(chunk),
+                        "reused": True,
+                    },
+                )
+            continue
         direct_translations = {
             segment.id: preserve_only
             for segment in chunk
@@ -892,5 +1033,33 @@ def translate_segments(
                     "context_after": len(context_after),
                 },
             )
+        if checkpoint_target:
+            completed_chunks.add(chunk_index)
+            save_segments_payload(
+                segments,
+                checkpoint_target,
+                input_file=checkpoint_input_file,
+                summary={
+                    "stage": "translated_segments_incremental",
+                    "chunk_size": chunk_size,
+                    "completed_chunks": len(completed_chunks),
+                    "chunk_total": len(chunks),
+                    "last_completed_chunk": chunk_index,
+                },
+            )
+            if checkpoint_meta_path:
+                checkpoint_meta_path.write_text(
+                    json.dumps(
+                        {
+                            "completed_chunks": sorted(completed_chunks),
+                            "chunk_total": len(chunks),
+                            "last_completed_chunk": chunk_index,
+                            "updated_at": time.time(),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
 
     return segments

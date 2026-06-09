@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Autosub Studio</title>
-    <link rel="stylesheet" href="./styles.css?v=20260519-stability1" />
+    <link rel="stylesheet" href="./styles.css?v=20260607-jobsync" />
   </head>
   <body>
     <div class="app-shell">
@@ -18,7 +18,8 @@
         </div>
 
         <nav class="nav-group">
-          <div class="nav-title">Workspace</div>
+          <div class="nav-title">工作区</div>
+          <button class="nav-item" data-panel="workflow">工作流</button>
           <button class="nav-item active" data-panel="recognition">识别设置</button>
           <button class="nav-item" data-panel="translation">翻译设置</button>
           <button class="nav-item" data-panel="subtitle">字幕样式</button>
@@ -43,6 +44,9 @@
             <button id="pickInputBtn" class="ghost-btn">添加 Input</button>
             <button id="pickAudioBtn" class="ghost-btn">追加 MP3</button>
             <button id="previewBtn" class="ghost-btn">生成 60s 预览</button>
+            <button id="pauseFlowBtn" class="ghost-btn" type="button">暂停流程</button>
+            <button id="resumeFlowBtn" class="ghost-btn" type="button">继续翻译</button>
+            <button id="cancelJobBtn" class="ghost-btn" type="button">取消任务</button>
             <button id="clearQueueBtn" class="ghost-btn">清除队列</button>
             <button id="openOutputBtn" class="ghost-btn">打开 Output</button>
             <button id="saveConfigBtn" class="ghost-btn">保存配置</button>
@@ -95,7 +99,7 @@
           <section class="card video-picker">
             <div class="card-head">
               <h3>输入视频</h3>
-              <span>Input</span>
+              <button id="toggleInputListBtn" class="mini-btn" type="button">展开全部 Input</button>
             </div>
             <div class="download-block">
               <input id="downloadUrlInput" type="text" placeholder="粘贴 YouTube 链接，例如 https://www.youtube.com/watch?v=..." />
@@ -108,6 +112,10 @@
                     <option value="idm">仅 IDM 桥接</option>
                     <option value="manual">手动导入</option>
                   </select>
+                </label>
+                <label>
+                  <span>代理地址</span>
+                  <input id="proxy_url" type="text" placeholder="留空直连，或填 http://127.0.0.1:7890" />
                 </label>
                 <label>
                   <span>IDM 路径</span>
@@ -173,9 +181,18 @@
             <div id="queueList" class="video-list"></div>
           </section>
 
-          <section class="workspace-card">
+          <section class="card job-feed">
+            <div class="card-head">
+              <h3>后端任务</h3>
+              <span>Jobs</span>
+            </div>
+            <div id="activeJobCard" class="job-active-card"></div>
+            <div id="jobList" class="job-list"></div>
+          </section>
+
+          <section class="workspace-card" id="workspaceDetails">
             <div class="tabs">
-              <button class="tab" data-panel="workflow">Workflow</button>
+              <button class="tab" data-panel="workflow">工作流</button>
               <button class="tab active" data-panel="recognition">识别设置</button>
               <button class="tab" data-panel="translation">翻译设置</button>
               <button class="tab" data-panel="subtitle">字幕样式</button>
@@ -186,38 +203,60 @@
               <section class="workspace-panel" data-panel="workflow">
                 <div class="section-head">
                   <div>
-                    <h3>Workflow Profile</h3>
-                    <p>Choose a language workflow, subtitle output mode, prompt profile, and dataset profile.</p>
+                    <h3>工作流预设</h3>
+                    <p>选择语言方向、字幕输出模式、提示词和术语数据集；下方摘要会显示本次实际运行配置。</p>
                   </div>
-                  <button id="applyRussianWorkflowBtn" class="mini-btn" type="button">Russian Preset</button>
+                  <button id="applyRussianWorkflowBtn" class="mini-btn" type="button">套用俄文预设</button>
                 </div>
                 <div class="form-grid">
-                  <label><span>Workflow</span>
+                  <label><span>工作流</span>
                     <select id="workflow_profile"></select>
                   </label>
-                  <label><span>Subtitle Mode</span>
+                  <label><span>字幕模式</span>
                     <select id="subtitle_mode">
                       <option value="target_only">target_only</option>
                       <option value="bilingual_source_reference">bilingual_source_reference</option>
                       <option value="source_review">source_review</option>
                     </select>
                   </label>
-                  <label><span>Source Reference Label</span><input id="source_reference_label" type="text" /></label>
-                  <label><span>Prompt Profile</span><input id="prompt_profile" type="text" /></label>
-                  <label><span>Dataset Profile</span><input id="dataset_profile" type="text" /></label>
-                  <label><span>Active Pair</span><input id="workflow_pair_preview" type="text" readonly /></label>
+                  <label><span>参考层标签</span><input id="source_reference_label" type="text" /></label>
+                  <label><span>提示词 Profile</span><input id="prompt_profile" type="text" /></label>
+                  <label><span>数据集 Profile</span><input id="dataset_profile" type="text" /></label>
+                  <label><span>当前语言方向</span><input id="workflow_pair_preview" type="text" readonly /></label>
+                </div>
+                <div class="workflow-effective-card">
+                  <div class="workflow-effective-head">
+                    <h4>有效工作流摘要</h4>
+                    <span id="workflowWarningSummary"></span>
+                  </div>
+                  <div id="effectiveWorkflowSummary" class="workflow-effective-grid"></div>
+                  <div class="workflow-note">ASR 与 FFmpeg 属于不可安全中断步骤；暂停请求会在步骤开始前或结束后的安全检查点生效。</div>
+                </div>
+                <div class="workflow-help-panel">
+                  <div class="workflow-help-head">
+                    <h4>字段说明与使用范例</h4>
+                    <span>保留技术枚举值，避免保存时跑偏。</span>
+                  </div>
+                  <div class="workflow-help-grid">
+                    <div><strong>工作流</strong><p>选择语言管线预设，会更新源语言、目标语言、ASR 模型、提示词、数据集和参考层样式。例：俄文视频选 ru_to_zh_default。</p></div>
+                    <div><strong>字幕模式</strong><p>target_only 只输出中文；bilingual_source_reference 输出中文加源语参考层；source_review 用于源语校对。</p></div>
+                    <div><strong>参考层标签</strong><p>用于源语文件名和参考层身份。俄文用 ru，英文用 en。</p></div>
+                    <div><strong>提示词 Profile</strong><p>控制翻译风格和语言规则。俄译中建议 ru_zh_natural_subtitle。</p></div>
+                    <div><strong>数据集 Profile</strong><p>加载术语、QA 样例、ASR 易混词和风格例子。俄译中建议 ru_zh/general。</p></div>
+                    <div><strong>俄文范例</strong><p>ru -> zh-Hans，large-v3，Huiwen-HKHei，32，80，4，1.2，full_split。</p></div>
+                  </div>
                 </div>
                 <div class="workflow-summary-grid">
                   <div class="workflow-summary-card">
-                    <h4>Profile Notes</h4>
+                    <h4>Profile 说明</h4>
                     <p id="workflowProfileDescription"></p>
                   </div>
                   <div class="workflow-summary-card">
-                    <h4>Prompt Preview</h4>
+                    <h4>提示词预览</h4>
                     <pre id="workflowPromptPreview"></pre>
                   </div>
                   <div class="workflow-summary-card">
-                    <h4>Dataset Preview</h4>
+                    <h4>数据集预览</h4>
                     <pre id="workflowDatasetPreview"></pre>
                   </div>
                 </div>
@@ -281,6 +320,7 @@
                   <label><span>Chunk Size</span><input id="translation_chunk_size" type="number" /></label>
                   <label><span>重试次数</span><input id="translation_retries" type="number" /></label>
                   <label class="wide"><span>OpenAI Base URL</span><input id="openai_base_url" type="text" /></label>
+                  <div id="openaiRuntimeCard" class="openai-runtime-card wide"></div>
                   <label class="wide"><span>附加音频路径</span><input id="audio_override_path" type="text" readonly /></label>
                   <label class="toggle-row"><span>复用已有分段</span><input id="load_existing_segments" type="checkbox" /></label>
                   <label class="toggle-row"><span>强制重翻译已有分段</span><input id="force_retranslate_existing_segments" type="checkbox" /></label>
@@ -289,6 +329,13 @@
                   <label><span>最多修复 Span</span><input id="span_repair_max_spans" type="number" min="0" /></label>
                   <label class="toggle-row"><span>启用 AI 风格重写</span><input id="enable_ai_display_rewrite" type="checkbox" /></label>
                   <label><span>最多 AI 风格重写段数</span><input id="display_rewrite_max_ai_segments" type="number" min="0" /></label>
+                  <label><span>Entity Bootstrap Mode</span>
+                    <select id="bootstrap_entity_decisions">
+                      <option value="high_confidence_only">high_confidence_only</option>
+                      <option value="always">always</option>
+                      <option value="off">off</option>
+                    </select>
+                  </label>
                 </div>
               </section>
 
@@ -361,6 +408,7 @@
                       <label><span>参考层模式</span>
                         <select id="reference_mode">
                           <option value="full">full</option>
+                          <option value="full_split">full_split</option>
                           <option value="compact">compact</option>
                           <option value="hide_when_overflow">hide_when_overflow</option>
                         </select>
@@ -378,6 +426,7 @@
                   </div>
                   <button id="openOutputInlineBtn" class="mini-btn">在资源管理器中打开</button>
                 </div>
+                <div id="entityReviewPanel" class="entity-panel"></div>
                 <div class="output-layout">
                   <div id="projectList" class="project-list"></div>
                   <div class="preview-pane">
@@ -406,6 +455,6 @@
 
     <div id="toast" class="toast hidden"></div>
 
-    <script src="./app.js?v=20260519-stability1"></script>
+    <script src="./app.js?v=20260607-jobsync"></script>
   </body>
 </html>

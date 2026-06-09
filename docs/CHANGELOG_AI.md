@@ -54,6 +54,7 @@ This file is the dedicated update log for project changes that should remain leg
   - translated SRT
   - Chinese-only ASS
   - QA pass with warnings only
+- Installed `fontTools`, resolved the true family name of the provided 匯文港黑 font file as `Huiwen-HKHei`, and set it as the default Russian reference-layer font in the workflow profile
 
 ### Current incomplete areas
 

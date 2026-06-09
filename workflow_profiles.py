@@ -293,8 +293,14 @@ def apply_workflow_profile(config: dict[str, Any], defaults: dict[str, Any] | No
         default = defaults.get(key)
         if key not in merged or current in {None, ""} or (key in defaults and current == default):
             merged[key] = value
-    style = dict(profile.style)
-    style.update(dict(merged.get("style") or {}))
+    current_style = dict(merged.get("style") or {})
+    default_style = dict(defaults.get("style") or {})
+    style = dict(current_style)
+    for key, value in profile.style.items():
+        current = current_style.get(key)
+        default = default_style.get(key)
+        if key not in current_style or current in {None, ""} or (key in default_style and current == default):
+            style[key] = value
     if style:
         merged["style"] = style
     prompt_text = load_prompt_profile(str(merged.get("prompt_profile") or profile.prompt_profile))

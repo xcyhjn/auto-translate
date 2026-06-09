@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import unquote, urlparse
 
-from yt_dlp import YoutubeDL
-
 from .media import merge_video_with_audio, probe_media
 from .yt_dlp_config import ytdlp_auth_options_from_user_config
 
@@ -21,6 +19,17 @@ TEMP_SUFFIXES = {".part", ".ytdl", ".temp", ".tmp", ".crdownload"}
 UNSUPPORTED_DIRECT_PROTOCOLS = {"m3u8", "m3u8_native", "http_dash_segments", "f4m"}
 
 DownloadStageCallback = Callable[[str, dict], None]
+
+
+def get_youtube_dl_class():
+    try:
+        from yt_dlp import YoutubeDL
+    except ImportError as exc:
+        raise RuntimeError(
+            "yt-dlp is not installed in this Python environment. "
+            "Install it with: python -m pip install yt-dlp"
+        ) from exc
+    return YoutubeDL
 
 
 class DownloadError(RuntimeError):
@@ -267,6 +276,7 @@ class YtdlpDownloader:
         for attempt_name, options in attempts:
             emit(self.callback, "download_ytdlp_start", {"url": url, "attempt": attempt_name})
             try:
+                YoutubeDL = get_youtube_dl_class()
                 with YoutubeDL(options) as ydl:
                     ydl.extract_info(url, download=True)
             except Exception as exc:
@@ -308,6 +318,7 @@ class YtdlpDownloader:
             "skip_download": True,
         }
         try:
+            YoutubeDL = get_youtube_dl_class()
             with YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception as exc:

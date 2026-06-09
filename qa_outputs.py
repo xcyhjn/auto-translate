@@ -68,6 +68,7 @@ def build_editor_review_rows(
         severity: str,
         risk_score: int,
         source_text: str,
+        reference_text: str,
         target_text: str,
         note: str,
     ) -> None:
@@ -82,6 +83,7 @@ def build_editor_review_rows(
                 "risk_type": risk_type,
                 "risk_score": risk_score,
                 "source_text": source_text,
+                "reference_text": reference_text,
                 "target_text": target_text,
                 "note": note,
             }
@@ -105,6 +107,7 @@ def build_editor_review_rows(
                 severity=severity,
                 risk_score=int(item.get("risk_score") or span.get("score") or 0),
                 source_text=segment.source_text,
+                reference_text=segment.reference_text or segment.source_text,
                 target_text=segment.target_text or "",
                 note=note,
             )
@@ -124,6 +127,7 @@ def build_editor_review_rows(
             severity=severity,
             risk_score=len(review_actions) * 2 + (1 if item.get("changed") else 0),
             source_text=str(item.get("source_text") or ""),
+            reference_text=str(item.get("reference_text") or item.get("source_text") or ""),
             target_text=str(item.get("rewritten_target_text") or ""),
             note=", ".join(actions),
         )
@@ -152,6 +156,7 @@ def build_editor_review_rows(
                     severity=severity,
                     risk_score=risk_score,
                     source_text="",
+                    reference_text="",
                     target_text=text,
                     note=note.replace(sample_suffix, ""),
                 )
@@ -168,10 +173,12 @@ def build_editor_review_rows(
                 severity="high",
                 risk_score=10,
                 source_text=str(sample.get("source_text") or ""),
+                reference_text=str(sample.get("reference_text") or sample.get("source_text") or ""),
                 target_text=str(sample.get("target_text") or ""),
                 note=f"Translate discourse marker(s) according to context: {markers}",
             )
         for key, risk_type, severity, risk_score in (
+            ("entity_residue_samples", "entity_residue", "high", 9),
             ("literal_chinese_artifact_samples", "literal_chinese_artifact", "medium", 6),
             ("source_target_semantic_conflict_samples", "source_target_semantic_conflict", "high", 10),
         ):
@@ -179,12 +186,15 @@ def build_editor_review_rows(
                 if not isinstance(sample, dict):
                     continue
                 issues = ", ".join(str(value) for value in sample.get("issues") or [])
+                if not issues:
+                    issues = ", ".join(str(value) for value in sample.get("leaks") or [])
                 add_row(
                     segment_id=int(sample.get("segment_id") or 0),
                     risk_type=risk_type,
                     severity=severity,
                     risk_score=risk_score,
                     source_text=str(sample.get("source_text") or ""),
+                    reference_text=str(sample.get("reference_text") or sample.get("source_text") or ""),
                     target_text=str(sample.get("target_text") or ""),
                     note=issues,
                 )
@@ -269,6 +279,52 @@ def build_glossary_qa_rows(quality_metrics: dict) -> list[dict]:
                     "segment_id": sample.get("segment_id", ""),
                     "canonical": sample.get("canonical", ""),
                     "bad_alias": sample.get("bad_alias", "") or sample.get("expected_zh", ""),
+                }
+            )
+    return rows
+
+
+def build_entity_qa_rows(ass_entity_audit: dict, quality_metrics: dict) -> list[dict]:
+    rows: list[dict] = []
+    issues = ass_entity_audit.get("issues") if isinstance(ass_entity_audit, dict) else []
+    if isinstance(issues, list):
+        for item in issues:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                {
+                    "issue_type": str(item.get("issue_type") or ""),
+                    "segment_id": item.get("segment_id", ""),
+                    "entity_type": item.get("entity_type", ""),
+                    "layer": item.get("layer", ""),
+                    "style": item.get("style", ""),
+                    "start": item.get("start", ""),
+                    "end": item.get("end", ""),
+                    "text": item.get("text", ""),
+                    "canonical_en": item.get("canonical_en", ""),
+                    "canonical_native": item.get("canonical_native", ""),
+                    "line_text": item.get("line_text", ""),
+                }
+            )
+
+    translation_metrics = quality_metrics.get("translation") if isinstance(quality_metrics, dict) else {}
+    if isinstance(translation_metrics, dict):
+        for sample in translation_metrics.get("entity_residue_samples") or []:
+            if not isinstance(sample, dict):
+                continue
+            rows.append(
+                {
+                    "issue_type": "entity_residue_in_target",
+                    "segment_id": sample.get("segment_id", ""),
+                    "entity_type": "unknown",
+                    "layer": 0,
+                    "style": "Default",
+                    "start": "",
+                    "end": "",
+                    "text": ", ".join(str(value) for value in sample.get("leaks") or []),
+                    "canonical_en": "",
+                    "canonical_native": "",
+                    "line_text": str(sample.get("target_text") or ""),
                 }
             )
     return rows
