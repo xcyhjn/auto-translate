@@ -103,8 +103,12 @@ def fetch_youtube_meta(url: str, *, proxy_url: str | None = None) -> YouTubeMeta
     if proxy_url:
         options["proxy"] = proxy_url
     YoutubeDL = get_youtube_dl_class()
-    with YoutubeDL(options) as ydl:
-        info = ydl.extract_info(url, download=False)
+    try:
+        with YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:
+        proxy_note = f" via proxy {proxy_url}" if proxy_url else " without proxy"
+        raise RuntimeError(f"yt-dlp failed to read YouTube metadata{proxy_note}: {exc}") from exc
     if not isinstance(info, dict):
         raise RuntimeError("Could not read YouTube metadata.")
 
@@ -199,10 +203,14 @@ def safe_project_slug(text: str, fallback: str = "video") -> str:
 
 def download_cover(url: str, output_path: Path, *, proxy_url: str | None = None) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with httpx.Client(timeout=60.0, proxy=proxy_url or None, trust_env=not bool(proxy_url), follow_redirects=True) as client:
-        response = client.get(url)
-        response.raise_for_status()
-        output_path.write_bytes(response.content)
+    try:
+        with httpx.Client(timeout=60.0, proxy=proxy_url or None, trust_env=not bool(proxy_url), follow_redirects=True) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            output_path.write_bytes(response.content)
+    except Exception as exc:
+        proxy_note = f" via proxy {proxy_url}" if proxy_url else " without proxy"
+        raise RuntimeError(f"Could not download YouTube cover{proxy_note} from {url}: {exc}") from exc
     return output_path
 
 
@@ -251,9 +259,15 @@ def ensure_cover(meta: YouTubeMeta, output_dir: Path, *, proxy_url: str | None =
         raise RuntimeError("No YouTube cover URL could be resolved.")
     try:
         download_cover(meta.cover_url, cover_path, proxy_url=proxy_url)
-    except Exception:
+    except Exception as first_exc:
         fallback_url = build_fallback_cover_url(meta.video_id)
-        download_cover(fallback_url, cover_path, proxy_url=proxy_url)
+        try:
+            download_cover(fallback_url, cover_path, proxy_url=proxy_url)
+        except Exception as fallback_exc:
+            raise RuntimeError(
+                "Could not download YouTube cover from primary or fallback URL. "
+                f"primary_error={first_exc}; fallback_error={fallback_exc}"
+            ) from fallback_exc
     meta.cover_path = str(cover_path)
     return cover_path
 

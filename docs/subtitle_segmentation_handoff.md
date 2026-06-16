@@ -507,3 +507,50 @@ The span pretranslation path was too broad and too early:
 - Span pretranslation still writes locked translations when it succeeds. The next implementation should make it proposal-first and QA-gated before adding IDs to `locked_translation_ids`.
 - Long spans are currently downgraded to context instead of split into child span-first units. That is safer and faster for now, but not a full semantic allocation solution.
 - Existing output directories may still contain old `04a_source_spans.json` counts until the pipeline rewrites the file; runtime translation/allocation now recalculates stale files before use.
+
+## Phase 3.2 Update - Proxy / YouTube Diagnostics - 2026-06-17
+
+### Problem
+
+The web proxy test and YouTube info/cover fetch were failing without actionable diagnostics. In practice, the active config had `proxy_url` set to a YouTube video URL instead of an actual proxy endpoint, so the app was trying to use a webpage as a proxy.
+
+### Changes Made
+
+- `ui_server.py`
+  - Added `validate_proxy_url()` to reject non-proxy URLs before they reach `yt-dlp` or `httpx`.
+  - Added `proxy_connection_error()` for explicit socket-level proxy failure text.
+  - `test_proxy_connection()` now probes:
+    - the proxy socket itself
+    - `https://www.youtube.com`
+    - `https://i.ytimg.com/...`
+  - Proxy test results now include `exception_type`, `raw_error`, `active_proxy_url`, and `proxy_validation_error`.
+  - `/api/youtube-meta` and `/api/youtube-cover` now return structured error payloads with:
+    - `error`
+    - `error_detail`
+    - `operation`
+    - `proxy_url`
+    - `mode`
+    - `exception_type`
+    - `traceback`
+
+- `youtube_meta.py`
+  - Wrapped `yt-dlp` metadata fetch and cover download failures in more explicit `RuntimeError`s that mention whether a proxy was used.
+  - Cover download fallback now reports both the primary and fallback failure.
+
+- `test_proxy_youtube_diagnostics.py`
+  - Added coverage for invalid proxy URLs, unreachable proxies, and primary/fallback cover download failures.
+
+### Validation Results
+
+- `$env:PYTHONPATH='D:\'; python -m pytest test_proxy_youtube_diagnostics.py -q`
+  - `4 passed`
+- `python -m py_compile ui_server.py youtube_meta.py`
+- `node --check web\app.js`
+- Live local diagnostic with the current bad config now reports:
+  - `proxy_validation_error = Proxy URL looks like a web page, not a proxy endpoint...`
+  - `active_proxy_url = ""`
+  - direct YouTube page/image probes both returned `200`
+
+### Known Remaining Issue
+
+- The frontend still needs the proxy input corrected in the saved config. The code now blocks bad proxy values and shows a concrete error, but it will not silently fix the stored config for the user.

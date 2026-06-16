@@ -865,6 +865,32 @@ def normalize_proxy_url(value: object) -> str:
     return raw
 
 
+def validate_proxy_url(proxy_url: str) -> str:
+    if not proxy_url:
+        return ""
+    parsed = urlparse(proxy_url)
+    if parsed.scheme not in {"http", "https", "socks5", "socks5h", "socks4"}:
+        return f"Unsupported proxy scheme: {parsed.scheme or '(empty)'}"
+    if not parsed.hostname:
+        return f"Invalid proxy URL, missing host: {proxy_url}"
+    if parsed.path and parsed.path not in {"", "/"}:
+        return (
+            "Proxy URL looks like a web page, not a proxy endpoint. "
+            "Use a host:port address such as http://127.0.0.1:7890, not a YouTube video URL."
+        )
+    if parsed.query or parsed.fragment:
+        return (
+            "Proxy URL must not contain query strings or fragments. "
+            "Use a host:port address such as http://127.0.0.1:7890."
+        )
+    if parsed.port is None:
+        return (
+            "Proxy URL is missing a port. "
+            "Use a host:port address such as http://127.0.0.1:7890."
+        )
+    return ""
+
+
 def proxy_host_port(proxy_url: str) -> tuple[str, int] | None:
     try:
         parsed = urlparse(proxy_url)
@@ -888,11 +914,24 @@ def can_connect_to_proxy(proxy_url: str, *, timeout: float = 1.5) -> bool:
         return False
 
 
+def proxy_connection_error(proxy_url: str, *, timeout: float = 1.5) -> str:
+    target = proxy_host_port(proxy_url)
+    if not target:
+        return f"Invalid proxy URL: {proxy_url}"
+    try:
+        with socket.create_connection(target, timeout=timeout):
+            return ""
+    except OSError as exc:
+        return strip_ansi_codes(str(exc)) or repr(exc)
+
+
 def configured_proxy_url(config: dict | None = None) -> str:
     if config is not None:
-        return normalize_proxy_url(config.get("proxy_url"))
+        proxy_url = normalize_proxy_url(config.get("proxy_url"))
+        return "" if validate_proxy_url(proxy_url) else proxy_url
     try:
-        return normalize_proxy_url(read_config().get("proxy_url"))
+        proxy_url = normalize_proxy_url(read_config().get("proxy_url"))
+        return "" if validate_proxy_url(proxy_url) else proxy_url
     except Exception:
         return ""
 
@@ -941,6 +980,28 @@ def build_user_facing_error_message(exc: Exception) -> str:
         )
 
     return raw_message or "任务执行失败。"
+
+
+def build_error_payload(exc: Exception, *, proxy_url: str = "", operation: str = "") -> dict:
+    user_message = build_user_facing_error_message(exc)
+    raw_error = strip_ansi_codes(str(exc))
+    detail_lines = [
+        user_message,
+        f"operation: {operation}" if operation else "",
+        f"mode: {'proxy' if proxy_url else 'direct'}",
+        f"proxy: {proxy_url}" if proxy_url else "",
+        f"exception: {type(exc).__name__}",
+        f"detail: {raw_error}" if raw_error and raw_error != user_message else "",
+    ]
+    return {
+        "error": "\n".join(line for line in detail_lines if line),
+        "error_detail": raw_error,
+        "exception_type": type(exc).__name__,
+        "operation": operation,
+        "proxy_url": proxy_url,
+        "mode": "proxy" if proxy_url else "direct",
+        "traceback": traceback.format_exc(),
+    }
 
 
 def set_state_error(message: str, traceback_text: str) -> None:
@@ -1120,20 +1181,26 @@ def resolve_input_video_path(path_or_name: str) -> Path:
 
 
 def test_proxy_connection() -> dict:
-    proxy_url = get_proxy_url()
+    configured_raw_proxy_url = normalize_proxy_url(read_config().get("proxy_url"))
+    proxy_validation_error = validate_proxy_url(configured_raw_proxy_url)
+    proxy_url = "" if proxy_validation_error else configured_raw_proxy_url
     started_at = datetime.now(timezone.utc)
     targets = []
-    if proxy_url:
-        targets.append(("proxy", proxy_url))
+    if configured_raw_proxy_url:
+        targets.append(("proxy", configured_raw_proxy_url))
     targets.append(("youtube", "https://www.youtube.com"))
+    targets.append(("youtube_image", "https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg"))
     results = []
 
     for name, url in targets:
         entry = {"name": name, "url": url, "ok": False}
         try:
             if name == "proxy":
-                if not can_connect_to_proxy(proxy_url):
-                    raise ConnectionError(f"Proxy is not listening: {proxy_url}")
+                if proxy_validation_error:
+                    raise ValueError(proxy_validation_error)
+                proxy_error = proxy_connection_error(proxy_url)
+                if proxy_error:
+                    raise ConnectionError(f"Proxy is not listening: {proxy_url}; {proxy_error}")
                 entry["ok"] = True
                 entry["status_code"] = "listening"
                 results.append(entry)
@@ -1149,9 +1216,14 @@ def test_proxy_connection() -> dict:
                     response = client.get(url)
             entry["ok"] = True
             entry["status_code"] = response.status_code
+            entry["final_url"] = str(response.url)
         except Exception as exc:
+            raw_error = strip_ansi_codes(str(exc))
             entry["error"] = build_user_facing_error_message(exc)
-            entry["raw_error"] = strip_ansi_codes(str(exc))
+            if raw_error and raw_error != entry["error"]:
+                entry["error"] = f"{entry['error']} | {type(exc).__name__}: {raw_error}"
+            entry["raw_error"] = raw_error
+            entry["exception_type"] = type(exc).__name__
         results.append(entry)
 
     overall_ok = all(item.get("ok") for item in results)
@@ -1159,7 +1231,9 @@ def test_proxy_connection() -> dict:
     return {
         "ok": overall_ok,
         "checked_at": checked_at,
-        "proxy_url": proxy_url,
+        "proxy_url": configured_raw_proxy_url,
+        "active_proxy_url": proxy_url,
+        "proxy_validation_error": proxy_validation_error,
         "mode": "proxy" if proxy_url else "direct",
         "results": results,
     }
@@ -2805,11 +2879,31 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                     self._json_response({"ok": False, "error": "url required"}, status=400)
                     return
                 config = normalize_config({**read_config(), **payload.get("config", {})})
+                configured_raw_proxy_url = normalize_proxy_url(config.get("proxy_url"))
+                proxy_validation_error = validate_proxy_url(configured_raw_proxy_url)
+                if proxy_validation_error:
+                    exc = ValueError(proxy_validation_error)
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                proxy_url=configured_raw_proxy_url,
+                                operation="youtube_meta_proxy_validation",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                proxy_url = configured_proxy_url(config)
                 try:
-                    manifest = youtube_info_job(url, proxy_url=configured_proxy_url(config))
+                    manifest = youtube_info_job(url, proxy_url=proxy_url)
                 except Exception as exc:
                     append_error_log(traceback.format_exc())
-                    self._json_response({"ok": False, "error": build_user_facing_error_message(exc)}, status=502)
+                    self._json_response(
+                        {"ok": False, **build_error_payload(exc, proxy_url=proxy_url, operation="youtube_meta")},
+                        status=502,
+                    )
                     return
                 self._json_response({"ok": True, **manifest})
                 return
@@ -2820,11 +2914,31 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                     self._json_response({"ok": False, "error": "url required"}, status=400)
                     return
                 config = normalize_config({**read_config(), **payload.get("config", {})})
+                configured_raw_proxy_url = normalize_proxy_url(config.get("proxy_url"))
+                proxy_validation_error = validate_proxy_url(configured_raw_proxy_url)
+                if proxy_validation_error:
+                    exc = ValueError(proxy_validation_error)
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                proxy_url=configured_raw_proxy_url,
+                                operation="youtube_cover_proxy_validation",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                proxy_url = configured_proxy_url(config)
                 try:
-                    manifest = youtube_assets_job(url, download_cover_only=True, proxy_url=configured_proxy_url(config))
+                    manifest = youtube_assets_job(url, download_cover_only=True, proxy_url=proxy_url)
                 except Exception as exc:
                     append_error_log(traceback.format_exc())
-                    self._json_response({"ok": False, "error": build_user_facing_error_message(exc)}, status=502)
+                    self._json_response(
+                        {"ok": False, **build_error_payload(exc, proxy_url=proxy_url, operation="youtube_cover")},
+                        status=502,
+                    )
                     return
                 self._json_response({"ok": True, **manifest})
                 return

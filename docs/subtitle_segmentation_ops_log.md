@@ -630,3 +630,42 @@ Next:
 
 - Convert span pretranslation outputs from immediate locks into QA-gated proposals.
 - Add real child-span splitting for long spans if a later workflow needs span-first translation instead of context-only handling.
+
+## 2026-06-17 08:45 +08:00 - Proxy/Youtube Diagnostics
+
+Hypothesis:
+
+- The UI proxy test and YouTube cover/info fetch were failing without enough detail because proxy validation and downstream errors were too opaque.
+
+What:
+
+- Inspected `ui_server.py`, `youtube_meta.py`, and the frontend YouTube/proxy status render path.
+- Found the active `ui_config.json` had `proxy_url` set to a YouTube video URL: `https://www.youtube.com/watch?v=VWPkTdC488o`.
+- Added proxy URL validation so web-page URLs, missing ports, query strings, and unsupported schemes are rejected before they are passed to `yt-dlp` or `httpx`.
+- Enhanced proxy diagnostics:
+  - reports proxy socket errors
+  - probes both `https://www.youtube.com` and `https://i.ytimg.com/...`
+  - includes `exception_type`, `raw_error`, `active_proxy_url`, and `proxy_validation_error`
+- Enhanced YouTube info/cover API errors with operation, proxy mode, proxy URL, exception type, raw detail, and traceback.
+- Enhanced `youtube_meta.py` errors so `yt-dlp` and cover download failures include whether a proxy was used.
+- Cover fallback now reports both the primary thumbnail failure and fallback URL failure.
+- Added `test_proxy_youtube_diagnostics.py`.
+
+Validation:
+
+- `$env:PYTHONPATH='D:\'; python -m pytest test_proxy_youtube_diagnostics.py -q`
+  - `4 passed`
+- `python -m py_compile ui_server.py youtube_meta.py`
+- `node --check web\app.js`
+- Live local proxy diagnostic with the current bad config now reports:
+  - `proxy_validation_error = Proxy URL looks like a web page, not a proxy endpoint...`
+  - `active_proxy_url = ""`
+  - direct YouTube page/image probes returned `200`
+
+Rollback:
+
+- None.
+
+Next:
+
+- In the UI, replace the proxy field value with an actual proxy endpoint such as `http://127.0.0.1:7890`.
