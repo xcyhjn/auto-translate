@@ -47,6 +47,15 @@ const state = {
     missing: [],
     errors: [],
   },
+  seenListItems: {
+    videos: new Set(),
+    stage: new Set(),
+    queue: new Set(),
+    jobs: new Set(),
+    phases: new Set(),
+    projects: new Set(),
+    statusCards: new Set(),
+  },
 };
 
 const DEFAULT_UI_CONFIG = {
@@ -265,9 +274,113 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function setRunState(stateText) {
+const BUTTON_SVGS = {
+  play: '<path d="M8 5v14l11-7z"/>',
+  pause: '<path d="M7 5v14M17 5v14"/>',
+  folder: '<path d="M3 7h6l2 2h10v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V6a2 2 0 0 1 2-2h4l2 2"/>',
+  save: '<path d="M5 4h11l3 3v13H5z"/><path d="M7 4v6h8V4"/><path d="M8 20h8"/>',
+  upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>',
+  download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
+  copy: '<rect x="9" y="9" width="10" height="10" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/>',
+  alert: '<path d="M10.3 3.5 1.7 18a2 2 0 0 0 1.7 3h17.2a2 2 0 0 0 1.7-3L13.7 3.5a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.9-3"/><path d="M4 5v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3"/><path d="M20 19v-4h-4"/>',
+  trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v5M14 11v5"/>',
+  scan: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+  image: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 15 3-3 2 2 3-4 4 5"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="7" cy="18" r="3"/><circle cx="19" cy="16" r="3"/>',
+  spark: '<path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+};
+
+function buttonSvg(name) {
+  const path = BUTTON_SVGS[name];
+  if (!path) return "";
+  return `<svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${path}</svg>`;
+}
+
+function setButtonContent(target, iconName, label) {
+  const node = typeof target === "string" ? el(target) : target;
+  if (!node) return;
+  const text = label ?? node.dataset.label ?? node.textContent.trim();
+  if (!node.dataset.label) node.dataset.label = text;
+  node.classList.add("icon-btn");
+  node.innerHTML = `${buttonSvg(iconName)}<span class="button-label">${escapeHtml(text)}</span>`;
+}
+
+function decorateStaticButtons() {
+  [
+    ["runBtn", "play"],
+    ["previewBtn", "play"],
+    ["pauseFlowBtn", "pause"],
+    ["resumeFlowBtn", "play"],
+    ["cancelJobBtn", "alert"],
+    ["pickInputBtn", "upload"],
+    ["pickAudioBtn", "music"],
+    ["openOutputBtn", "folder"],
+    ["clearQueueBtn", "trash"],
+    ["saveConfigBtn", "save"],
+    ["saveConfigBottomBtn", "save"],
+    ["pickInputInlineBtn", "upload"],
+    ["pickAudioInlineBtn", "music"],
+    ["openYoutubeOutputBtn", "folder"],
+    ["openOutputInlineBtn", "folder"],
+    ["openInputBtn", "folder"],
+    ["scanInputBtn", "scan"],
+    ["downloadOnlyBtn", "download"],
+    ["downloadAndRunBtn", "play"],
+    ["testProxyBtn", "alert"],
+    ["checkIdmBtn", "scan"],
+    ["fetchYoutubeInfoBtn", "download"],
+    ["fetchYoutubeCoverBtn", "image"],
+    ["rebuildPaddedCoverBtn", "refresh"],
+    ["copyErrorBtn", "copy"],
+    ["applyRussianWorkflowBtn", "spark"],
+    ["learnStyleBtn", "spark"],
+    ["reburnFromInputBtn", "refresh"],
+    ["reburnFromAssBtn", "refresh"],
+  ].forEach(([id, icon]) => setButtonContent(id, icon));
+}
+
+function revealNode(node, index = 0) {
+  if (!node) return;
+  node.classList.add("list-enter");
+  node.style.transitionDelay = `${Math.min(index, 8) * 40}ms`;
+  requestAnimationFrame(() => node.classList.add("is-visible"));
+}
+
+function revealNewNode(group, key, node, index = 0) {
+  const bucket = state.seenListItems[group];
+  if (!bucket || !key) {
+    revealNode(node, index);
+    return;
+  }
+  if (bucket.has(key)) {
+    node.classList.add("is-visible");
+    return;
+  }
+  bucket.add(key);
+  revealNode(node, index);
+}
+
+function revealChildren(root, selector = ".list-enter") {
+  if (!root) return;
+  root.querySelectorAll(selector).forEach((node, index) => revealNode(node, index));
+}
+
+function revealMotionNodes() {
+  const nodes = Array.from(document.querySelectorAll(".motion-enter"));
+  nodes.slice(0, 8).forEach((node, index) => {
+    node.style.transitionDelay = `${index * 40}ms`;
+    requestAnimationFrame(() => node.classList.add("is-visible"));
+  });
+}
+
+function setRunState(stateText, runState = "idle") {
   el("serverState").textContent = stateText;
   el("runStatePill").textContent = stateText;
+  const commandState = el("commandRunState");
+  if (commandState) commandState.textContent = stateText;
+  document.body.dataset.runState = runState || "idle";
 }
 
 function setTaskButtonsDisabled(disabled) {
@@ -281,6 +394,17 @@ function setTaskButtonsDisabled(disabled) {
 
 function taskIsBusy(runtime) {
   return !["idle", "complete", "error", "recovered_state"].includes(String(runtime?.stage_key || "idle"));
+}
+
+function normalizeRunState(runtime, lastError = null) {
+  const flow = state.flowControl || {};
+  if (lastError?.message) return "error";
+  if (flow.paused) return "paused";
+  if (flow.pause_requested) return "running";
+  const key = String(runtime?.stage_key || "idle");
+  if (["error", "failed"].includes(key)) return "error";
+  if (["idle", "complete", "recovered_state"].includes(key)) return key;
+  return "running";
 }
 
 function jobIsActive(job = state.activeJob) {
@@ -386,9 +510,20 @@ function formatSummaryValue(key, value) {
   return String(value);
 }
 
-function showToast(message) {
+function inferToastType(message, type = "") {
+  if (type) return type;
+  const text = String(message || "");
+  if (/失败|错误|报错|未通过|不可用/.test(text)) return "error";
+  if (/警告|风险|请先|需要|未保存/.test(text)) return "warn";
+  if (/已|成功|通过|完成|保存|复制|添加|获取|开始/.test(text)) return "success";
+  return "info";
+}
+
+function showToast(message, type = "") {
   const toast = el("toast");
   toast.textContent = message;
+  toast.classList.remove("success", "warn", "error", "info");
+  toast.classList.add(inferToastType(message, type));
   toast.classList.remove("hidden");
   toast.classList.add("show");
   clearTimeout(showToast.timer);
@@ -404,11 +539,15 @@ function renderConfigSaveState() {
   if (state.configSaveState === "saving") {
     node.textContent = "正在保存当前配置";
     node.className = "config-save-state saving";
+    const commandStateSaving = el("commandConfigState");
+    if (commandStateSaving) commandStateSaving.textContent = "正在保存当前配置";
     return;
   }
   const dirty = state.configSaveState === "dirty";
   node.textContent = dirty ? "当前配置未保存" : "当前配置已保存";
   node.className = `config-save-state ${dirty ? "dirty" : "saved"}`;
+  const commandState = el("commandConfigState");
+  if (commandState) commandState.textContent = node.textContent;
 }
 
 async function copyText(text) {
@@ -874,7 +1013,7 @@ function renderOpenAiRuntimeStatus() {
         <strong>OpenAI 运行环境</strong>
         <span>网页只显示状态；API Key 不会以明文返回前端。</span>
       </div>
-      <button id="refreshOpenAiRuntimeBtn" type="button">重新检测</button>
+      <button id="refreshOpenAiRuntimeBtn" type="button" class="mini-btn icon-btn">${buttonSvg("refresh")}<span class="button-label">重新检测</span></button>
     </div>
     <div class="openai-runtime-row ${apiKey.available ? "ok" : "missing"}">
       <span>API Key</span>
@@ -980,6 +1119,8 @@ function syncSelectedVideo(videos) {
     state.selectedMediaInfo = null;
     el("selectedVideoName").textContent = "未选择视频";
     el("selectedVideoMeta").textContent = "请添加视频后开始处理。";
+    const commandName = el("commandSelectedVideoName");
+    if (commandName) commandName.textContent = "未选择视频";
     renderMediaAlert();
     renderInputAssStatus();
     return;
@@ -991,6 +1132,8 @@ function syncSelectedVideo(videos) {
   state.selectedVideoProjectPath = state.selectedVideoProject?.path || null;
   el("selectedVideoName").textContent = state.selectedVideo.name;
   el("selectedVideoMeta").textContent = `输入路径：${state.selectedVideo.path}`;
+  const commandName = el("commandSelectedVideoName");
+  if (commandName) commandName.textContent = state.selectedVideo.name;
   if (state.selectedVideo.path !== previousPath || !state.selectedMediaInfo) {
     inspectSelectedVideo();
   }
@@ -1032,10 +1175,12 @@ function renderVideos(videos) {
       scrollToWorkspaceDetails();
     });
     root.appendChild(item);
+    revealNewNode("videos", video.path || video.name, item, root.children.length - 1);
   });
 
   if (!videos.length) {
     root.innerHTML = `<div class="stage-item empty-card"><strong>暂无输入视频</strong><div class="meta-row"><span>点击“添加 Input”或下载视频后会出现在这里。</span></div></div>`;
+    revealChildren(root, ".stage-item");
   }
 }
 
@@ -1061,9 +1206,11 @@ function renderStageFeed(history) {
       <div class="summary-grid">${detail || `<div class="summary-row full"><span>摘要</span><strong>本阶段没有额外结构化字段。</strong></div>`}</div>
     `;
     root.appendChild(node);
+    revealNewNode("stage", `${entry.stage || ""}:${entry.title || ""}:${entry.description || ""}`, node, root.children.length - 1);
   });
   if (!entries.length) {
     root.innerHTML = `<div class="stage-item empty-card"><strong>暂无运行日志</strong><div class="meta-row"><span>流程启动后会在这里展示结构化阶段摘要。</span></div></div>`;
+    revealChildren(root, ".stage-item");
   }
 }
 
@@ -1079,9 +1226,11 @@ function renderQueue(queue) {
       <div class="path-note">${item.path}</div>
     `;
     root.appendChild(node);
+    revealNewNode("queue", item.path || item.name || String(index), node, root.children.length - 1);
   });
   if (!queue || !queue.length) {
     root.innerHTML = `<div class="stage-item empty-card"><strong>队列为空</strong><div class="meta-row"><span>下载到队列或添加 Input 后会显示在这里。</span></div></div>`;
+    revealChildren(root, ".stage-item");
   }
 }
 
@@ -1154,10 +1303,12 @@ function renderJobs(jobs, activeJob) {
       <div class="path-note">${escapeHtml(job.current_stage || "")}${job.updated_at ? ` · ${escapeHtml(formatDateTime(job.updated_at))}` : ""}</div>
     `;
     listRoot.appendChild(node);
+    revealNewNode("jobs", job.id || `${job.input_path || ""}:${job.updated_at || ""}`, node, listRoot.children.length - 1);
   });
 
   if (!visibleJobs.length) {
     listRoot.innerHTML = `<div class="stage-item empty-card"><strong>暂无历史任务</strong><div class="meta-row"><span>后端 JobStore 记录会在任务创建后出现在这里。</span></div></div>`;
+    revealChildren(listRoot, ".stage-item");
   }
 }
 
@@ -1247,6 +1398,7 @@ function renderPhaseStatus(phaseStatus) {
       </div>
     `;
     root.appendChild(card);
+    revealNewNode("phases", key, card, root.children.length - 1);
   });
 
   renderChunkPanel(phaseStatus?.translation);
@@ -1685,10 +1837,12 @@ function renderProjects(projects) {
 
     if (expanded) wrapper.appendChild(fileList);
     list.appendChild(wrapper);
+    revealNewNode("projects", project.path || project.name, wrapper, list.children.length - 1);
   });
 
   if (!projects.length) {
     list.innerHTML = `<div class="stage-item empty-card"><strong>暂无输出项目</strong><div class="meta-row"><span>运行流程后，项目产物会显示在这里。</span></div></div>`;
+    revealChildren(list, ".stage-item");
   }
 }
 
@@ -1733,6 +1887,7 @@ function renderProxyStatus() {
         .join("")}
     </div>
   `;
+  revealNewNode("statusCards", `proxy:${proxy.ok}:${proxy.checked_at || ""}`, card);
 }
 
 function renderIdmStatus() {
@@ -1756,6 +1911,7 @@ function renderIdmStatus() {
       <div class="proxy-status-row"><span>目录存在</span><strong>${idm.output_dir_exists ? "是" : "否"}</strong></div>
     </div>
   `;
+  revealNewNode("statusCards", `idm:${idm.ok}:${idm.resolved_path || idm.configured_path || ""}`, card);
 }
 
 function renderYoutubeMeta() {
@@ -1784,6 +1940,7 @@ function renderYoutubeMeta() {
     cover.classList.add("hidden");
     cover.removeAttribute("src");
     info.textContent = meta.error;
+    revealNewNode("statusCards", `youtube:error:${meta.error || ""}`, card);
     return;
   }
 
@@ -1808,6 +1965,7 @@ function renderYoutubeMeta() {
     cover.src = meta.cover_url;
     cover.classList.remove("hidden");
   }
+  revealNewNode("statusCards", `youtube:ok:${meta.title || meta.cover_path || meta.cover_url || ""}`, card);
 }
 
 function renderRuntime(runtime, lastError) {
@@ -1820,7 +1978,7 @@ function renderRuntime(runtime, lastError) {
       ? "已收到暂停请求；ASR/FFmpeg 等不可安全中断步骤会在当前步骤结束后暂停。"
       : "";
   const description = flowDescription || runtime?.recovery?.message || lastError?.message || runtime?.description || "等待开始新的任务。";
-  setRunState(title);
+  setRunState(title, normalizeRunState(runtime, lastError));
   el("currentStageLabel").textContent = `当前阶段：${title}`;
   el("currentStageDescription").textContent = description;
   el("overallProgressLabel").textContent = `总进度 ${progress}%`;
@@ -2107,13 +2265,32 @@ function startPolling() {
 }
 
 function bindTabs() {
+  const switchPanel = (panel) => {
+    if (!panel) return;
+    document.querySelectorAll(".tab").forEach((node) => {
+      const active = node.dataset.panel === panel;
+      node.classList.toggle("active", active);
+      node.setAttribute("aria-selected", active ? "true" : "false");
+      if (active) node.setAttribute("aria-current", "page");
+      else node.removeAttribute("aria-current");
+    });
+    document.querySelectorAll(".nav-item").forEach((node) => {
+      const active = node.dataset.panel === panel;
+      node.classList.toggle("active", active);
+      if (active) node.setAttribute("aria-current", "page");
+      else node.removeAttribute("aria-current");
+    });
+    document.querySelectorAll(".workspace-panel").forEach((node) => {
+      node.classList.toggle("active", node.dataset.panel === panel);
+    });
+  };
+
   document.querySelectorAll(".tab, .nav-item").forEach((btn) => {
     btn.addEventListener("click", () => {
       const panel = btn.dataset.panel;
       if (!panel) return;
-      document.querySelectorAll(".tab").forEach((node) => node.classList.toggle("active", node.dataset.panel === panel));
-      document.querySelectorAll(".nav-item").forEach((node) => node.classList.toggle("active", node.dataset.panel === panel));
-      document.querySelectorAll(".workspace-panel").forEach((node) => node.classList.toggle("active", node.dataset.panel === panel));
+      switchPanel(panel);
+      scrollToWorkspaceDetails();
     });
   });
 }
@@ -2531,6 +2708,8 @@ function bindConfigInputs() {
 bindTabs();
 bindSubtitleStyleControls();
 bindConfigInputs();
+decorateStaticButtons();
 bindActions();
 renderConfigSaveState();
+revealMotionNodes();
 bootstrap();
