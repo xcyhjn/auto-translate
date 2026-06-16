@@ -35,6 +35,12 @@ class SubtitleRules:
     strong_pause_split_threshold: float = 1.2
     sentence_split_min_chars: int = 8
     max_internal_silence: float = 1.2
+    sentence_boundary_split_gap: float = 0.22
+    sentence_boundary_min_next_words: int = 2
+    orphan_word_threshold: int = 5
+    orphan_duration_threshold: float = 1.6
+    display_overflow_tolerance: float = 1.35
+    complete_sentence_duration_tolerance: float = 0.45
 
 
 @dataclass(slots=True)

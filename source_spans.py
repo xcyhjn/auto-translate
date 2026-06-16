@@ -22,6 +22,12 @@ MEDIUM_JOIN_GAP = 0.75
 LONG_SOURCE_CHARS = 120
 COMPLEX_SOURCE_COMMAS = 2
 COMMA_RE = re.compile(r"[,;:]")
+INTERNAL_SENTENCE_RE = re.compile(r"(?<!\b[ap])(?<!\b[mM])(?<!\bMr)(?<!\bDr)([.!?])\s+(?=[A-Z0-9])")
+LATIN_WORD_COUNT_RE = re.compile(r"[A-Za-z0-9']+")
+
+
+def source_word_count(text: str) -> int:
+    return len(LATIN_WORD_COUNT_RE.findall(text or ""))
 
 
 def segment_gap(left: Segment, right: Segment) -> float:
@@ -39,6 +45,10 @@ def source_segment_reasons(segment: Segment, previous: Segment | None, following
         reasons.append("ends_with_function_word")
     if not ends_with_terminal(text):
         reasons.append("open_clause")
+    if source_word_count(text) <= 8 and not ends_with_terminal(text):
+        reasons.append("short_open_fragment")
+    if INTERNAL_SENTENCE_RE.search(text):
+        reasons.append("internal_sentence_boundary")
     if suspicious_source_words(text):
         reasons.append("suspicious_asr_word")
     source_asr_suspicions = find_source_asr_suspicions(
@@ -73,6 +83,8 @@ def should_join(current: Segment, following: Segment, current_reasons: set[str],
     if gap <= MEDIUM_JOIN_GAP and (
         "ends_with_function_word" in current_reasons
         or "starts_with_continuation" in following_reasons
+        or "short_open_fragment" in current_reasons
+        or "short_open_fragment" in following_reasons
         or "tight_next_open_clause" in current_reasons
     ):
         return True
@@ -91,9 +103,12 @@ def span_strategy(reason_counts: Counter[str], source_joined: str, segment_count
     if segment_count >= 2 and (
         reason_counts.get("starts_with_continuation")
         or reason_counts.get("ends_with_function_word")
+        or reason_counts.get("short_open_fragment")
         or reason_counts.get("open_clause", 0) >= 2
     ):
         return "span_first"
+    if reason_counts.get("internal_sentence_boundary"):
+        return "span_context"
     if len(source_joined) >= LONG_SOURCE_CHARS or source_joined.count(",") >= COMPLEX_SOURCE_COMMAS:
         return "span_context"
     return "normal"
@@ -114,6 +129,8 @@ def build_source_span(segments: list[Segment], start: int, end: int, reasons_by_
         + sum(int(count) * 5 for reason, count in reason_counts.items() if str(reason).startswith("source_asr_"))
         + reason_counts.get("repeated_short_phrase", 0) * 3
         + reason_counts.get("ends_with_function_word", 0) * 3
+        + reason_counts.get("short_open_fragment", 0) * 3
+        + reason_counts.get("internal_sentence_boundary", 0) * 2
         + reason_counts.get("starts_with_continuation", 0) * 2
         + reason_counts.get("open_clause", 0)
         + max(0, len(source_joined) - LONG_SOURCE_CHARS) // 30
@@ -173,6 +190,8 @@ def detect_source_spans(segments: list[Segment], *, max_span_size: int = MAX_SOU
                 "suspicious_asr_word" in reasons
                 or any(reason.startswith("source_asr_") for reason in reasons)
                 or "repeated_short_phrase" in reasons
+                or "short_open_fragment" in reasons
+                or "internal_sentence_boundary" in reasons
                 or len(text) >= LONG_SOURCE_CHARS
                 or text.count(",") >= COMPLEX_SOURCE_COMMAS
             ):
