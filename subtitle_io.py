@@ -737,6 +737,12 @@ def build_chinese_groups_for_english(text: str, english_groups: list[str]) -> li
     target_count = len(english_groups)
     if not base_chunks:
         return []
+    if len(base_chunks) < target_count and target_count > 1:
+        shortest_chunk = min(visible_text_length(chunk) for chunk in base_chunks)
+        if len(base_chunks) == 1 and visible_text_length(base_chunks[0]) <= max(12, target_count * 5):
+            return []
+        if shortest_chunk <= 3:
+            return []
 
     while len(base_chunks) < target_count:
         split_index = max(range(len(base_chunks)), key=lambda idx: visible_text_length(base_chunks[idx]))
@@ -956,6 +962,62 @@ def prepare_bilingual_ass_segments(
         debug_rows.append(debug_row)
 
     return prepared, debug_rows
+
+
+def write_bilingual_ass_from_display_cues(
+    cues: list[DisplayCue],
+    output_path: str | Path,
+    style: BilingualSubtitleStyle | None = None,
+    *,
+    reference_lang: str = "en",
+) -> None:
+    ensure_parent(output_path)
+    if style is None:
+        style = BilingualSubtitleStyle()
+    zh_primary = ass_color(style.zh_primary_color, style.zh_primary_opacity, fallback="#FFF2A6")
+    zh_outline = ass_color(style.zh_outline_color, style.zh_outline_opacity, fallback="#202020")
+    zh_shadow = ass_color(style.zh_shadow_color, style.zh_shadow_opacity, fallback="#000000")
+    zh_outline_width = clamp_float(style.zh_outline_width, 0.0, 12.0, 1.8)
+    zh_shadow_depth = clamp_float(style.zh_shadow_depth, 0.0, 12.0, 0.4)
+
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+YCbCr Matrix: TV.709
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,0,0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
+Style: EnglishSmall,{style.en_font_name},{style.en_font_size},&H00E8E8E8,&H000000FF,&H5A202020,&HA6000000,0,0,0,0,100,100,0,0,1,1.2,0.3,2,{style.en_margin_l},{style.en_margin_r},{style.en_margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    lines: list[str] = [header.rstrip()]
+    for cue in sorted(cues, key=lambda item: (item.start, item.end)):
+        start = format_ass_timestamp(cue.start)
+        end = format_ass_timestamp(cue.end)
+
+        if cue.zh_text and contains_chinese(cue.zh_text):
+            zh_text = escape_ass_text(
+                wrap_chinese_text(
+                    cue.zh_text,
+                    trigger_chars=style.zh_wrap_trigger_chars,
+                    max_chars=style.zh_max_chars_per_line,
+                    max_lines=style.zh_max_lines,
+                )
+            )
+            lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{zh_text}")
+
+        en_text = escape_ass_text(normalize_reference_text(cue.en_text, lang=reference_lang))
+        if en_text:
+            lines.append(f"Dialogue: 1,{start},{end},EnglishSmall,,0,0,0,,{en_text}")
+
+    Path(output_path).write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
 
 
 def build_alignment_debug(

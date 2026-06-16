@@ -348,7 +348,11 @@
                   <label class="toggle-row"><span>强制重翻译已有分段</span><input id="force_retranslate_existing_segments" type="checkbox" /></label>
                   <label class="toggle-row"><span>只输出到 ASS</span><input id="skip_burn" type="checkbox" /></label>
                   <label class="toggle-row"><span>启用难句 AI 修复</span><input id="repair_high_risk_spans" type="checkbox" /></label>
+                  <label><span>最多 Span 预翻译</span><input id="span_translation_max_spans" type="number" min="0" /></label>
                   <label><span>最多修复 Span</span><input id="span_repair_max_spans" type="number" min="0" /></label>
+                  <label class="toggle-row"><span>启用中文语义分配</span><input id="semantic_zh_allocation_enabled" type="checkbox" /></label>
+                  <label><span>最多语义分配 Span</span><input id="semantic_zh_allocation_max_spans" type="number" min="0" /></label>
+                  <label class="toggle-row"><span>短完整句合屏</span><input id="short_complete_sentence_display_grouping" type="checkbox" /></label>
                   <label class="toggle-row"><span>启用 AI 风格重写</span><input id="enable_ai_display_rewrite" type="checkbox" /></label>
                   <label><span>最多 AI 风格重写段数</span><input id="display_rewrite_max_ai_segments" type="number" min="0" /></label>
                   <label><span>Entity Bootstrap Mode</span>
@@ -448,6 +452,7 @@
                   </div>
                   <button id="openOutputInlineBtn" class="mini-btn">在资源管理器中打开</button>
                 </div>
+                <div id="segmentationReviewPanel" class="entity-panel"></div>
                 <div id="entityReviewPanel" class="entity-panel"></div>
                 <div class="output-layout">
                   <div id="projectList" class="project-list"></div>

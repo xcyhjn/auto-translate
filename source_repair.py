@@ -11,6 +11,15 @@ from .text_quality import ASMR_PET_CONTEXT_RE
 
 WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9'.-]*")
 ASR_REPAIR_CONTEXT_RADIUS = 2
+OPEN_ENDED_FRAGMENT_RE = re.compile(
+    r"\b(?:pinching his skin|suddenly|and then|but then|what if|you know|i mean)\b",
+    re.IGNORECASE,
+)
+TRUNCATED_CONTINUATION_RE = re.compile(r"(?:\.{3,}|[a-z]\.)\s*(?:[A-Z][a-z]+|[A-Z]{2,}|[iI])")
+SAFE_ABBREVIATION_BREAK_RE = re.compile(
+    r"\b(?:a\.m|p\.m|mr|mrs|ms|dr|prof|sr|jr|st|vs|e\.g|i\.e)\.\s*(?:[A-Z][a-z]+|[A-Z]{2,}|[iI])",
+    re.IGNORECASE,
+)
 
 
 def source_context_text(segments: list[Segment], index: int, *, radius: int = ASR_REPAIR_CONTEXT_RADIUS) -> str:
@@ -94,6 +103,54 @@ def repair_builtin_asr_text(text: str, *, context_text: str = "") -> tuple[str, 
             )
 
     return repaired, repairs
+
+
+def detect_source_repair_candidates(segment: Segment, *, context_text: str = "") -> list[dict]:
+    text = segment.source_text or ""
+    lowered = text.lower()
+    candidates: list[dict] = []
+
+    if TRUNCATED_CONTINUATION_RE.search(text) and not SAFE_ABBREVIATION_BREAK_RE.search(text):
+        candidates.append(
+            {
+                "reason": "truncated_continuation",
+                "confidence": 0.82,
+                "note": "Possible sentence break inside a source cue.",
+            }
+        )
+    if OPEN_ENDED_FRAGMENT_RE.search(lowered):
+        candidates.append(
+            {
+                "reason": "open_ended_fragment",
+                "confidence": 0.72,
+                "note": "Source cue looks like a short or dangling fragment.",
+            }
+        )
+    if text.endswith("...") or text.endswith("…"):
+        candidates.append(
+            {
+                "reason": "ellipsis_tail",
+                "confidence": 0.68,
+                "note": "Source cue ends with an unfinished ellipsis.",
+            }
+        )
+    if text and text[:1].islower() and context_text:
+        candidates.append(
+            {
+                "reason": "lowercase_continuation",
+                "confidence": 0.58,
+                "note": "Source cue may continue the previous segment.",
+            }
+        )
+    if re.search(r"\b(?:it|he|she|they|uri)\b\s*\.\s*[A-Z]", text):
+        candidates.append(
+            {
+                "reason": "punctuated_mid_sentence_break",
+                "confidence": 0.84,
+                "note": "Likely sentence break inserted inside a clause.",
+            }
+        )
+    return candidates
 
 
 def load_source_repair_rules(glossary_path: str | Path | None) -> list[dict]:
@@ -181,12 +238,30 @@ def repair_source_segments(
 ) -> dict:
     rules = load_source_repair_rules(glossary_path)
     repairs: list[dict] = []
+    candidates: list[dict] = []
     rule_hits: Counter[str] = Counter()
+    review_count = 0
 
     for index, segment in enumerate(segments):
         original_text = segment.source_text or ""
         repaired_text = original_text
         segment_repairs: list[dict] = []
+        candidate_items = detect_source_repair_candidates(
+            segment,
+            context_text=source_context_text(segments, index),
+        )
+        if candidate_items:
+            if any(float(candidate.get("confidence") or 0.0) >= 0.8 for candidate in candidate_items):
+                review_count += 1
+            candidates.append(
+                {
+                    "segment_id": segment.id,
+                    "start": segment.start,
+                    "end": segment.end,
+                    "source_text": original_text,
+                    "candidates": candidate_items,
+                }
+            )
         repaired_text, builtin_repairs = repair_builtin_asr_text(
             repaired_text,
             context_text=source_context_text(segments, index),
@@ -250,6 +325,8 @@ def repair_source_segments(
         "summary": {
             "segment_count": len(segments),
             "rule_count": len(rules),
+            "candidate_count": len(candidates),
+            "review_count": review_count,
             "repaired_segment_count": len(repairs),
             "replacement_count": sum(
                 int(item["replacement_count"])
@@ -258,5 +335,6 @@ def repair_source_segments(
             ),
             "term_hit_count": dict(sorted(rule_hits.items())),
         },
+        "candidates": candidates,
         "repairs": repairs,
     }

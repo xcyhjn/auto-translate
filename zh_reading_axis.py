@@ -69,6 +69,47 @@ TRAILING_FUNCTION_WORDS = {
     "что",
     "чтобы",
 }
+SOURCE_FUNCTION_EDGE_WORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "but",
+    "for",
+    "from",
+    "if",
+    "in",
+    "of",
+    "on",
+    "or",
+    "so",
+    "that",
+    "the",
+    "to",
+    "when",
+    "while",
+    "with",
+}
+SOURCE_CONTINUATION_EDGE_WORDS = {
+    "and",
+    "as",
+    "because",
+    "but",
+    "for",
+    "from",
+    "if",
+    "in",
+    "of",
+    "or",
+    "so",
+    "that",
+    "then",
+    "to",
+    "when",
+    "while",
+    "with",
+}
 
 
 @dataclass(slots=True)
@@ -130,6 +171,11 @@ def ends_clause(text: str) -> bool:
 
 def has_dangling_tail(text: str) -> bool:
     return clean_last_token(text) in TRAILING_FUNCTION_WORDS
+
+
+def has_source_function_edge(text: str) -> bool:
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9']*", normalize_inline_text(text).lower())
+    return bool(tokens and (tokens[0] in SOURCE_CONTINUATION_EDGE_WORDS or tokens[-1] in SOURCE_FUNCTION_EDGE_WORDS))
 
 
 def joined_source_text(segments: list[Segment]) -> str:
@@ -374,6 +420,104 @@ def build_zh_display_cues(
                 )
             )
     return cues
+
+
+def cue_is_short_complete_sentence(
+    cue: DisplayCue,
+    *,
+    max_duration: float,
+) -> bool:
+    duration = max(0.0, float(cue.end) - float(cue.start))
+    if duration <= 0 or duration > max_duration:
+        return False
+    source_text = normalize_inline_text(cue.en_text)
+    if not source_text or not ends_sentence(source_text):
+        return False
+    if has_source_function_edge(source_text):
+        return False
+    if cue.rewrite_action and "review" in cue.rewrite_action:
+        return False
+    return True
+
+
+def group_short_complete_sentence_cues(
+    cues: list[DisplayCue],
+    *,
+    max_single_duration: float = 1.2,
+    max_gap: float = 0.35,
+    max_group_duration: float = 3.5,
+    zh_max_chars: int = 56,
+) -> tuple[list[DisplayCue], dict]:
+    if not cues:
+        return [], {
+            "schema_version": 1,
+            "summary": {
+                "group_count": 0,
+                "merged_short_complete_sentence_count": 0,
+            },
+            "groups": [],
+        }
+
+    merged: list[DisplayCue] = []
+    groups: list[dict] = []
+    index = 0
+    sorted_cues = sorted(cues, key=lambda item: (item.start, item.end))
+    while index < len(sorted_cues):
+        current = sorted_cues[index]
+        run = [current]
+        while index + len(run) < len(sorted_cues):
+            next_cue = sorted_cues[index + len(run)]
+            gap = max(0.0, float(next_cue.start) - float(run[-1].end))
+            group_duration = max(0.0, float(next_cue.end) - float(run[0].start))
+            zh_text = normalize_inline_text("".join(item.zh_text or "" for item in [*run, next_cue]))
+            if not cue_is_short_complete_sentence(run[-1], max_duration=max_single_duration):
+                break
+            if not cue_is_short_complete_sentence(next_cue, max_duration=max_single_duration):
+                break
+            if gap > max_gap or group_duration > max_group_duration:
+                break
+            if visible_text_length(zh_text) > zh_max_chars:
+                break
+            run.append(next_cue)
+
+        if len(run) <= 1:
+            merged.append(current)
+            index += 1
+            continue
+
+        merged_cue = DisplayCue(
+            start=run[0].start,
+            end=run[-1].end,
+            en_text=normalize_inline_text(" ".join(item.en_text for item in run if item.en_text)),
+            zh_text=normalize_inline_text("".join(item.zh_text or "" for item in run if item.zh_text)) or None,
+            words=[word for item in run for word in (item.words or [])],
+            source_segment_id=run[0].source_segment_id,
+            group_index=1,
+            group_total=1,
+            rewrite_action="display_short_sentence_group",
+        )
+        merged.append(merged_cue)
+        groups.append(
+            {
+                "source_segment_ids": [item.source_segment_id for item in run],
+                "start": merged_cue.start,
+                "end": merged_cue.end,
+                "duration": round(max(0.0, merged_cue.end - merged_cue.start), 3),
+                "en_text": merged_cue.en_text,
+                "zh_text": merged_cue.zh_text or "",
+            }
+        )
+        index += len(run)
+
+    report = {
+        "schema_version": 1,
+        "summary": {
+            "group_count": len(groups),
+            "merged_short_complete_sentence_count": sum(len(group["source_segment_ids"]) for group in groups),
+        },
+        "groups": groups,
+    }
+    return merged, report
 
 
 def write_zh_ass_from_display_cues(

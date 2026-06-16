@@ -47,6 +47,17 @@ const state = {
     missing: [],
     errors: [],
   },
+  segmentationArtifacts: {
+    projectPath: null,
+    signature: "",
+    token: 0,
+    loading: false,
+    metrics: null,
+    allocation: null,
+    repair: null,
+    missing: [],
+    errors: [],
+  },
   seenListItems: {
     videos: new Set(),
     stage: new Set(),
@@ -86,7 +97,11 @@ const DEFAULT_UI_CONFIG = {
   force_retranslate_existing_segments: false,
   skip_burn: false,
   repair_high_risk_spans: true,
+  span_translation_max_spans: 16,
   span_repair_max_spans: 12,
+  semantic_zh_allocation_enabled: true,
+  semantic_zh_allocation_max_spans: 16,
+  short_complete_sentence_display_grouping: true,
   enable_ai_display_rewrite: false,
   display_rewrite_max_ai_segments: 12,
   bootstrap_entity_decisions: "high_confidence_only",
@@ -266,7 +281,7 @@ function normalizeBootstrapMode(value) {
 }
 
 function escapeHtml(value) {
-  return String(value || "")
+  return String(value == null ? "" : value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -692,7 +707,11 @@ function readFormConfig() {
     force_retranslate_existing_segments: el("force_retranslate_existing_segments").checked,
     skip_burn: el("skip_burn").checked,
     repair_high_risk_spans: el("repair_high_risk_spans").checked,
+    span_translation_max_spans: Number(el("span_translation_max_spans")?.value || 16),
     span_repair_max_spans: Number(el("span_repair_max_spans").value || 12),
+    semantic_zh_allocation_enabled: el("semantic_zh_allocation_enabled")?.checked !== false,
+    semantic_zh_allocation_max_spans: Number(el("semantic_zh_allocation_max_spans")?.value || 16),
+    short_complete_sentence_display_grouping: el("short_complete_sentence_display_grouping")?.checked !== false,
     enable_ai_display_rewrite: el("enable_ai_display_rewrite").checked,
     display_rewrite_max_ai_segments: Number(el("display_rewrite_max_ai_segments").value || 12),
     bootstrap_entity_decisions: normalizeBootstrapMode(el("bootstrap_entity_decisions")?.value),
@@ -763,7 +782,11 @@ function fillForm(config) {
   el("force_retranslate_existing_segments").checked = Boolean(config.force_retranslate_existing_segments);
   el("skip_burn").checked = Boolean(config.skip_burn);
   el("repair_high_risk_spans").checked = config.repair_high_risk_spans !== false;
+  if (el("span_translation_max_spans")) el("span_translation_max_spans").value = config.span_translation_max_spans ?? 16;
   el("span_repair_max_spans").value = config.span_repair_max_spans ?? 12;
+  if (el("semantic_zh_allocation_enabled")) el("semantic_zh_allocation_enabled").checked = config.semantic_zh_allocation_enabled !== false;
+  if (el("semantic_zh_allocation_max_spans")) el("semantic_zh_allocation_max_spans").value = config.semantic_zh_allocation_max_spans ?? 16;
+  if (el("short_complete_sentence_display_grouping")) el("short_complete_sentence_display_grouping").checked = config.short_complete_sentence_display_grouping !== false;
   el("enable_ai_display_rewrite").checked = Boolean(config.enable_ai_display_rewrite);
   el("display_rewrite_max_ai_segments").value = config.display_rewrite_max_ai_segments ?? 12;
   if (el("bootstrap_entity_decisions")) {
@@ -1416,8 +1439,24 @@ const ENTITY_ARTIFACT_FILES = {
   decisions: "00_entity_decisions.json",
 };
 
+const SEGMENTATION_ARTIFACT_FILES = {
+  metrics: "07j_segmentation_qa_metrics.json",
+  allocation: "05a_semantic_allocation_report.json",
+  repair: "03b_source_repair_report.json",
+  previewMetrics: "segmentation_preview_metrics.json",
+};
+
 function projectEntitySignature(project) {
   return Object.values(ENTITY_ARTIFACT_FILES)
+    .map((name) => {
+      const file = getProjectFile(project, name);
+      return `${name}:${file?.mtime_ts || 0}:${file?.size || 0}`;
+    })
+    .join("|");
+}
+
+function projectSegmentationSignature(project) {
+  return Object.values(SEGMENTATION_ARTIFACT_FILES)
     .map((name) => {
       const file = getProjectFile(project, name);
       return `${name}:${file?.mtime_ts || 0}:${file?.size || 0}`;
@@ -1659,6 +1698,242 @@ function renderEntityReviewPanel() {
   `;
 }
 
+function renderSegmentationMetricCards(metrics) {
+  const summary = metrics?.summary || {};
+  const segmentation = metrics?.segmentation || {};
+  const allocation = metrics?.allocation || {};
+  const repair = metrics?.source_repair || {};
+  const display = metrics?.display_grouping || {};
+  const cards = [
+    ["短残片", segmentation.short_fragment_count ?? 0],
+    ["混句", segmentation.mixed_sentence_count ?? 0],
+    ["function 边界", segmentation.function_edge_count ?? 0],
+    ["语义分配复核", allocation.review_count ?? 0],
+    ["ASR 候选", repair.candidate_count ?? 0],
+    ["ASR 复核", repair.review_count ?? 0],
+    ["短句合屏", display.group_count ?? 0],
+  ];
+  return cards
+    .map(
+      ([label, value]) => `
+        <div class="entity-metric">
+          <span>${label}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function segmentationRowsFromMetrics(metrics) {
+  const segmentation = metrics?.segmentation || {};
+  const rows = [];
+  for (const sample of segmentation.short_fragment_samples || []) {
+    rows.push({
+      issue_type: "short_fragment",
+      segment_id: sample.segment_id || "",
+      text: sample.text || "",
+    });
+  }
+  for (const sample of segmentation.mixed_sentence_samples || []) {
+    rows.push({
+      issue_type: "mixed_sentence",
+      segment_id: sample.segment_id || "",
+      text: sample.source_text || sample.target_text || "",
+    });
+  }
+  for (const sample of segmentation.function_edge_samples || []) {
+    rows.push({
+      issue_type: "function_edge",
+      segment_id: sample.segment_id || "",
+      text: sample.source_text || "",
+    });
+  }
+  for (const sample of segmentation.too_short_samples || []) {
+    rows.push({
+      issue_type: "too_short",
+      segment_id: sample.segment_id || "",
+      text: sample.text || "",
+    });
+  }
+  for (const sample of segmentation.too_long_samples || []) {
+    rows.push({
+      issue_type: "too_long",
+      segment_id: sample.segment_id || "",
+      text: sample.text || "",
+    });
+  }
+  return rows;
+}
+
+function renderSegmentationReviewPanel() {
+  const panel = el("segmentationReviewPanel");
+  if (!panel) return;
+  const project = state.selectedProject;
+  const artifacts = state.segmentationArtifacts;
+  if (!project) {
+    panel.innerHTML = `
+      <div class="entity-panel-head">
+        <div>
+          <h4>字幕 QA</h4>
+          <p>选择一个项目后，可查看短残片、混句、语义分配和 ASR 修复统计。</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  if (artifacts.loading && artifacts.projectPath === project.path) {
+    panel.innerHTML = `
+      <div class="entity-panel-head">
+        <div>
+          <h4>字幕 QA</h4>
+          <p>正在从 ${escapeHtml(project.name)} 读取字幕 QA 产物。</p>
+        </div>
+      </div>
+      <div class="entity-loading">正在读取 QA 产物...</div>
+    `;
+    return;
+  }
+  const metrics = artifacts.metrics || {};
+  const rows = segmentationRowsFromMetrics(metrics);
+  panel.innerHTML = `
+    <div class="entity-panel-head">
+      <div>
+        <h4>字幕 QA</h4>
+        <p>项目：${escapeHtml(project.name)}</p>
+      </div>
+      <div class="entity-status-stack">
+        <span class="entity-status ${getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.metrics) ? "ok" : "muted"}">${escapeHtml(getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.metrics) ? "07j 已生成" : "暂无 07j")}</span>
+        <span class="entity-status ${getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.allocation) ? "ok" : "muted"}">${escapeHtml(getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.allocation) ? "05a 语义分配" : "暂无分配报告")}</span>
+      </div>
+    </div>
+    <div class="entity-metrics-grid">
+      ${artifacts.metrics ? renderSegmentationMetricCards(metrics) : `<div class="entity-empty wide">07j_segmentation_qa_metrics.json 暂未生成。</div>`}
+    </div>
+    <div class="entity-type-row">
+      <span class="entity-chip">blocking <strong>${escapeHtml(metrics.summary?.blocking_issue_count ?? 0)}</strong></span>
+      <span class="entity-chip">warnings <strong>${escapeHtml(metrics.summary?.warning_issue_count ?? 0)}</strong></span>
+      <span class="entity-chip">pass <strong>${escapeHtml(metrics.summary?.pass ? "yes" : "no")}</strong></span>
+    </div>
+    <div class="entity-sections">
+      <section class="entity-section wide">
+        <div class="entity-section-head">
+          <h5>问题样例</h5>
+          <span>${rows.length} 行</span>
+        </div>
+        ${renderEntityTable({
+          rows,
+          columns: [
+            { key: "issue_type", label: "问题" },
+            { key: "segment_id", label: "分段" },
+            { key: "text", label: "文本" },
+          ],
+          emptyText: "当前项目没有可展示的字幕 QA 样例。",
+          limit: 10,
+        })}
+      </section>
+      <section class="entity-section wide">
+        <div class="entity-section-head">
+          <h5>产物入口</h5>
+          <span>ASS / JSON</span>
+        </div>
+        <div class="qa-artifact-links">
+          ${[
+            SEGMENTATION_ARTIFACT_FILES.metrics,
+            SEGMENTATION_ARTIFACT_FILES.allocation,
+            SEGMENTATION_ARTIFACT_FILES.repair,
+            "08_bilingual_zh_en.ass",
+            "08_bilingual_zh_en.segmentation_preview.ass",
+            "segmentation_preview_metrics.json",
+          ]
+            .map((name) => {
+              const file = getProjectFile(project, name);
+              if (!file) return `<span class="entity-chip muted">${escapeHtml(name)}</span>`;
+              return `<button class="entity-chip qa-link" data-file-path="${escapeHtml(file.path)}" data-file-name="${escapeHtml(file.name)}" type="button">${escapeHtml(name)}</button>`;
+            })
+            .join("")}
+        </div>
+      </section>
+    </div>
+  `;
+  panel.querySelectorAll(".qa-link").forEach((button) => {
+    button.addEventListener("click", () => {
+      const path = button.getAttribute("data-file-path");
+      const name = button.getAttribute("data-file-name");
+      if (path && name) openFile(path, name);
+    });
+  });
+}
+
+async function loadSegmentationArtifactsForProject(project) {
+  const token = state.segmentationArtifacts.token + 1;
+  const files = {
+    metrics: getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.metrics),
+    allocation: getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.allocation),
+    repair: getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.repair),
+    previewMetrics: getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.previewMetrics),
+  };
+  state.segmentationArtifacts = {
+    projectPath: project?.path || null,
+    signature: projectSegmentationSignature(project),
+    token,
+    loading: true,
+    metrics: null,
+    allocation: null,
+    repair: null,
+    missing: Object.entries(files).filter(([, file]) => !file).map(([name]) => SEGMENTATION_ARTIFACT_FILES[name]),
+    errors: [],
+  };
+  renderSegmentationReviewPanel();
+  const nextArtifacts = { ...state.segmentationArtifacts, loading: false, errors: [] };
+  const guarded = async (key, loader) => {
+    if (!files[key]) return null;
+    try {
+      return await loader(files[key]);
+    } catch (error) {
+      nextArtifacts.errors.push(`${files[key].name}: ${error.message || error}`);
+      return null;
+    }
+  };
+  const [metrics, allocation, repair] = await Promise.all([
+    guarded("metrics", fetchJsonArtifact),
+    guarded("allocation", fetchJsonArtifact),
+    guarded("repair", fetchJsonArtifact),
+  ]);
+  if (state.segmentationArtifacts.token !== token) return;
+  nextArtifacts.metrics = metrics || allocation || repair || null;
+  nextArtifacts.allocation = allocation || null;
+  nextArtifacts.repair = repair || null;
+  nextArtifacts.signature = projectSegmentationSignature(project);
+  state.segmentationArtifacts = nextArtifacts;
+  renderSegmentationReviewPanel();
+}
+
+function refreshSegmentationArtifactsForSelectedProject() {
+  const project = state.selectedProject;
+  if (!project) {
+    state.segmentationArtifacts = {
+      projectPath: null,
+      signature: "",
+      token: state.segmentationArtifacts.token + 1,
+      loading: false,
+      metrics: null,
+      allocation: null,
+      repair: null,
+      missing: [],
+      errors: [],
+    };
+    renderSegmentationReviewPanel();
+    return;
+  }
+  const signature = projectSegmentationSignature(project);
+  if (state.segmentationArtifacts.projectPath === project.path && state.segmentationArtifacts.signature === signature) {
+    renderSegmentationReviewPanel();
+    return;
+  }
+  loadSegmentationArtifactsForProject(project);
+}
+
 async function loadEntityArtifactsForProject(project) {
   const token = state.entityArtifacts.token + 1;
   const files = {
@@ -1790,6 +2065,7 @@ function syncSelectedProject(projects) {
 function renderProjects(projects) {
   state.projects = projects;
   syncSelectedProject(projects);
+  refreshSegmentationArtifactsForSelectedProject();
   refreshEntityArtifactsForSelectedProject();
   const list = el("projectList");
   list.innerHTML = "";

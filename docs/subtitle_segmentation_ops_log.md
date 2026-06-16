@@ -186,3 +186,141 @@ Rollback:
 Next:
 
 - Stage only the segmentation-related files and create a focused git commit.
+
+## 2026-06-17 01:25 +08:00 - Semantic QA Phase 2 Start
+
+What:
+
+- Started phase 2 implementation for Chinese semantic allocation, display-only short sentence grouping, ASR repair candidates, and frontend QA visualization.
+- Added `docs/subtitle_semantic_qa_plan.md`.
+- Captured a pre-change diff snapshot at `%TEMP%\autosub_pre_semantic.diff` because the worktree already contained unrelated edits.
+
+Why:
+
+- The previous English timing pass improved ASR cue shape, but Chinese still needed a semantic redistribution layer and the UI needed visible QA metrics.
+
+Result:
+
+- Plan is now documented before code changes.
+- Implementation will avoid reverting existing unrelated dirty files.
+
+Rollback:
+
+- None.
+
+Next:
+
+- Implement backend QA artifacts, then wire the frontend panel and tests.
+
+## 2026-06-17 02:05 +08:00 - Phase 2 Backend and First Sample Validation
+
+What:
+
+- Added `semantic_allocation.py` and `segmentation_qa.py`.
+- Updated `source_repair.py`, `zh_reading_axis.py`, `subtitle_io.py`, `pipeline_core.py`, `pipeline_runner.py`, and `ui_server.py`.
+- Added `test_semantic_qa_phase2.py`.
+- Wired the frontend QA panel in `web/index.html`, `web/app.js`, and `web/styles.css`.
+- Regenerated Russian sample QA artifacts:
+  - `02b_asr_source_repair_candidates.json`
+  - `05a_semantic_allocated_segments.json`
+  - `05a_semantic_allocation_report.json`
+  - `07j_segmentation_qa_metrics.json`
+  - `08_bilingual_zh_en.segmentation_preview.ass`
+
+Why:
+
+- Make the phase-2 semantic allocation and QA outputs visible end to end, not just described in docs.
+
+Result:
+
+- Tests passed on the first implementation batch.
+- Sample metrics exposed real remaining issues:
+  - `short_fragment_count = 27`
+  - `mixed_sentence_count = 89`
+  - `function_edge_count = 339`
+  - `semantic_review_count = 13`
+  - `display_group_count = 0`
+- This showed the first pass was working, but `function_edge_count` was too broad and needed tightening.
+
+Rollback:
+
+- None.
+
+Next:
+
+- Tighten QA edge rules and repair candidate logic, then rerun the sample.
+
+## 2026-06-17 02:28 +08:00 - QA Rule Tightening Pass
+
+What:
+
+- Narrowed `function_edge_count` so it no longer flags normal terminal sentences.
+- Split function-edge detection into start-continuation and end-function-word checks.
+- Reduced ASR repair noise:
+  - removed plain `it` / `uri` from the open-ended fragment detector
+  - added `a.m.` / `p.m.` / title abbreviation guards
+  - changed `source_repair.review_count` to count only high-confidence candidates
+- Added regression coverage for safe time abbreviations.
+
+Why:
+
+- The first sample validation showed the metrics were still too noisy and were overstating QA risk on normal English punctuation patterns.
+
+Result:
+
+- Relevant tests still passed after tightening.
+- Russian sample metrics improved:
+  - `function_edge_count` dropped from `339` to `116`
+  - `candidate_count` dropped from `172` to `170`
+  - `review_count` dropped from `172` to `87`
+  - `blocking_issue_count` dropped from `455` to `232`
+- `display_group_count` remained `0`, which is expected for this sample because no short complete-sentence pair satisfied the conservative grouping rules.
+
+Rollback:
+
+- None.
+
+Next:
+
+- Run browser QA on the live UI and confirm the new subtitle QA panel, artifact links, and responsive layout.
+
+## 2026-06-17 02:44 +08:00 - Frontend QA Verification
+
+What:
+
+- Opened the live UI at `http://127.0.0.1:8777`.
+- Verified the new "字幕 QA" panel under "项目产物".
+- Confirmed Russian sample project renders:
+  - metric cards
+  - sample rows
+  - artifact links
+- Checked breakpoints at `375px`, `768px`, `1280px`, and `1920px`.
+- Fixed `escapeHtml(0)` so zero-valued QA metrics render correctly.
+
+Why:
+
+- The second phase is only useful if the new QA outputs are actually legible in the product UI, not just present on disk.
+
+Result:
+
+- Russian QA panel shows:
+  - `短残片 27`
+  - `混句 89`
+  - `function 边界 116`
+  - `语义分配复核 13`
+  - `ASR 候选 170`
+  - `ASR 复核 87`
+  - `短句合屏 0`
+- Responsive checks:
+  - no horizontal overflow
+  - body font stays at `16px`
+  - sampled buttons are at least `46px` tall
+- One UI nuance remains: the sticky command bar can obscure project cards while scrolling if the project list is not positioned carefully. The UI is usable, but this is the main residual frontend polish item.
+
+Rollback:
+
+- None.
+
+Next:
+
+- Finish git staging with only task-related files and commit the phase-2 bundle.

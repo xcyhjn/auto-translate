@@ -147,3 +147,50 @@ Notable improvements:
    - ASR timing preservation for short complete sentences
 3. Review remaining `segmentation_preview_metrics.json` samples and decide whether short complete cues under 1 second should be displayed as-is or grouped only in the rendering layer.
 4. Consider a Chinese post-alignment pass that translates source spans first, then redistributes target text to refined English cues by semantic boundaries instead of old cue timing.
+
+## Phase 2 Update - 2026-06-17
+
+### Added
+
+- `semantic_allocation.py` builds per-cue semantic allocation reports with `source_span_id`, `allocation_confidence`, `qa_flags`, and `allocation_note`.
+- `segmentation_qa.py` writes the stable segmentation QA metrics used by both JSON artifacts and the frontend.
+- `source_repair.py` now emits `02b_asr_source_repair_candidates.json` for raw/timed ASR source repair candidates without changing word timestamps.
+- `zh_reading_axis.py` and `subtitle_io.py` now support display-only grouping for adjacent short complete sentences.
+- The pipeline now writes:
+  - `02b_asr_source_repair_candidates.json`
+  - `05a_semantic_allocated_segments.json`
+  - `05a_semantic_allocation_report.json`
+  - `07j_segmentation_qa_metrics.json`
+- The frontend "项目产物" view now has a "字幕 QA" panel with metric cards, samples, and direct artifact links.
+
+### Russian Sample Result
+
+Generated phase-2 artifacts for `output/Russian-book-about-a-dying-god`.
+
+- `short_fragment_count`: 27
+- `mixed_sentence_count`: 89
+- `function_edge_count`: 116
+- `too_short_count`: 0
+- `too_long_count`: 0
+- `semantic_review_count`: 13
+- `source_repair_candidate_count`: 170
+- `source_repair_review_count`: 87
+- `display_group_count`: 0
+- `blocking_issue_count`: 232
+
+### Validation
+
+- `python -m py_compile semantic_allocation.py segmentation_qa.py source_repair.py zh_reading_axis.py subtitle_io.py pipeline_core.py ui_server.py pipeline_runner.py`
+- `node --check web\app.js`
+- `pytest -q test_semantic_qa_phase2.py test_zh_reading_axis.py test_asr_repair_flow.py`
+- Browser check at `http://127.0.0.1:8777`
+  - Russian sample QA metrics and artifact links render in "项目产物 -> 字幕 QA".
+  - 375px / 768px / 1280px / 1920px have no horizontal overflow.
+  - Body font is 16px and sampled buttons are at least 46px tall.
+
+### Remaining Phase 2 Gaps
+
+- The current semantic allocator is a protected/reporting pass. It does not yet perform a full rewritten Chinese redistribution from span-level translations into refined cues.
+- `display_group_count` is 0 for the Russian sample because no adjacent short complete-sentence pair satisfied the conservative grouping thresholds.
+- The sticky command bar can visually overlap project cards during scroll; the UI remains usable, but scroll positioning could be polished.
+- `07j_segmentation_qa_metrics.json` is JSON only; a TSV export would make manual QA faster.

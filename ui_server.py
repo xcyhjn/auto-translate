@@ -105,7 +105,11 @@ DEFAULT_CONFIG = {
     "preview_seconds": None,
     "skip_burn": False,
     "repair_high_risk_spans": True,
+    "span_translation_max_spans": 16,
     "span_repair_max_spans": 12,
+    "semantic_zh_allocation_enabled": True,
+    "semantic_zh_allocation_max_spans": 16,
+    "short_complete_sentence_display_grouping": True,
     "enable_ai_display_rewrite": False,
     "display_rewrite_max_ai_segments": 12,
     "bootstrap_entity_decisions": "high_confidence_only",
@@ -588,6 +592,13 @@ def normalize_config(config: dict) -> dict:
         normalized.get("force_retranslate_existing_segments", False)
     )
     normalized["load_existing_segments"] = bool(normalized.get("load_existing_segments", False))
+    normalized["semantic_zh_allocation_enabled"] = bool(normalized.get("semantic_zh_allocation_enabled", True))
+    normalized["short_complete_sentence_display_grouping"] = bool(normalized.get("short_complete_sentence_display_grouping", True))
+    for key in ("span_translation_max_spans", "span_repair_max_spans", "semantic_zh_allocation_max_spans"):
+        try:
+            normalized[key] = max(0, int(normalized.get(key, DEFAULT_CONFIG[key]) or 0))
+        except (TypeError, ValueError):
+            normalized[key] = DEFAULT_CONFIG[key]
     normalized["subtitle_mode"] = normalize_subtitle_mode(normalized.get("subtitle_mode"))
     normalized["subtitle_timing_mode"] = str(normalized.get("subtitle_timing_mode") or "bound").strip().lower()
     if normalized["subtitle_timing_mode"] not in {"bound", "dual_axis"}:
@@ -611,6 +622,11 @@ def normalize_config(config: dict) -> dict:
     normalized["source_reference_label"] = str(
         normalized.get("source_reference_label") or normalized.get("src_lang") or "source"
     ).strip()
+    env_base_url = configured_openai_base_url()
+    if env_base_url:
+        normalized["openai_base_url"] = env_base_url
+    else:
+        normalized["openai_base_url"] = str(normalized.get("openai_base_url") or "").strip()
     normalized["proxy_url"] = normalize_proxy_url(normalized.get("proxy_url"))
     return normalized
 
@@ -665,6 +681,11 @@ def resolve_env_value(name: str, aliases: tuple[str, ...] = ()) -> dict:
             if value:
                 return {"available": True, "name": name, "env_name": env_name, "value": value, "source": source}
     return {"available": False, "name": name, "env_name": name, "value": "", "source": "missing"}
+
+
+def configured_openai_base_url() -> str:
+    info = resolve_env_value(OPENAI_BASE_URL_ENV, OPENAI_BASE_URL_ALIASES)
+    return str(info.get("value") or "").strip()
 
 
 def mask_openai_key(value: str) -> str:
@@ -758,8 +779,13 @@ def build_openai_base_url_status(info: dict, injected: bool = False, *, config_b
 
 def build_openai_runtime_status(config: dict | None = None) -> dict:
     runtime = ensure_openai_runtime_env_loaded()
-    if config and str(config.get("openai_base_url") or "").strip():
-        base_info = resolve_env_value(OPENAI_BASE_URL_ENV, OPENAI_BASE_URL_ALIASES)
+    base_info = resolve_env_value(OPENAI_BASE_URL_ENV, OPENAI_BASE_URL_ALIASES)
+    if base_info.get("available"):
+        runtime["base_url"] = build_openai_base_url_status(
+            base_info,
+            bool(runtime.get("base_url", {}).get("injected")),
+        )
+    elif config and str(config.get("openai_base_url") or "").strip():
         runtime["base_url"] = build_openai_base_url_status(
             base_info,
             bool(runtime.get("base_url", {}).get("injected")),
@@ -1212,7 +1238,7 @@ def build_flow_control_from_jobs() -> dict | None:
 
 
 def build_compatible_state_from_jobs() -> dict | None:
-    job = JOB_STORE.get_active_job()
+    job = JOB_STORE.get_active_job() or JOB_STORE.get_latest_job()
     if not job:
         return None
     events = JOB_STORE.get_events(str(job["id"]), limit=120)
@@ -1300,6 +1326,32 @@ def build_compatible_state_from_jobs() -> dict | None:
     }
 
 
+def legacy_state_should_take_precedence(snapshot: dict, latest_job: dict | None) -> bool:
+    if snapshot.get("running"):
+        return True
+    stage = str(snapshot.get("current_stage") or "idle")
+    if stage in {"idle", "recovered_state"}:
+        return False
+    state_ts = max(
+        read_state_timestamp(snapshot.get("task_updated_at_ts")),
+        read_state_timestamp(snapshot.get("task_updated_at")),
+        read_state_timestamp(snapshot.get("last_heartbeat_at_ts")),
+        read_state_timestamp(snapshot.get("last_heartbeat_at")),
+    )
+    job_ts = read_state_timestamp((latest_job or {}).get("updated_at"))
+    return state_ts > job_ts
+
+
+def build_state_payload(job_payload: dict) -> dict:
+    snapshot = capture_state_snapshot()
+    latest_job = job_payload.get("active_job") if isinstance(job_payload, dict) else None
+    if isinstance(latest_job, dict) and legacy_state_should_take_precedence(snapshot, latest_job):
+        return snapshot
+    if latest_job is None and legacy_state_should_take_precedence(snapshot, None):
+        return snapshot
+    return build_compatible_state_from_jobs() or snapshot
+
+
 def update_phase_status_for_snapshot(phase_status: dict, stage: str, payload: dict) -> None:
     with STATE_LOCK:
         original = STATE.get("phase_status")
@@ -1370,12 +1422,16 @@ def build_bootstrap_payload(*, include_collections: bool) -> dict:
     reconcile_runtime_state()
     config = read_config()
     job_payload = build_jobs_payload()
+    state_payload = build_state_payload(job_payload)
+    active_job = job_payload["active_job"]
+    if state_payload.get("task_id") and state_payload.get("running") and not JOB_STORE.get_active_job():
+        active_job = None
     payload = {
         "server_version": SERVER_VERSION,
-        "state": build_compatible_state_from_jobs() or capture_state_snapshot(),
+        "state": state_payload,
         "flow_control": build_flow_control_from_jobs() or capture_flow_control_snapshot(),
         "jobs": job_payload["jobs"],
-        "active_job": job_payload["active_job"],
+        "active_job": active_job,
         "openai_runtime": build_openai_runtime_status(config),
     }
     if include_collections:
@@ -2302,7 +2358,11 @@ def execute_pipeline_job(video_path: str, config: dict, task_id: str | None = No
             preview_seconds=int(config["preview_seconds"]) if config["preview_seconds"] else None,
             skip_burn=bool(config.get("skip_burn", False)),
             repair_high_risk_spans=bool(config.get("repair_high_risk_spans", True)),
+            span_translation_max_spans=int(config.get("span_translation_max_spans", 16) or 0),
             span_repair_max_spans=int(config.get("span_repair_max_spans", 12) or 12),
+            semantic_zh_allocation_enabled=bool(config.get("semantic_zh_allocation_enabled", True)),
+            semantic_zh_allocation_max_spans=int(config.get("semantic_zh_allocation_max_spans", 16) or 0),
+            short_complete_sentence_display_grouping=bool(config.get("short_complete_sentence_display_grouping", True)),
             enable_ai_display_rewrite=bool(config.get("enable_ai_display_rewrite", False)),
             display_rewrite_max_ai_segments=int(config.get("display_rewrite_max_ai_segments", 12) or 12),
             bootstrap_entity_decisions=config.get("bootstrap_entity_decisions", "high_confidence_only"),

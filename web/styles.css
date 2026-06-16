@@ -1299,6 +1299,12 @@
     margin-top: var(--space-3);
   }
 
+  .qa-artifact-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
   .entity-chip,
   .entity-status {
     border-color: rgba(91, 216, 255, 0.24);
@@ -1311,6 +1317,21 @@
     border-color: var(--line);
     background: rgba(255, 255, 255, 0.04);
     color: var(--muted);
+  }
+
+  .entity-chip.qa-link {
+    min-height: 40px;
+    cursor: pointer;
+    transition:
+      transform var(--motion-fast) var(--ease-out),
+      border-color var(--motion) var(--ease-out),
+      background var(--motion) var(--ease-out);
+  }
+
+  .entity-chip.qa-link:hover {
+    border-color: rgba(91, 216, 255, 0.48);
+    background: rgba(91, 216, 255, 0.13);
+    transform: translateY(-1px);
   }
 
   .entity-metric strong {
