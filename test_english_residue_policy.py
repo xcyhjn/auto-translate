@@ -6,6 +6,7 @@ from autosub_zh.english_residue_policy import analyze_english_residue, build_eng
 from autosub_zh.models import Segment
 from autosub_zh.span_translate import validate_span_translations
 from autosub_zh.translate import validate_translations
+from autosub_zh.translate import resolve_preserve_only_translation
 
 
 def score(candidate: str, *, source_text: str | None = None, target_text: str | None = None) -> int:
@@ -85,6 +86,18 @@ def test_translate_validation_blocks_low_score_english_residue() -> None:
     assert issues["english_residue"] == [1]
 
 
+def test_translate_validation_blocks_pure_low_score_person_name() -> None:
+    segment = Segment(id=1, start=0.0, end=2.0, source_text="Juan Kokom.")
+    issues = validate_translations(
+        [segment],
+        {1: "Juan Kokom."},
+        dst_lang="zh-Hans",
+        glossary_text="",
+    )
+
+    assert issues["english_residue"] == [1]
+
+
 def test_span_validation_blocks_low_score_english_residue() -> None:
     segment = Segment(id=1, start=0.0, end=2.0, source_text="Juan Kokom tells the conquistador.")
     issues = validate_span_translations(
@@ -108,3 +121,12 @@ def test_report_summarizes_blocking_review_and_preserved_items() -> None:
     assert report["summary"]["english_residue_preserved_count"] == 1
     assert report["summary"]["pass"] is False
     json.dumps(report, ensure_ascii=False)
+
+
+def test_preserve_only_translation_requires_exact_normalized_match() -> None:
+    preserve_map = {
+        "thetranslationfollows": "The Translation Follows",
+    }
+
+    assert resolve_preserve_only_translation("translation.", preserve_map) is None
+    assert resolve_preserve_only_translation("The Translation Follows", preserve_map) == "The Translation Follows"

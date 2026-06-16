@@ -164,7 +164,7 @@ def contains_candidate(text: str, candidate: str) -> bool:
 
 
 def extract_latin_residue(text: str, *, dst_lang: str | None = None) -> list[str]:
-    if not text or not is_chinese_target_language(dst_lang) or not contains_chinese(text):
+    if not text or not is_chinese_target_language(dst_lang):
         return []
     results: list[str] = []
     seen: set[str] = set()

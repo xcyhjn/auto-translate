@@ -394,3 +394,56 @@ Result:
 - The Russian sample currently does not contain strong discourse-particle examples, so the new counters stay at zero there.
 - The classifier is intentionally conservative. Short uppercase cues like `He wonders.` and proper-name cues remain untouched.
 - Remaining non-particle QA blockers are still separate work.
+
+## Phase 3 Update - Strict English Residue ASS Output - 2026-06-17
+
+### Problem
+
+The first strict English residue implementation exposed three bypasses during actual ASS regeneration:
+
+- Preserve-only glossary matching used substring logic, so `translation.` could incorrectly match `The Translation Follows`.
+- `pure_term_cue` terminology short-circuit locked auto-discovered names such as `Juan Kokom` before main translation validation could repair them.
+- The English residue extractor only scanned mixed Chinese+Latin lines, so pure English target cues such as `Juan Kokom.` were not scored.
+
+### Strategy
+
+- `translate.py`
+  - `resolve_preserve_only_translation()` now requires exact normalized match.
+- `terminology.py`
+  - `apply_terminology_short_circuit()` now runs preserve terms through `score_english_residue()`.
+  - Auto-discovered preserve names no longer lock unless their preserve score passes the threshold.
+- `english_residue_policy.py`
+  - `extract_latin_residue()` now scans all Chinese-target output containing Latin letters, including pure English lines.
+
+### Generated Output
+
+- New ASS:
+  - `output/Russian-book-about-a-dying-god/08_bilingual_zh_en.english_residue_strict.ass`
+- The default generated ASS was also updated by the pipeline:
+  - `output/Russian-book-about-a-dying-god/08_bilingual_zh_en.ass`
+- Timestamped ASS backups were created during regeneration:
+  - `08_bilingual_zh_en.pre_strict_residue_*.ass`
+
+### Validation
+
+- Tests:
+  - `python -m pytest test_english_residue_policy.py test_terminology_short_circuit.py -q`
+  - Result: `12 passed`
+- ASS inspection:
+  - Chinese layer Latin residue count: `1`
+  - remaining residue: `L5`, scored as `code_or_identifier`
+  - `franchise.` is no longer a standalone English cue
+  - the previous broken pair is now:
+    - Chinese: `后来还被改编成了更有名的视频游戏系列。`
+    - English: `that was made into an even more famous video game franchise.`
+- `07k_english_residue_report.json`:
+  - `english_residue_total_count = 1`
+  - `english_residue_blocking_count = 0`
+  - `english_residue_preserved_count = 1`
+  - `pass = true`
+
+### Known Remaining Issue
+
+- This regeneration disabled span-first translation with `span_translation_max_spans=0` to avoid locked translations bypassing strict residue validation.
+- The long-term fix should validate span translations again before adding IDs to `locked_translation_ids`, so span-first allocation can be safely re-enabled.
+- `07j_segmentation_qa_metrics.json` still reports segmentation QA blockers/warnings unrelated to English residue cleanup.

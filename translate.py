@@ -317,7 +317,7 @@ def resolve_preserve_only_translation(source_text: str, preserve_term_map: dict[
     if not normalized_source:
         return None
     for normalized_term, canonical in preserve_term_map.items():
-        if normalized_source == normalized_term or normalized_source in normalized_term or normalized_term in normalized_source:
+        if normalized_source == normalized_term:
             return canonical
     return None
 
@@ -416,7 +416,10 @@ def validate_translations(
             is_chinese_target_language(dst_lang)
             and not contains_chinese(translated_text)
             and has_translatable_alpha_text(source_text)
-            and not is_allowable_non_chinese_translation(source_text, translated_text, preserved_terms)
+            and (
+                not english_residue_validation_enabled
+                and not is_allowable_non_chinese_translation(source_text, translated_text, preserved_terms)
+            )
         ):
             issues["target_without_chinese"].append(segment_id)
         pollution_issues = find_text_pollution(translated_text, dst_lang=dst_lang)

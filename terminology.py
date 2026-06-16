@@ -5,6 +5,7 @@ from collections import Counter
 from pathlib import Path
 
 from .glossary import clean_candidate, load_glossary_payload, normalize_term_key
+from .english_residue_policy import score_english_residue
 from .models import Segment
 from .translate import normalize_term_text
 
@@ -55,6 +56,7 @@ def load_terminology_rules(glossary_path: str | Path | None) -> list[dict]:
                 "type": str(item.get("type") or "term"),
                 "confidence": float(item.get("confidence") or 0.0),
                 "short_name": str(item.get("short_name") or ""),
+                "sources": [str(value) for value in item.get("sources") or [] if str(value)],
                 "normalized_forms": normalized_forms,
             }
         )
@@ -74,6 +76,32 @@ def target_for_policy(rule: dict, *, first_mention: bool) -> str:
             return f"{zh}（{canonical}）"
         return short_name or zh or canonical
     return canonical
+
+
+def should_short_circuit_rule(rule: dict, source_text: str, target_text: str) -> bool:
+    policy = str(rule.get("policy") or "preserve").strip().lower()
+    if policy in {"translate", "mixed"}:
+        return True
+    if policy not in {"preserve", "preserve_en"}:
+        return False
+    priority = str(rule.get("priority") or "").strip().lower()
+    glossary_line = (
+        f"- {rule.get('canonical') or ''} | zh={rule.get('zh') or rule.get('canonical') or ''} "
+        f"| policy={policy}"
+    )
+    if priority:
+        glossary_line += f" | priority={priority}"
+    sources = [str(value) for value in rule.get("sources") or [] if str(value)]
+    if sources:
+        glossary_line += f" | sources={'; '.join(sources)}"
+    decision = score_english_residue(
+        target_text,
+        source_text=source_text,
+        target_text=target_text,
+        reference_text=source_text,
+        glossary_text=glossary_line,
+    )
+    return decision.decision == "preserve"
 
 
 def apply_terminology_short_circuit(
@@ -109,6 +137,8 @@ def apply_terminology_short_circuit(
             first_mention = term_id not in seen_terms
             target_text = target_for_policy(rule, first_mention=first_mention)
             if not target_text:
+                continue
+            if not should_short_circuit_rule(rule, segment.source_text or "", target_text):
                 continue
             original_target = segment.target_text
             segment.target_text = target_text

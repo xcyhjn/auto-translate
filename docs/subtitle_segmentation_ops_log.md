@@ -515,3 +515,63 @@ Next:
 
 - Re-run translation with the strict scorer enabled so low-score English residue triggers model repair.
 - Add project-specific `00_entity_decisions.json` or glossary `policy=translate` entries for recurring names if automatic transliteration is not stable enough.
+
+## 2026-06-17 06:45 +08:00 - Strict English Residue ASS Regeneration
+
+Hypothesis:
+
+- A full translation rerun with strict English residue validation should remove person/place/language English leftovers from Chinese subtitles while preserving only high-score identifiers such as model numbers.
+
+What:
+
+- Installed local `pytest` with `python -m pip install --user pytest`.
+- Fixed preserve-only glossary matching in `translate.py`:
+  - before: `translation.` could match auto glossary phrase `The Translation Follows`
+  - after: preserve-only shortcut requires exact normalized match
+- Fixed terminology short-circuit in `terminology.py`:
+  - pure term cues no longer lock auto-discovered `policy=preserve` names unless the residue scorer says `decision=preserve`
+  - `Juan Kokom.` now goes through translation instead of becoming `Juan Kokom`
+- Fixed `english_residue_policy.py` extraction:
+  - pure English target cues are now scored, not only mixed Chinese+Latin lines
+- Added tests:
+  - `test_preserve_only_translation_requires_exact_normalized_match`
+  - `test_translate_validation_blocks_pure_low_score_person_name`
+  - `test_terminology_short_circuit.py`
+
+Self-correction:
+
+- First regeneration failed because `translation.` was polluted by auto glossary `The Translation Follows`.
+- Second regeneration showed span translation/terminology locks could bypass strict validation.
+- Third regeneration showed pure English `Juan Kokom.` was not extracted as residue because the extractor required Chinese text.
+- Final regeneration resumed from checkpoint after a network SSL EOF at chunk 30/35; completed chunks 1-29 were reused and only chunks 30-35 were rerun.
+
+Validation:
+
+- `python -m pytest test_english_residue_policy.py test_terminology_short_circuit.py -q`
+  - `12 passed`
+- Generated:
+  - `output/Russian-book-about-a-dying-god/08_bilingual_zh_en.english_residue_strict.ass`
+- ASS checks:
+  - Chinese `Default` rows: `813`
+  - English `EnglishSmall` rows: `813`
+  - Chinese-layer Latin residue count: `1`
+  - only remaining Chinese-layer Latin sample: `L5`
+  - standalone English `franchise.` cue count: `0`
+  - `video game franchise.` now appears as one English cue from `0:01:37.67` to `0:01:42.37`
+- `07k_english_residue_report.json`:
+  - `english_residue_total_count = 1`
+  - `english_residue_blocking_count = 0`
+  - `english_residue_preserved_count = 1`
+  - `english_residue_review_count = 0`
+  - `pass = true`
+  - preserved item: `L5`, category `code_or_identifier`, score `94`
+
+Rollback:
+
+- None.
+- Original/default ASS was backed up during generation under timestamped `08_bilingual_zh_en.pre_strict_residue_*.ass` files.
+
+Next:
+
+- Consider making `span_translation_max_spans=0` unnecessary by validating span-locked translations before they enter `locked_translation_ids`.
+- Consider deleting old timestamped generation backups after manual review if disk clutter matters.
