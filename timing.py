@@ -259,6 +259,53 @@ def is_orphan_fragment(words: list[Word], rules: SubtitleRules) -> bool:
     return False
 
 
+def is_terminal_orphan_tail(words: list[Word], rules: SubtitleRules) -> bool:
+    if not words:
+        return False
+    text = words_to_source_text(words)
+    count = source_word_count(text)
+    if count <= 0 or count > 2:
+        return False
+    if not ends_with_sentence_terminal(text):
+        return False
+    duration = max(0.0, float(words[-1].end) - float(words[0].start))
+    return count <= 1 or duration < rules.orphan_duration_threshold
+
+
+def can_absorb_terminal_orphan_tail(
+    left_words: list[Word],
+    right_words: list[Word],
+    rules: SubtitleRules,
+    *,
+    allow_closed_left: bool = False,
+    extra_duration: float = 1.2,
+    length_multiplier: float = 2.2,
+) -> bool:
+    if not left_words or not right_words:
+        return False
+    if not is_terminal_orphan_tail(right_words, rules):
+        return False
+    left_text = words_to_source_text(left_words)
+    if ends_with_sentence_terminal(left_text):
+        if not allow_closed_left:
+            return False
+        if source_word_count(left_text) < 4:
+            return False
+        first_word = right_words[0].word.strip()
+        if not first_word or not first_word[:1].islower():
+            return False
+    gap = word_gap(left_words[-1], right_words[0])
+    if gap > rules.strong_pause_split_threshold:
+        return False
+    merged_words = [*left_words, *right_words]
+    merged_duration = max(0.0, float(merged_words[-1].end) - float(merged_words[0].start))
+    merged_len = visible_source_length(words_to_source_text(merged_words))
+    return (
+        merged_duration <= rules.max_duration + extra_duration
+        and merged_len <= rules.max_chars_per_line * length_multiplier
+    )
+
+
 def is_open_fragment(segment: Segment) -> bool:
     text = normalize_text(segment.source_text)
     if not text:
@@ -279,6 +326,17 @@ def starts_with_continuation_fragment(segment: Segment) -> bool:
 def merge_segments(left: Segment, right: Segment) -> Segment:
     words = [*left.words, *right.words]
     text = words_to_source_text(words) if words else normalize_text(f"{left.source_text} {right.source_text}")
+    if (
+        ends_with_sentence_terminal(left.source_text)
+        and ends_with_sentence_terminal(right.source_text)
+        and source_word_count(right.source_text) <= 2
+        and (right.source_text or "").strip()[:1].islower()
+    ):
+        text = re.sub(
+            r"([A-Za-z])\.\s+([a-z][A-Za-z0-9'-]*(?:\s+[a-z][A-Za-z0-9'-]*)?[.!?])$",
+            r"\1 \2",
+            text,
+        )
     return Segment(
         id=left.id,
         start=float(left.start),
@@ -298,6 +356,10 @@ def should_merge_adjacent(left: Segment, right: Segment, rules: SubtitleRules) -
     merged_duration = float(right.end) - float(left.start)
     merged_text = words_to_source_text([*left.words, *right.words])
     merged_len = visible_source_length(merged_text)
+    if is_open_fragment(left) and can_absorb_terminal_orphan_tail(left.words, right.words, rules):
+        return True
+    if can_absorb_terminal_orphan_tail(left.words, right.words, rules, allow_closed_left=True):
+        return True
     if ends_with_sentence_terminal(left.source_text) and starts_new_sentence(right.words[0]):
         return False
     if merged_duration > rules.max_duration + 0.35:
@@ -420,6 +482,18 @@ def score_duration_split(words: list[Word], split_index: int, rules: SubtitleRul
         score += 280
     if is_orphan_fragment(right_words, rules):
         score += 360
+    if is_terminal_orphan_tail(right_words, rules) and not can_absorb_terminal_orphan_tail(
+        left_words,
+        right_words,
+        rules,
+        extra_duration=1.8,
+        length_multiplier=2.4,
+    ):
+        score += 5000
+    elif is_terminal_orphan_tail(right_words, rules):
+        score += 900
+    if source_word_count(left_text) <= 2 and not ends_with_sentence_terminal(left_text):
+        score += 1200
     if is_bad_split_edge(left_words, right_words):
         score += 180
 
@@ -519,6 +593,18 @@ def score_display_split(
         short_text_penalty += 260
     if is_orphan_fragment(right_words, rules):
         short_text_penalty += 360
+    if is_terminal_orphan_tail(right_words, rules) and not can_absorb_terminal_orphan_tail(
+        left_words,
+        right_words,
+        rules,
+        extra_duration=1.8,
+        length_multiplier=2.4,
+    ):
+        short_text_penalty += 5000
+    elif is_terminal_orphan_tail(right_words, rules):
+        short_text_penalty += 900
+    if source_word_count(left_text) <= 2 and not ends_with_sentence_terminal(left_text):
+        short_text_penalty += 1200
     bad_edge_penalty = 0.0
     if left_last_word in BAD_SPLIT_EDGE_WORDS:
         bad_edge_penalty += 180
@@ -573,6 +659,8 @@ def score_display_group(
         score += (min(18, max(8, max_chars // 4)) - length) * 20
     if is_orphan_fragment(group, rules):
         score += 300
+    if is_terminal_orphan_tail(group, rules) and start_index > 0:
+        score += 5000
 
     last_word = re.sub(r"[^A-Za-z']+", "", group[-1].word.lower())
     if last_word in BAD_SPLIT_EDGE_WORDS and end_index < len(words):
@@ -662,6 +750,12 @@ def split_segment_for_display_limits(
     line_count = count_source_lines(text, max_chars)
     length = visible_source_length(text)
     cps = length / max(duration, 0.001)
+    if (
+        ends_with_sentence_terminal(text)
+        and duration <= rules.max_duration + rules.complete_sentence_duration_tolerance
+        and length <= rules.max_chars_per_line * 2.2
+    ):
+        return [segment]
     should_split = (
         length > max_total_chars
         or line_count > rules.max_lines

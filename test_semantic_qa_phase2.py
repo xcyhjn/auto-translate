@@ -5,7 +5,7 @@ from autosub_zh.semantic_allocation import build_semantic_allocation_report
 from autosub_zh.segmentation_qa import build_segmentation_qa_metrics
 from autosub_zh.source_repair import repair_source_segments
 from autosub_zh.subtitle_io import DisplayCue
-from autosub_zh.zh_reading_axis import group_short_complete_sentence_cues
+from autosub_zh.zh_reading_axis import group_short_complete_sentence_cues, merge_orphan_tail_display_cues
 
 
 def make_words(text: str, start: float, step: float = 0.2) -> list[Word]:
@@ -108,3 +108,99 @@ def test_segmentation_metrics_counts_core_qa_buckets() -> None:
     assert metrics["segmentation"]["mixed_sentence_count"] >= 1
     assert metrics["segmentation"]["function_edge_count"] >= 1
     assert metrics["segmentation"]["too_short_count"] == 1
+
+
+def test_orphan_terminal_tail_display_merge_cleans_zh_tail() -> None:
+    cues = [
+        DisplayCue(
+            start=97.67,
+            end=100.29,
+            en_text="that was made into an even more famous video game",
+            zh_text="\u540e\u6765\u8fd8\u88ab\u6539\u7f16\u6210\u4e86\u66f4\u6709\u540d\u7684\u7535\u5b50\u6e38\u620f\u3002",
+            source_segment_id=1,
+        ),
+        DisplayCue(
+            start=100.37,
+            end=102.37,
+            en_text="franchise.",
+            zh_text="\u7cfb\u5217\u3002",
+            source_segment_id=2,
+        ),
+    ]
+
+    merged, report = merge_orphan_tail_display_cues(cues)
+
+    assert len(merged) == 1
+    assert merged[0].en_text == "that was made into an even more famous video game franchise."
+    assert merged[0].zh_text == "\u540e\u6765\u8fd8\u88ab\u6539\u7f16\u6210\u4e86\u66f4\u6709\u540d\u7684\u7535\u5b50\u6e38\u620f\u7cfb\u5217\u3002"
+    assert report["summary"]["merged_orphan_tail_count"] == 2
+
+
+def test_orphan_terminal_tail_display_merge_handles_suspicious_period() -> None:
+    cues = [
+        DisplayCue(
+            start=178.47,
+            end=180.0,
+            en_text="These are rare and go for a lot of money on the property.",
+            zh_text="\u8fd9\u4e9b\u623f\u5b50\u5f88\u7a00\u6709\uff0c\u5728\u623f\u4ea7\u5e02\u573a\u4e0a\u5f88\u503c\u94b1\u3002",
+            source_segment_id=1,
+        ),
+        DisplayCue(
+            start=180.08,
+            end=180.47,
+            en_text="market.",
+            zh_text="\u5e02\u573a\u4e0a\u5f88\u503c\u94b1\u3002",
+            source_segment_id=2,
+        ),
+    ]
+
+    merged, report = merge_orphan_tail_display_cues(cues)
+
+    assert len(merged) == 1
+    assert merged[0].en_text.endswith("property market.")
+    assert merged[0].zh_text == "\u8fd9\u4e9b\u623f\u5b50\u5f88\u7a00\u6709\uff0c\u5728\u623f\u4ea7\u5e02\u573a\u4e0a\u5f88\u503c\u94b1\u3002"
+    assert report["summary"]["group_count"] == 1
+
+
+def test_orphan_terminal_tail_display_merge_preserves_real_short_sentence() -> None:
+    cues = [
+        DisplayCue(start=0.0, end=0.7, en_text="Hello.", zh_text="\u4f60\u597d\u3002", source_segment_id=1),
+        DisplayCue(start=0.85, end=1.4, en_text="Goodbye.", zh_text="\u518d\u89c1\u3002", source_segment_id=2),
+    ]
+
+    merged, report = merge_orphan_tail_display_cues(cues)
+
+    assert [cue.en_text for cue in merged] == ["Hello.", "Goodbye."]
+    assert report["summary"]["group_count"] == 0
+
+
+def test_orphan_terminal_tail_counts_as_blocking_metric() -> None:
+    segments = [
+        Segment(id=1, start=0.0, end=1.0, source_text="that was made into an even more famous video game"),
+        Segment(id=2, start=1.05, end=2.0, source_text="franchise."),
+    ]
+    cues = [
+        DisplayCue(start=0.0, end=1.0, en_text="that was made into an even more famous video game", zh_text="\u7535\u5b50\u6e38\u620f", source_segment_id=1),
+        DisplayCue(start=1.05, end=2.0, en_text="franchise.", zh_text="\u7cfb\u5217\u3002", source_segment_id=2),
+    ]
+
+    metrics = build_segmentation_qa_metrics(segments, cues)
+
+    assert metrics["segmentation"]["orphan_terminal_tail_count"] == 1
+    assert metrics["summary"]["pass"] is False
+
+
+def test_suspicious_closed_left_tail_counts_as_blocking_metric() -> None:
+    segments = [
+        Segment(id=1, start=0.0, end=1.0, source_text="These are rare on the property."),
+        Segment(id=2, start=1.05, end=1.4, source_text="market."),
+    ]
+    cues = [
+        DisplayCue(start=0.0, end=1.0, en_text="These are rare on the property.", zh_text="\u623f\u4ea7", source_segment_id=1),
+        DisplayCue(start=1.05, end=1.4, en_text="market.", zh_text="\u5e02\u573a\u3002", source_segment_id=2),
+    ]
+
+    metrics = build_segmentation_qa_metrics(segments, cues)
+
+    assert metrics["segmentation"]["orphan_terminal_tail_count"] == 1
+    assert metrics["summary"]["pass"] is False

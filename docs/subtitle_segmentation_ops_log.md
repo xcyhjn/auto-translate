@@ -324,3 +324,89 @@ Rollback:
 Next:
 
 - Finish git staging with only task-related files and commit the phase-2 bundle.
+
+## 2026-06-17 03:20 +08:00 - Orphan Terminal Tail Fix, First Pass
+
+Hypothesis:
+
+- The `franchise.` failure came from terminal punctuation blocking the existing orphan merge path. If a right cue is only 1-2 words and completes an open previous cue, it should be absorbed even when it ends in `.` / `!` / `?`.
+
+What:
+
+- Added terminal orphan-tail detection in `timing.py`.
+- Made `should_merge_adjacent()` merge open-left + terminal orphan tail before the normal sentence-terminal guard.
+- Added strong display split penalties so DP avoids creating a 1-2 word sentence tail.
+- Added display-only `merge_orphan_tail_display_cues()` before ASS writing.
+- Added QA metrics:
+  - `orphan_terminal_tail_count`
+  - `orphan_terminal_tail_samples`
+- Added frontend QA card: `孤立句尾词`.
+- Added focused unit tests for:
+  - `video game` + `franchise.`
+  - long gap not force-merged
+  - `Hello.` / `Goodbye.` not merged
+  - display-layer Chinese cleanup from `电子游戏。系列。` to `电子游戏系列。`
+
+Result:
+
+- Targeted tests passed.
+- Russian sample ASS changed the reported case to one cue:
+  - `that was made into an even more famous video game franchise.`
+- `07j_segmentation_qa_metrics.json` reported `orphan_terminal_tail_count = 0`.
+
+Failure analysis:
+
+- Wider sample audit still found `market.` as a one-word tail after `property.`. This was caused by raw ASR adding a suspicious period to the previous cue, so the first pass did not treat the previous cue as open.
+
+Rollback:
+
+- None. Continued with a second pass.
+
+Next:
+
+- Handle suspicious closed-left tails where the previous cue is long enough and the right cue begins lowercase.
+
+## 2026-06-17 03:45 +08:00 - Orphan Terminal Tail Fix, Second Pass
+
+Hypothesis:
+
+- Some one-word tails survive because ASR puts a terminal period before the final word, e.g. `property.` + `market.`. These should be merged only when the tail begins lowercase, the gap is short, and the previous cue has enough words to avoid swallowing true short sentences.
+
+What:
+
+- Extended `can_absorb_terminal_orphan_tail()` with `allow_closed_left=True`.
+- Allowed suspicious closed-left merges only when:
+  - previous cue has at least 4 source words
+  - right tail has 1-2 words
+  - right tail begins lowercase
+  - gap <= `strong_pause_split_threshold`
+  - merged duration and length stay within conservative tolerance
+- Added English cleanup:
+  - `property. market.` -> `property market.`
+- Added Chinese cleanup:
+  - removes duplicate short tail sentence only when the tail text already appears earlier in the merged Chinese cue
+- Expanded `segmentation_qa.py` so suspicious closed-left lowercase tails also count as blockers if they remain.
+- Added regression tests for:
+  - `property.` + `market.`
+  - display cleanup for duplicate Chinese tail
+  - preserving real short complete sentences.
+
+Result:
+
+- `pytest -q test_timing_segmentation.py test_semantic_qa_phase2.py test_zh_reading_axis.py test_subtitle_output_modes.py test_asr_repair_flow.py`
+  - `38 passed in 0.37s`
+- Russian sample regenerated from existing `05_translated_segments.json`:
+  - `orphan_tail_group_count = 20`
+  - `orphan_terminal_tail_count = 0`
+- ASS spot checks:
+  - `that was made into an even more famous video game franchise.`
+  - `These are rare, have tall ceilings and go for a lot of money on the property market.`
+- Remaining 1-2 word terminal cues are uppercase independent/proper-name-like cases, not open-tail cases.
+
+Rollback:
+
+- None.
+
+Next:
+
+- Keep the QA card visible in the frontend and commit only task-related files. Remaining non-orphan segmentation blockers should be handled in a separate pass.

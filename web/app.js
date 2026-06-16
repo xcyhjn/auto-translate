@@ -1707,6 +1707,7 @@ function renderSegmentationMetricCards(metrics) {
   const cards = [
     ["短残片", segmentation.short_fragment_count ?? 0],
     ["混句", segmentation.mixed_sentence_count ?? 0],
+    ["孤立句尾词", segmentation.orphan_terminal_tail_count ?? 0],
     ["function 边界", segmentation.function_edge_count ?? 0],
     ["语义分配复核", allocation.review_count ?? 0],
     ["ASR 候选", repair.candidate_count ?? 0],
@@ -1747,6 +1748,13 @@ function segmentationRowsFromMetrics(metrics) {
       issue_type: "function_edge",
       segment_id: sample.segment_id || "",
       text: sample.source_text || "",
+    });
+  }
+  for (const sample of segmentation.orphan_terminal_tail_samples || []) {
+    rows.push({
+      issue_type: "orphan_terminal_tail",
+      segment_id: sample.segment_id || "",
+      text: `${sample.previous_text || ""} → ${sample.source_text || ""}`,
     });
   }
   for (const sample of segmentation.too_short_samples || []) {

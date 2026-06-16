@@ -110,6 +110,7 @@ SOURCE_CONTINUATION_EDGE_WORDS = {
     "while",
     "with",
 }
+SOURCE_TERMINAL_RE = re.compile(r"[.!?][\"')\]]*$")
 
 
 @dataclass(slots=True)
@@ -438,6 +439,145 @@ def cue_is_short_complete_sentence(
     if cue.rewrite_action and "review" in cue.rewrite_action:
         return False
     return True
+
+
+def cue_source_word_count(text: str) -> int:
+    return len(re.findall(r"[A-Za-z0-9']+", text or ""))
+
+
+def is_terminal_orphan_tail_text(text: str, *, max_words: int = 2) -> bool:
+    source_text = normalize_inline_text(text)
+    if not source_text:
+        return False
+    return cue_source_word_count(source_text) <= max_words and bool(SOURCE_TERMINAL_RE.search(source_text))
+
+
+def can_merge_orphan_tail_display_pair(
+    current_text: str,
+    next_text: str,
+    *,
+    gap: float,
+    group_duration: float,
+    combined_en: str,
+    max_gap: float,
+    max_group_duration: float,
+    en_max_chars: int,
+) -> bool:
+    if not current_text or not is_terminal_orphan_tail_text(next_text):
+        return False
+    if gap > max_gap or group_duration > max_group_duration:
+        return False
+    if visible_text_length(combined_en) > en_max_chars:
+        return False
+    if ends_sentence(current_text) and cue_source_word_count(current_text) < 4:
+        return False
+    if ends_sentence(current_text) and not next_text[:1].islower():
+        return False
+    return True
+
+
+def cleanup_orphan_tail_zh_text(text: str) -> str:
+    cleaned = normalize_inline_text(text)
+    cleaned = re.sub(r"([一-龥])。([一-龥]{1,4}。)$", r"\1\2", cleaned)
+    cleaned = re.sub(r"([一-龥])，([一-龥]{1,4}。)$", r"\1\2", cleaned)
+    duplicate_tail = re.search(r"^(.*[。！？])([^。！？]{2,10})([。！？])$", cleaned)
+    if duplicate_tail:
+        prefix, tail, terminal = duplicate_tail.groups()
+        if tail in prefix:
+            cleaned = prefix.rstrip("。！？") + terminal
+    return cleaned
+
+
+def cleanup_orphan_tail_source_text(text: str) -> str:
+    cleaned = normalize_inline_text(text)
+    return re.sub(
+        r"([A-Za-z])\.\s+([a-z][A-Za-z0-9'-]*(?:\s+[a-z][A-Za-z0-9'-]*)?[.!?])$",
+        r"\1 \2",
+        cleaned,
+    )
+
+
+def merge_orphan_tail_display_cues(
+    cues: list[DisplayCue],
+    *,
+    max_gap: float = 1.2,
+    max_group_duration: float = 7.7,
+    en_max_chars: int = 92,
+) -> tuple[list[DisplayCue], dict]:
+    if not cues:
+        return [], {
+            "schema_version": 1,
+            "summary": {"group_count": 0, "merged_orphan_tail_count": 0},
+            "groups": [],
+        }
+
+    sorted_cues = sorted(cues, key=lambda item: (item.start, item.end))
+    merged: list[DisplayCue] = []
+    groups: list[dict] = []
+    index = 0
+    while index < len(sorted_cues):
+        current = sorted_cues[index]
+        if index + 1 >= len(sorted_cues):
+            merged.append(current)
+            break
+        next_cue = sorted_cues[index + 1]
+        current_text = normalize_inline_text(current.en_text)
+        next_text = normalize_inline_text(next_cue.en_text)
+        gap = max(0.0, float(next_cue.start) - float(current.end))
+        group_duration = max(0.0, float(next_cue.end) - float(current.start))
+        combined_en = normalize_inline_text(" ".join(part for part in [current_text, next_text] if part))
+        should_merge = can_merge_orphan_tail_display_pair(
+            current_text,
+            next_text,
+            gap=gap,
+            group_duration=group_duration,
+            combined_en=combined_en,
+            max_gap=max_gap,
+            max_group_duration=max_group_duration,
+            en_max_chars=en_max_chars,
+        )
+        if not should_merge:
+            merged.append(current)
+            index += 1
+            continue
+
+        combined_en = cleanup_orphan_tail_source_text(combined_en)
+        combined_zh = cleanup_orphan_tail_zh_text(
+            normalize_inline_text("".join(part for part in [current.zh_text or "", next_cue.zh_text or ""] if part))
+        )
+        merged_cue = DisplayCue(
+            start=current.start,
+            end=next_cue.end,
+            en_text=combined_en,
+            zh_text=combined_zh or None,
+            words=[*(current.words or []), *(next_cue.words or [])],
+            source_segment_id=current.source_segment_id,
+            group_index=1,
+            group_total=1,
+            rewrite_action="display_orphan_tail_merge",
+        )
+        merged.append(merged_cue)
+        groups.append(
+            {
+                "source_segment_ids": [current.source_segment_id, next_cue.source_segment_id],
+                "start": merged_cue.start,
+                "end": merged_cue.end,
+                "duration": round(group_duration, 3),
+                "gap": round(gap, 3),
+                "en_text": merged_cue.en_text,
+                "zh_text": merged_cue.zh_text or "",
+            }
+        )
+        index += 2
+
+    return merged, {
+        "schema_version": 1,
+        "summary": {
+            "group_count": len(groups),
+            "merged_orphan_tail_count": sum(len(group["source_segment_ids"]) for group in groups),
+        },
+        "groups": groups,
+    }
 
 
 def group_short_complete_sentence_cues(

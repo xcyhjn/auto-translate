@@ -34,7 +34,7 @@ from .media import (
     run_ffmpeg_command,
     suggest_hwaccel_decoder,
 )
-from .models import BilingualSubtitleStyle, Segment
+from .models import BilingualSubtitleStyle, Segment, SubtitleRules
 from .qa import build_quality_metrics, qa_ass_entity_audit, qa_check, qa_difficult_spans, qa_display_cues, qa_final_ass_file, qa_glossary_consistency
 from .qa_outputs import (
     build_blocker_report,
@@ -69,6 +69,7 @@ from .zh_reading_axis import (
     build_zh_display_cues,
     build_zh_reading_groups,
     group_short_complete_sentence_cues,
+    merge_orphan_tail_display_cues,
     reading_groups_to_segments,
     save_zh_reading_groups,
     source_reference_cues_from_segments,
@@ -561,6 +562,14 @@ def run_pipeline(
         "summary": {
             "group_count": 0,
             "merged_short_complete_sentence_count": 0,
+        },
+        "groups": [],
+    }
+    orphan_tail_display_report = {
+        "schema_version": 1,
+        "summary": {
+            "group_count": 0,
+            "merged_orphan_tail_count": 0,
         },
         "groups": [],
     }
@@ -1544,6 +1553,18 @@ def run_pipeline(
                     **display_group_report["summary"],
                 }
             )
+        display_cues, orphan_tail_display_report = merge_orphan_tail_display_cues(
+            display_cues,
+            max_gap=SubtitleRules().strong_pause_split_threshold,
+            en_max_chars=max(42, int(effective_style.en_max_single_line_chars or 42) * 2 + 8),
+        )
+        if orphan_tail_display_report["summary"]["group_count"]:
+            alignment_debug.append(
+                {
+                    "mode": "display_orphan_tail_merge",
+                    **orphan_tail_display_report["summary"],
+                }
+            )
         write_bilingual_ass_from_display_cues(
             display_cues,
             ass_path,
@@ -1596,6 +1617,7 @@ def run_pipeline(
         display_cues,
         allocation_report=semantic_allocation_report,
         display_group_report=display_group_report,
+        orphan_tail_display_report=orphan_tail_display_report,
         source_repair_report=source_repair_report,
     )
     quality_metrics["segmentation"] = segmentation_metrics.get("segmentation", {})

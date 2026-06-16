@@ -28,6 +28,10 @@ def source_sentence_count(text: str) -> int:
     return len([part for part in SOURCE_SENTENCE_RE.split(normalized) if part.strip()])
 
 
+def source_word_count(text: str) -> int:
+    return len(re.findall(r"[A-Za-z0-9']+", normalize_inline_text(text)))
+
+
 def starts_with_function_word(text: str) -> bool:
     words = re.findall(r"[A-Za-z']+", normalize_inline_text(text))
     return bool(words and START_CONTINUATION_WORD_RE.match(words[0]))
@@ -43,12 +47,18 @@ def is_open_ending(text: str) -> bool:
     return bool(normalized and (OPEN_END_RE.search(normalized) or normalized.endswith(("的", "和", "与", "但", "而", "因为", "所以"))))
 
 
+def is_terminal_orphan_tail_text(text: str) -> bool:
+    normalized = normalize_inline_text(text)
+    return bool(normalized and source_word_count(normalized) <= 2 and TERMINAL_RE.search(normalized))
+
+
 def build_segmentation_qa_metrics(
     segments: list[Segment],
     cues: list[DisplayCue],
     *,
     allocation_report: dict | None = None,
     display_group_report: dict | None = None,
+    orphan_tail_display_report: dict | None = None,
     source_repair_report: dict | None = None,
     sample_limit: int = 20,
 ) -> dict:
@@ -64,6 +74,8 @@ def build_segmentation_qa_metrics(
         "display_grouping": {
             "group_count": 0,
             "merged_short_complete_sentence_count": 0,
+            "orphan_tail_group_count": 0,
+            "merged_orphan_tail_count": 0,
         },
         "allocation": {
             "applied_count": 0,
@@ -75,11 +87,13 @@ def build_segmentation_qa_metrics(
             "short_fragment_count": 0,
             "mixed_sentence_count": 0,
             "function_edge_count": 0,
+            "orphan_terminal_tail_count": 0,
             "too_short_count": 0,
             "too_long_count": 0,
             "short_fragment_samples": [],
             "mixed_sentence_samples": [],
             "function_edge_samples": [],
+            "orphan_terminal_tail_samples": [],
             "too_short_samples": [],
             "too_long_samples": [],
         },
@@ -96,6 +110,11 @@ def build_segmentation_qa_metrics(
     if isinstance(display_summary, dict):
         metrics["display_grouping"]["group_count"] = int(display_summary.get("group_count") or 0)
         metrics["display_grouping"]["merged_short_complete_sentence_count"] = int(display_summary.get("merged_short_complete_sentence_count") or 0)
+
+    orphan_display_summary = (orphan_tail_display_report or {}).get("summary") if isinstance(orphan_tail_display_report, dict) else {}
+    if isinstance(orphan_display_summary, dict):
+        metrics["display_grouping"]["orphan_tail_group_count"] = int(orphan_display_summary.get("group_count") or 0)
+        metrics["display_grouping"]["merged_orphan_tail_count"] = int(orphan_display_summary.get("merged_orphan_tail_count") or 0)
 
     repair_summary = (source_repair_report or {}).get("summary") if isinstance(source_repair_report, dict) else {}
     if isinstance(repair_summary, dict):
@@ -158,11 +177,35 @@ def build_segmentation_qa_metrics(
             if find_short_english_leaks(target_text, dst_lang="zh-Hans"):
                 metrics["segmentation"]["mixed_sentence_count"] += 1
 
+    sorted_cues = sorted(cues, key=lambda item: (item.start, item.end))
+    for previous, current in zip(sorted_cues, sorted_cues[1:]):
+        previous_text = normalize_inline_text(previous.en_text)
+        current_text = normalize_inline_text(current.en_text)
+        previous_terminal = bool(TERMINAL_RE.search(previous_text))
+        suspicious_closed_left = (
+            previous_terminal
+            and source_word_count(previous_text) >= 4
+            and current_text[:1].islower()
+        )
+        if previous_text and (not previous_terminal or suspicious_closed_left) and is_terminal_orphan_tail_text(current_text):
+            metrics["segmentation"]["orphan_terminal_tail_count"] += 1
+            append_sample(
+                "orphan_terminal_tail_samples",
+                {
+                    "segment_id": current.source_segment_id,
+                    "previous_text": previous_text,
+                    "source_text": current_text,
+                    "start": round(float(current.start), 3),
+                    "end": round(float(current.end), 3),
+                },
+            )
+
     metrics["summary"] = {
         "blocking_issue_count": (
             metrics["segmentation"]["mixed_sentence_count"]
             + metrics["segmentation"]["short_fragment_count"]
             + metrics["segmentation"]["function_edge_count"]
+            + metrics["segmentation"]["orphan_terminal_tail_count"]
             + metrics["segmentation"]["too_short_count"]
             + metrics["segmentation"]["too_long_count"]
         ),
@@ -170,6 +213,7 @@ def build_segmentation_qa_metrics(
         "pass": (
             metrics["segmentation"]["mixed_sentence_count"] == 0
             and metrics["segmentation"]["short_fragment_count"] == 0
+            and metrics["segmentation"]["orphan_terminal_tail_count"] == 0
         ),
     }
     return metrics

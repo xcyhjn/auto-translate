@@ -194,3 +194,77 @@ Generated phase-2 artifacts for `output/Russian-book-about-a-dying-god`.
 - `display_group_count` is 0 for the Russian sample because no adjacent short complete-sentence pair satisfied the conservative grouping thresholds.
 - The sticky command bar can visually overlap project cards during scroll; the UI remains usable, but scroll positioning could be polished.
 - `07j_segmentation_qa_metrics.json` is JSON only; a TSV export would make manual QA faster.
+
+## Phase 2.1 Update - Orphan Terminal Tail Blocking - 2026-06-17
+
+### Problem
+
+The official Russian sample ASS still produced a one-word sentence tail:
+
+- Before:
+  - `that was made into an even more famous video game`
+  - `franchise.`
+  - Chinese followed the broken cut as `系列。`
+
+This happened because terminal orphan cues were protected from the existing orphan merge path: `should_merge_adjacent()` only merged right-side orphans when the right cue did not end with sentence punctuation.
+
+### Strategy
+
+- Treat 1-2 word terminal tails as a blocking segmentation defect when the previous cue is open, or when the previous cue looks suspiciously closed and the tail begins lowercase.
+- Merge these tails with the previous cue when gap, duration, and display length stay within conservative limits.
+- Prefer a slightly longer complete cue over a standalone one-word cue.
+- Keep ASR word timestamps intact; merges use existing word start/end times.
+- Add a display-only ASS fallback so old translated segments can still be rendered without isolated tails.
+- Clean safe display artifacts:
+  - `电子游戏。系列。` -> `电子游戏系列。`
+  - `property. market.` -> `property market.`
+  - duplicate Chinese tail sentences are removed only when the short tail text already appears in the previous sentence.
+
+### Files Changed
+
+- `timing.py`
+  - Added `is_terminal_orphan_tail()` and `can_absorb_terminal_orphan_tail()`.
+  - Merges open-left + terminal tail before normal sentence-boundary protections.
+  - Handles suspicious ASR punctuation such as `property.` + `market.`.
+  - Adds strong DP penalties against producing terminal 1-2 word tails.
+- `zh_reading_axis.py`
+  - Added `merge_orphan_tail_display_cues()`.
+  - Added English and Chinese cleanup for display-only merged cues.
+- `pipeline_core.py`
+  - Runs the orphan-tail display pass before writing bilingual ASS.
+- `segmentation_qa.py`
+  - Added `orphan_terminal_tail_count` and samples.
+  - `pass=false` when a residual terminal orphan tail remains.
+- `web/app.js`
+  - Added the frontend QA card `孤立句尾词`.
+- Tests:
+  - `test_timing_segmentation.py`
+  - `test_semantic_qa_phase2.py`
+
+### Validation
+
+Commands:
+
+- `python -m py_compile timing.py zh_reading_axis.py segmentation_qa.py pipeline_core.py`
+- `node --check web/app.js`
+- `pytest -q test_timing_segmentation.py test_semantic_qa_phase2.py test_zh_reading_axis.py test_subtitle_output_modes.py test_asr_repair_flow.py`
+
+Result:
+
+- `38 passed in 0.37s`
+- Russian sample regenerated from existing `05_translated_segments.json`.
+- `07j_segmentation_qa_metrics.json`:
+  - `orphan_terminal_tail_count = 0`
+  - `orphan_tail_group_count = 20`
+- The user-reported ASS case now renders as:
+  - Chinese: `后来还被改编成了更有名的电子游戏系列。`
+  - English: `that was made into an even more famous video game franchise.`
+- Additional discovered case now renders as:
+  - Chinese: `这种公寓很稀有，层高很高，在房产市场上价值不菲。`
+  - English: `These are rare, have tall ceilings and go for a lot of money on the property market.`
+
+### Remaining Notes
+
+- The sample still has other QA blockers (`pass=false`) from mixed-sentence/short-fragment/function-edge metrics. They are separate from orphan terminal tails.
+- Four remaining 1-2 word terminal English cues in the sample are not flagged because they look like independent short sentences or proper-name cues, e.g. `He wonders.` and `Juan Kokom.`
+- The display merge is intentionally conservative: strong pauses, severe length overflow, and uppercase independent short sentences are not force-merged.
