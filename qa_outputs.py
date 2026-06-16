@@ -163,6 +163,29 @@ def build_editor_review_rows(
 
     translation_metrics = (quality_metrics or {}).get("translation") if isinstance(quality_metrics, dict) else {}
     if isinstance(translation_metrics, dict):
+        for sample in translation_metrics.get("english_residue_samples") or []:
+            if not isinstance(sample, dict):
+                continue
+            decisions = [
+                item
+                for item in sample.get("decisions") or []
+                if isinstance(item, dict) and str(item.get("decision") or "") != "preserve"
+            ]
+            for decision in decisions:
+                add_row(
+                    segment_id=int(sample.get("segment_id") or 0),
+                    risk_type="english_residue",
+                    severity="high" if str(decision.get("decision") or "") == "translate" else "medium",
+                    risk_score=max(1, 10 - int(decision.get("preserve_score") or 0) // 10),
+                    source_text=str(sample.get("source_text") or ""),
+                    reference_text=str(sample.get("reference_text") or sample.get("source_text") or ""),
+                    target_text=str(sample.get("target_text") or ""),
+                    note=(
+                        f"{decision.get('candidate', '')}: score={decision.get('preserve_score', '')}; "
+                        f"decision={decision.get('decision', '')}; "
+                        f"reason={', '.join(str(value) for value in decision.get('reason_codes') or [])}"
+                    ),
+                )
         for sample in translation_metrics.get("untranslated_discourse_marker_samples") or []:
             if not isinstance(sample, dict):
                 continue

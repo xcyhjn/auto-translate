@@ -10,6 +10,7 @@ from typing import Any
 from typing import Callable
 
 from .models import Segment
+from .english_residue_policy import analyze_english_residue
 from .segment_io import save_segments_payload
 from .style_rules import build_style_guidance, load_style_prompt_text
 from .text_quality import (
@@ -19,6 +20,8 @@ from .text_quality import (
 )
 
 TranslationProgressCallback = Callable[[str, dict], None]
+DEFAULT_OPENAI_TIMEOUT_SECONDS = 60.0
+OPENAI_TIMEOUT_ENV = "AUTOSUB_OPENAI_TIMEOUT_SECONDS"
 TRANSLATABLE_FUNCTION_WORDS = {
     "am",
     "and",
@@ -69,6 +72,14 @@ class TranslationValidationError(RuntimeError):
         super().__init__(f"Translation validation failed: {details}")
 
 
+def blocking_translation_issues(issues: dict[str, list[int]]) -> dict[str, list[int]]:
+    return {
+        key: value
+        for key, value in issues.items()
+        if key != "short_english_leak" and value
+    }
+
+
 def short_error_message(exc: Exception) -> str:
     message = str(exc).strip()
     return message or exc.__class__.__name__
@@ -78,6 +89,8 @@ def classify_retry(exc: Exception, attempt: int, max_retries: int) -> tuple[floa
     message = short_error_message(exc).lower()
     if "rate limit" in message or "429" in message:
         return (min(120.0, 20.0 * (attempt + 1)), "rate_limit")
+    if "upstream" in message or "502" in message or "503" in message or "temporarily unavailable" in message:
+        return (min(180.0, 30.0 * (attempt + 1)), "upstream")
     if "timed out" in message or "timeout" in message:
         return (min(90.0, 10.0 * (attempt + 1)), "timeout")
     if "connection" in message or "handshake" in message:
@@ -124,13 +137,19 @@ def render_structured_glossary(payload: object) -> str:
         zh = str(item.get("zh") or canonical).strip()
         policy = str(item.get("policy") or "preserve").strip()
         term_type = str(item.get("type") or "term").strip()
+        priority = str(item.get("priority") or "").strip()
         aliases = [str(value).strip() for value in item.get("aliases") or [] if str(value).strip()]
         bad_aliases = [str(value).strip() for value in item.get("bad_aliases") or [] if str(value).strip()]
+        sources = [str(value).strip() for value in item.get("sources") or [] if str(value).strip()]
         line = f"- {canonical} | zh={zh} | type={term_type} | policy={policy}"
+        if priority:
+            line += f" | priority={priority}"
         if aliases:
             line += f" | aliases={'; '.join(aliases)}"
         if bad_aliases:
             line += f" | correct_bad_aliases={'; '.join(bad_aliases)} -> {canonical}"
+        if sources:
+            line += f" | sources={'; '.join(sources)}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -360,6 +379,10 @@ def validate_translations(
     dst_lang: str | None,
     preserved_terms: set[str] | None = None,
     preserved_phrases: set[str] | None = None,
+    glossary_text: str = "",
+    english_residue_validation_enabled: bool = True,
+    english_residue_preserve_threshold: int = 85,
+    english_residue_review_threshold: int = 70,
 ) -> dict[str, list[int]]:
     expected_ids = {segment.id for segment in chunk}
     returned_ids = set(translations)
@@ -375,6 +398,7 @@ def validate_translations(
         "target_without_chinese": [],
         "text_pollution": [],
         "short_english_leak": [],
+        "english_residue": [],
     }
     for segment_id in sorted(expected_ids & returned_ids):
         translated_text = translations.get(segment_id, "").strip()
@@ -406,7 +430,54 @@ def validate_translations(
         )
         if short_english_leaks:
             issues["short_english_leak"].append(segment_id)
+        if english_residue_validation_enabled:
+            residue_decisions = analyze_english_residue(
+                translated_text,
+                source_text=source_text,
+                reference_text=source_text,
+                dst_lang=dst_lang,
+                glossary_text=glossary_text,
+                preserve_threshold=english_residue_preserve_threshold,
+                review_threshold=english_residue_review_threshold,
+            )
+            if any(item.decision != "preserve" for item in residue_decisions):
+                issues["english_residue"].append(segment_id)
     return {key: value for key, value in issues.items() if value}
+
+
+def build_english_residue_repair_notes(
+    chunk: list[Segment],
+    translations: dict[int, str],
+    *,
+    dst_lang: str | None,
+    glossary_text: str = "",
+    english_residue_preserve_threshold: int = 85,
+    english_residue_review_threshold: int = 70,
+) -> list[dict]:
+    source_by_id = {segment.id: segment.source_text for segment in chunk}
+    notes: list[dict] = []
+    for segment_id, translated_text in sorted(translations.items()):
+        source_text = source_by_id.get(segment_id, "")
+        decisions = analyze_english_residue(
+            translated_text,
+            source_text=source_text,
+            reference_text=source_text,
+            dst_lang=dst_lang,
+            glossary_text=glossary_text,
+            preserve_threshold=english_residue_preserve_threshold,
+            review_threshold=english_residue_review_threshold,
+        )
+        flagged = [decision.to_dict() for decision in decisions if decision.decision != "preserve"]
+        if flagged:
+            notes.append(
+                {
+                    "id": segment_id,
+                    "source_text": source_text,
+                    "target_text": translated_text,
+                    "residue": flagged,
+                }
+            )
+    return notes
 
 
 def sanitize_base_url(base_url: str | None) -> str | None:
@@ -428,6 +499,17 @@ def resolve_openai_base_url(explicit_base_url: str | None = None) -> str | None:
         or os.getenv("OPENAI_BASE_URL")
         or os.getenv("OPENAI_API_BASE")
     )
+
+
+def resolve_openai_timeout_seconds() -> float:
+    raw_value = os.getenv(OPENAI_TIMEOUT_ENV, "").strip()
+    if not raw_value:
+        return DEFAULT_OPENAI_TIMEOUT_SECONDS
+    try:
+        parsed = float(raw_value)
+    except ValueError:
+        return DEFAULT_OPENAI_TIMEOUT_SECONDS
+    return max(10.0, min(600.0, parsed))
 
 
 def build_translation_prompt(
@@ -581,6 +663,9 @@ def translate_chunk_with_openai(
     retry_invalid_individually: bool = True,
     context_before: list[Segment] | None = None,
     context_after: list[Segment] | None = None,
+    english_residue_validation_enabled: bool = True,
+    english_residue_preserve_threshold: int = 85,
+    english_residue_review_threshold: int = 70,
 ) -> dict[int, str]:
     try:
         from openai import OpenAI
@@ -595,7 +680,7 @@ def translate_chunk_with_openai(
             "OPENAI_API_KEY is not set. Set it before using --translate-provider openai."
         )
 
-    client_kwargs = {"timeout": 30.0}
+    client_kwargs = {"timeout": resolve_openai_timeout_seconds(), "max_retries": 0}
     if base_url:
         # 如果你使用 GPTCodePlan 这类中转站，就在这里把 base_url 传给 SDK。
         client_kwargs["base_url"] = base_url
@@ -757,6 +842,10 @@ def translate_chunk_with_openai(
         dst_lang=dst_lang,
         preserved_terms=preserved_terms,
         preserved_phrases=preserved_phrases,
+        glossary_text=glossary_text,
+        english_residue_validation_enabled=english_residue_validation_enabled,
+        english_residue_preserve_threshold=english_residue_preserve_threshold,
+        english_residue_review_threshold=english_residue_review_threshold,
     )
     retryable_ids = sorted(
         set(issues.get("missing", []))
@@ -765,6 +854,7 @@ def translate_chunk_with_openai(
         | set(issues.get("target_without_chinese", []))
         | set(issues.get("text_pollution", []))
         | set(issues.get("short_english_leak", []))
+        | set(issues.get("english_residue", []))
     )
     if retryable_ids and retry_invalid_individually and len(chunk) > 1:
         segment_by_id = {segment.id: segment for segment in chunk}
@@ -782,6 +872,9 @@ def translate_chunk_with_openai(
                 retry_invalid_individually=False,
                 context_before=context_before,
                 context_after=context_after,
+                english_residue_validation_enabled=english_residue_validation_enabled,
+                english_residue_preserve_threshold=english_residue_preserve_threshold,
+                english_residue_review_threshold=english_residue_review_threshold,
             )
             translations[segment_id] = single_translation[segment_id]
         issues = validate_translations(
@@ -790,16 +883,31 @@ def translate_chunk_with_openai(
             dst_lang=dst_lang,
             preserved_terms=preserved_terms,
             preserved_phrases=preserved_phrases,
+            glossary_text=glossary_text,
+            english_residue_validation_enabled=english_residue_validation_enabled,
+            english_residue_preserve_threshold=english_residue_preserve_threshold,
+            english_residue_review_threshold=english_residue_review_threshold,
         )
 
     if issues and not retry_invalid_individually and len(chunk) == 1:
         segment = chunk[0]
         for repair_attempt in range(max_retries):
+            residue_notes = build_english_residue_repair_notes(
+                chunk,
+                translations,
+                dst_lang=dst_lang,
+                glossary_text=glossary_text,
+                english_residue_preserve_threshold=english_residue_preserve_threshold,
+                english_residue_review_threshold=english_residue_review_threshold,
+            )
             repair_prompt = (
                 f"{prompt}\n\nValidation failure repair attempt {repair_attempt + 1}/{max_retries}:\n"
                 f"- Failed issues: {json.dumps(issues, ensure_ascii=False)}\n"
                 f"- Previous invalid target_text: {json.dumps(translations.get(segment.id, ''), ensure_ascii=False)}\n"
-                "- Return a new clean target_text for this same ID that fixes every listed issue."
+                f"- English residue scoring notes: {json.dumps(residue_notes, ensure_ascii=False)}\n"
+                "- Return a new clean target_text for this same ID that fixes every listed issue.\n"
+                f"- For every English residue with preserve_score below {english_residue_preserve_threshold}, translate it into natural Simplified Chinese or absorb it into the sentence.\n"
+                "- Preserve English only when the scoring notes say decision=preserve."
             )
             try:
                 response = client.responses.create(
@@ -830,6 +938,10 @@ def translate_chunk_with_openai(
                     dst_lang=dst_lang,
                     preserved_terms=preserved_terms,
                     preserved_phrases=preserved_phrases,
+                    glossary_text=glossary_text,
+                    english_residue_validation_enabled=english_residue_validation_enabled,
+                    english_residue_preserve_threshold=english_residue_preserve_threshold,
+                    english_residue_review_threshold=english_residue_review_threshold,
                 )
                 if not issues:
                     break
@@ -843,8 +955,9 @@ def translate_chunk_with_openai(
                 wait_seconds, _ = classify_retry(exc, repair_attempt, max_retries)
                 time.sleep(wait_seconds)
 
-    if issues:
-        raise TranslationValidationError(issues)
+    blocking_issues = blocking_translation_issues(issues)
+    if blocking_issues:
+        raise TranslationValidationError(blocking_issues)
 
     return translations
 
@@ -867,7 +980,7 @@ def dry_run_openai_translation(
         ) from exc
 
     resolved_base_url = resolve_openai_base_url(base_url)
-    client_kwargs = {"timeout": 600.0}
+    client_kwargs = {"timeout": resolve_openai_timeout_seconds(), "max_retries": 0}
     if resolved_base_url:
         client_kwargs["base_url"] = resolved_base_url
 
@@ -904,6 +1017,9 @@ def translate_segments(
     checkpoint_path: str | None = None,
     checkpoint_input_file: str = "",
     resume_from_checkpoint: bool = True,
+    english_residue_validation_enabled: bool = True,
+    english_residue_preserve_threshold: int = 85,
+    english_residue_review_threshold: int = 70,
 ) -> list[Segment]:
     if not enabled:
         for segment in segments:
@@ -947,8 +1063,41 @@ def translate_segments(
         except Exception:
             completed_chunks = set()
 
+    def save_partial_checkpoint(last_segment_id: int) -> None:
+        if not checkpoint_target:
+            return
+        save_segments_payload(
+            segments,
+            checkpoint_target,
+            input_file=checkpoint_input_file,
+            summary={
+                "stage": "translated_segments_partial",
+                "chunk_size": chunk_size,
+                "completed_chunks": len(completed_chunks),
+                "chunk_total": len(chunks),
+                "last_segment_id": last_segment_id,
+            },
+        )
+
+    def translate_single_fallback(single_segment: Segment) -> dict[int, str]:
+        return translate_chunk_with_openai(
+            [single_segment],
+            src_lang=src_lang,
+            dst_lang=dst_lang,
+            glossary_text=glossary_text,
+            style_prompt_text=style_prompt_text,
+            model=model,
+            base_url=resolved_base_url,
+            max_retries=max(2, max_retries),
+            context_before=[],
+            context_after=[],
+            english_residue_validation_enabled=english_residue_validation_enabled,
+            english_residue_preserve_threshold=english_residue_preserve_threshold,
+            english_residue_review_threshold=english_residue_review_threshold,
+        )
+
     for chunk_index, (start_index, end_index, chunk) in enumerate(chunks, start=1):
-        if chunk_index in completed_chunks and all((segment.target_text or "").strip() for segment in chunk):
+        if all((segment.target_text or "").strip() for segment in chunk):
             if progress_callback:
                 progress_callback(
                     "translation_chunk_complete",
@@ -957,6 +1106,7 @@ def translate_segments(
                         "chunk_total": len(chunks),
                         "segment_count": len(chunk),
                         "reused": True,
+                        "checkpoint_reused": chunk_index in completed_chunks,
                     },
                 )
             continue
@@ -991,6 +1141,7 @@ def translate_segments(
         print(f"Translating chunk {chunk_index}/{len(chunks)} with {len(chunk)} segments.")
         started_at = time.time()
         translations = dict(direct_translations)
+        split_fallback_count = 0
         if chunk_for_model:
             try:
                 model_translations = translate_chunk_with_openai(
@@ -1004,14 +1155,50 @@ def translate_segments(
                     max_retries=max_retries,
                     context_before=context_before,
                     context_after=context_after,
+                    english_residue_validation_enabled=english_residue_validation_enabled,
+                    english_residue_preserve_threshold=english_residue_preserve_threshold,
+                    english_residue_review_threshold=english_residue_review_threshold,
                 )
                 translations.update(model_translations)
             except Exception as exc:
-                chunk_summary = (
-                    f"chunk {chunk_index}/{len(chunks)} failed after {round(time.time() - started_at, 2)}s; "
-                    f"segment_ids={chunk[0].id}-{chunk[-1].id}; count={len(chunk)}"
-                )
-                raise RuntimeError(f"{chunk_summary}\n{exc}") from exc
+                if len(chunk_for_model) <= 1:
+                    single_segment = chunk_for_model[0]
+                    try:
+                        single_translations = translate_single_fallback(single_segment)
+                        translations.update(single_translations)
+                        translated_text = single_translations.get(single_segment.id, "").strip()
+                        if translated_text:
+                            single_segment.target_text = translated_text
+                            save_partial_checkpoint(single_segment.id)
+                    except Exception as single_exc:
+                        chunk_summary = (
+                            f"chunk {chunk_index}/{len(chunks)} single fallback failed after "
+                            f"{round(time.time() - started_at, 2)}s; "
+                            f"segment_id={single_segment.id}; count=1"
+                        )
+                        raise RuntimeError(f"{chunk_summary}\n{single_exc}") from single_exc
+                else:
+                    split_fallback_count = len(chunk_for_model)
+                    print(
+                        f"Chunk {chunk_index}/{len(chunks)} failed as a batch; "
+                        f"retrying {split_fallback_count} segments individually."
+                    )
+                    for single_segment in chunk_for_model:
+                        single_started_at = time.time()
+                        try:
+                            single_translations = translate_single_fallback(single_segment)
+                            translations.update(single_translations)
+                            translated_text = single_translations.get(single_segment.id, "").strip()
+                            if translated_text:
+                                single_segment.target_text = translated_text
+                                save_partial_checkpoint(single_segment.id)
+                        except Exception as single_exc:
+                            chunk_summary = (
+                                f"chunk {chunk_index}/{len(chunks)} split fallback failed after "
+                                f"{round(time.time() - single_started_at, 2)}s; "
+                                f"segment_id={single_segment.id}; count=1"
+                            )
+                            raise RuntimeError(f"{chunk_summary}\n{single_exc}") from single_exc
         fallback_count = 0
         for segment in chunk:
             translated_text = translations.get(segment.id, "").strip()
@@ -1028,6 +1215,7 @@ def translate_segments(
                     "direct_count": len(direct_translations),
                     "locked_count": len(locked_translations),
                     "fallback_count": fallback_count,
+                    "split_fallback_count": split_fallback_count,
                     "elapsed_seconds": round(time.time() - started_at, 2),
                     "context_before": len(context_before),
                     "context_after": len(context_after),

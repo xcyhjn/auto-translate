@@ -16,6 +16,7 @@ from .bilingual_postprocess import postprocess_bilingual_segments
 from .difficult_spans import detect_difficult_spans
 from .display_rewrite import rewrite_display_segments
 from .entity_normalization import audit_ass_entities, build_entity_metrics, build_entity_review_rows, normalize_entities
+from .english_residue_policy import build_english_residue_report
 from .glossary import (
     apply_glossary_alias_corrections,
     apply_translate_policy_corrections,
@@ -483,6 +484,9 @@ def run_pipeline(
     semantic_zh_allocation_enabled: bool = True,
     semantic_zh_allocation_max_spans: int = 16,
     short_complete_sentence_display_grouping: bool = True,
+    english_residue_validation_enabled: bool = True,
+    english_residue_preserve_threshold: int = 85,
+    english_residue_review_threshold: int = 70,
     enable_ai_display_rewrite: bool = False,
     display_rewrite_max_ai_segments: int = 12,
     bootstrap_entity_decisions: str | bool = "high_confidence_only",
@@ -1135,6 +1139,9 @@ def run_pipeline(
                     base_url=openai_base_url,
                     max_retries=translation_retries,
                     max_spans=span_translation_max_spans,
+                    english_residue_validation_enabled=english_residue_validation_enabled,
+                    english_residue_preserve_threshold=english_residue_preserve_threshold,
+                    english_residue_review_threshold=english_residue_review_threshold,
                     locked_ids=locked_translation_ids,
                     progress_callback=lambda stage, progress: (
                         checkpoint(control_callback, stage, progress),
@@ -1185,6 +1192,9 @@ def run_pipeline(
             checkpoint_path=str(translated_json_path),
             checkpoint_input_file=str(input_path),
             resume_from_checkpoint=bool(load_existing_segments and not force_retranslate_existing_segments),
+            english_residue_validation_enabled=english_residue_validation_enabled,
+            english_residue_preserve_threshold=english_residue_preserve_threshold,
+            english_residue_review_threshold=english_residue_review_threshold,
         )
         glossary_json_path = get_glossary_json_path(output_dir)
         alias_stats = apply_glossary_alias_corrections(translated_segments, glossary_json_path)
@@ -1611,6 +1621,8 @@ def run_pipeline(
         zh_wrap_trigger_chars=effective_style.zh_wrap_trigger_chars,
         zh_max_lines=effective_style.zh_max_lines,
         require_bound_zh=not dual_axis_mode,
+        english_residue_preserve_threshold=english_residue_preserve_threshold,
+        english_residue_review_threshold=english_residue_review_threshold,
     )
     segmentation_metrics = build_segmentation_qa_metrics(
         translated_segments,
@@ -1620,13 +1632,25 @@ def run_pipeline(
         orphan_tail_display_report=orphan_tail_display_report,
         source_repair_report=source_repair_report,
     )
+    english_residue_report = build_english_residue_report(
+        translated_segments,
+        dst_lang=dst_lang,
+        glossary_path=glossary_json_path,
+        project_dir=output_dir,
+        preserve_threshold=english_residue_preserve_threshold,
+        review_threshold=english_residue_review_threshold,
+    )
     quality_metrics["segmentation"] = segmentation_metrics.get("segmentation", {})
     quality_metrics["semantic_allocation"] = segmentation_metrics.get("allocation", {})
     quality_metrics["source_repair"] = segmentation_metrics.get("source_repair", {})
     quality_metrics["display_grouping"] = segmentation_metrics.get("display_grouping", {})
+    quality_metrics["english_residue"] = english_residue_report.get("summary", {})
     quality_metrics["summary"]["segmentation_blocking_issue_count"] = segmentation_metrics["summary"]["blocking_issue_count"]
     quality_metrics["summary"]["semantic_allocation_review_count"] = segmentation_metrics["allocation"]["review_count"]
     quality_metrics["summary"]["display_short_sentence_group_count"] = segmentation_metrics["display_grouping"]["group_count"]
+    quality_metrics["summary"]["english_residue_blocking_count"] = english_residue_report["summary"]["english_residue_blocking_count"]
+    quality_metrics["summary"]["english_residue_review_count"] = english_residue_report["summary"]["english_residue_review_count"]
+    quality_metrics["summary"]["english_residue_preserved_count"] = english_residue_report["summary"]["english_residue_preserved_count"]
     report.errors.extend(display_report.errors)
     report.errors.extend(final_ass_report.errors)
     report.errors.extend(glossary_report.errors)
@@ -1654,6 +1678,23 @@ def run_pipeline(
         segmentation_metrics,
         input_path=input_path,
         segment_count=len(translated_segments),
+    )
+    write_stage_json(
+        output_dir / "07k_english_residue_report.json",
+        english_residue_report,
+        input_path=input_path,
+        segment_count=len(translated_segments),
+    )
+    write_tsv(
+        output_dir / "07k_english_residue_review.tsv",
+        ["segment_id", "candidate", "category", "preserve_score", "decision", "reason_codes", "suggested_action", "source_text", "reference_text", "target_text"],
+        [
+            {
+                **item,
+                "reason_codes": ", ".join(item.get("reason_codes") or []),
+            }
+            for item in english_residue_report.get("items") or []
+        ],
     )
     write_tsv(
         output_dir / "07d_editor_review.tsv",
@@ -1792,6 +1833,8 @@ def run_pipeline(
                 "07h_entity_qa.tsv",
                 "07i_entity_metrics.json",
                 "07j_segmentation_qa_metrics.json",
+                "07k_english_residue_report.json",
+                "07k_english_residue_review.tsv",
                 "08b_ass_entity_audit.json",
                 "00_entity_decisions.json" if (output_dir / "00_entity_decisions.json").exists() else None,
                 plan.ass_name,
@@ -1907,6 +1950,8 @@ def run_pipeline(
             "07h_entity_qa.tsv",
             "07i_entity_metrics.json",
             "07j_segmentation_qa_metrics.json",
+            "07k_english_residue_report.json",
+            "07k_english_residue_review.tsv",
             "08b_ass_entity_audit.json",
             plan.ass_name,
             plan.legacy_ass_name if plan.ass_name != plan.legacy_ass_name else None,

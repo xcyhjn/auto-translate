@@ -110,6 +110,9 @@ DEFAULT_CONFIG = {
     "semantic_zh_allocation_enabled": True,
     "semantic_zh_allocation_max_spans": 16,
     "short_complete_sentence_display_grouping": True,
+    "english_residue_validation_enabled": True,
+    "english_residue_preserve_threshold": 85,
+    "english_residue_review_threshold": 70,
     "enable_ai_display_rewrite": False,
     "display_rewrite_max_ai_segments": 12,
     "bootstrap_entity_decisions": "high_confidence_only",
@@ -594,9 +597,15 @@ def normalize_config(config: dict) -> dict:
     normalized["load_existing_segments"] = bool(normalized.get("load_existing_segments", False))
     normalized["semantic_zh_allocation_enabled"] = bool(normalized.get("semantic_zh_allocation_enabled", True))
     normalized["short_complete_sentence_display_grouping"] = bool(normalized.get("short_complete_sentence_display_grouping", True))
+    normalized["english_residue_validation_enabled"] = bool(normalized.get("english_residue_validation_enabled", True))
     for key in ("span_translation_max_spans", "span_repair_max_spans", "semantic_zh_allocation_max_spans"):
         try:
             normalized[key] = max(0, int(normalized.get(key, DEFAULT_CONFIG[key]) or 0))
+        except (TypeError, ValueError):
+            normalized[key] = DEFAULT_CONFIG[key]
+    for key in ("english_residue_preserve_threshold", "english_residue_review_threshold"):
+        try:
+            normalized[key] = max(0, min(100, int(normalized.get(key, DEFAULT_CONFIG[key]) or DEFAULT_CONFIG[key])))
         except (TypeError, ValueError):
             normalized[key] = DEFAULT_CONFIG[key]
     normalized["subtitle_mode"] = normalize_subtitle_mode(normalized.get("subtitle_mode"))
@@ -2363,6 +2372,9 @@ def execute_pipeline_job(video_path: str, config: dict, task_id: str | None = No
             semantic_zh_allocation_enabled=bool(config.get("semantic_zh_allocation_enabled", True)),
             semantic_zh_allocation_max_spans=int(config.get("semantic_zh_allocation_max_spans", 16) or 0),
             short_complete_sentence_display_grouping=bool(config.get("short_complete_sentence_display_grouping", True)),
+            english_residue_validation_enabled=bool(config.get("english_residue_validation_enabled", True)),
+            english_residue_preserve_threshold=int(config.get("english_residue_preserve_threshold", 85) or 85),
+            english_residue_review_threshold=int(config.get("english_residue_review_threshold", 70) or 70),
             enable_ai_display_rewrite=bool(config.get("enable_ai_display_rewrite", False)),
             display_rewrite_max_ai_segments=int(config.get("display_rewrite_max_ai_segments", 12) or 12),
             bootstrap_entity_decisions=config.get("bootstrap_entity_decisions", "high_confidence_only"),

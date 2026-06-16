@@ -8,6 +8,8 @@ def build_expected_entity_outputs(*, include_project_decisions: bool) -> list[st
         "06e_entity_decisions.json",
         "06f_entity_review.tsv",
         "06g_entity_normalized_segments.json",
+        "07k_english_residue_report.json",
+        "07k_english_residue_review.tsv",
         "08b_ass_entity_audit.json",
     ]
     if include_project_decisions:
@@ -38,6 +40,8 @@ def test_pipeline_core_manifest_contract_includes_entity_outputs() -> None:
         "06e_entity_decisions.json",
         "06f_entity_review.tsv",
         "06g_entity_normalized_segments.json",
+        "07k_english_residue_report.json",
+        "07k_english_residue_review.tsv",
         "08b_ass_entity_audit.json",
         "00_entity_decisions.json",
     ):

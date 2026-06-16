@@ -102,6 +102,9 @@ const DEFAULT_UI_CONFIG = {
   semantic_zh_allocation_enabled: true,
   semantic_zh_allocation_max_spans: 16,
   short_complete_sentence_display_grouping: true,
+  english_residue_validation_enabled: true,
+  english_residue_preserve_threshold: 85,
+  english_residue_review_threshold: 70,
   enable_ai_display_rewrite: false,
   display_rewrite_max_ai_segments: 12,
   bootstrap_entity_decisions: "high_confidence_only",
@@ -712,6 +715,9 @@ function readFormConfig() {
     semantic_zh_allocation_enabled: el("semantic_zh_allocation_enabled")?.checked !== false,
     semantic_zh_allocation_max_spans: Number(el("semantic_zh_allocation_max_spans")?.value || 16),
     short_complete_sentence_display_grouping: el("short_complete_sentence_display_grouping")?.checked !== false,
+    english_residue_validation_enabled: state.config?.english_residue_validation_enabled !== false,
+    english_residue_preserve_threshold: Number(state.config?.english_residue_preserve_threshold ?? 85),
+    english_residue_review_threshold: Number(state.config?.english_residue_review_threshold ?? 70),
     enable_ai_display_rewrite: el("enable_ai_display_rewrite").checked,
     display_rewrite_max_ai_segments: Number(el("display_rewrite_max_ai_segments").value || 12),
     bootstrap_entity_decisions: normalizeBootstrapMode(el("bootstrap_entity_decisions")?.value),
@@ -1435,12 +1441,16 @@ const ENTITY_ARTIFACT_FILES = {
   metrics: "07i_entity_metrics.json",
   review: "06f_entity_review.tsv",
   qa: "07h_entity_qa.tsv",
+  residue: "07k_english_residue_review.tsv",
+  residueReport: "07k_english_residue_report.json",
   normalized: "06g_entity_normalized_segments.json",
   decisions: "00_entity_decisions.json",
 };
 
 const SEGMENTATION_ARTIFACT_FILES = {
   metrics: "07j_segmentation_qa_metrics.json",
+  residue: "07k_english_residue_report.json",
+  residueTsv: "07k_english_residue_review.tsv",
   allocation: "05a_semantic_allocation_report.json",
   repair: "03b_source_repair_report.json",
   previewMetrics: "segmentation_preview_metrics.json",
@@ -1508,6 +1518,8 @@ function renderMetricCards(summary) {
     ["译文修正", summary?.target_text_replacements ?? 0],
     ["ASS 问题", summary?.ass_issue_count ?? 0],
     ["译文残留实体", summary?.target_entity_residue_count ?? 0],
+    ["英文残留", summary?.english_residue_count ?? 0],
+    ["残留复核", summary?.english_residue_review_count ?? 0],
   ];
   return metrics
     .map(
@@ -1679,6 +1691,26 @@ function renderEntityReviewPanel() {
 
       <section class="entity-section wide">
         <div class="entity-section-head">
+          <h5>英文残留评分 TSV</h5>
+          <span>${countRows(artifacts.residueRows)} 行</span>
+        </div>
+        ${renderEntityTable({
+          rows: artifacts.residueRows,
+          columns: [
+            { key: "segment_id", label: "分段" },
+            { key: "candidate", label: "残留" },
+            { key: "preserve_score", label: "分数" },
+            { key: "decision", label: "决策" },
+            { key: "reason_codes", label: "原因" },
+            { key: "target_text", label: "译文" },
+          ],
+          emptyText: "07k_english_residue_review.tsv 中未找到英文残留行。",
+          limit: 10,
+        })}
+      </section>
+
+      <section class="entity-section wide">
+        <div class="entity-section-head">
           <h5>参考文本对照</h5>
           <span>${referenceRows.length} 段</span>
         </div>
@@ -1704,6 +1736,7 @@ function renderSegmentationMetricCards(metrics) {
   const allocation = metrics?.allocation || {};
   const repair = metrics?.source_repair || {};
   const display = metrics?.display_grouping || {};
+  const residue = metrics?.english_residue || {};
   const cards = [
     ["短残片", segmentation.short_fragment_count ?? 0],
     ["混句", segmentation.mixed_sentence_count ?? 0],
@@ -1715,6 +1748,8 @@ function renderSegmentationMetricCards(metrics) {
     ["ASR 候选", repair.candidate_count ?? 0],
     ["ASR 复核", repair.review_count ?? 0],
     ["短句合屏", display.group_count ?? 0],
+    ["英文残留", residue.english_residue_blocking_count ?? summary.english_residue_blocking_count ?? 0],
+    ["残留复核", residue.english_residue_review_count ?? summary.english_residue_review_count ?? 0],
   ];
   return cards
     .map(
@@ -1864,6 +1899,8 @@ function renderSegmentationReviewPanel() {
         <div class="qa-artifact-links">
           ${[
             SEGMENTATION_ARTIFACT_FILES.metrics,
+            SEGMENTATION_ARTIFACT_FILES.residue,
+            SEGMENTATION_ARTIFACT_FILES.residueTsv,
             SEGMENTATION_ARTIFACT_FILES.allocation,
             SEGMENTATION_ARTIFACT_FILES.repair,
             "08_bilingual_zh_en.ass",
@@ -1893,6 +1930,7 @@ async function loadSegmentationArtifactsForProject(project) {
   const token = state.segmentationArtifacts.token + 1;
   const files = {
     metrics: getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.metrics),
+    residue: getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.residue),
     allocation: getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.allocation),
     repair: getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.repair),
     previewMetrics: getProjectFile(project, SEGMENTATION_ARTIFACT_FILES.previewMetrics),
@@ -1919,13 +1957,26 @@ async function loadSegmentationArtifactsForProject(project) {
       return null;
     }
   };
-  const [metrics, allocation, repair] = await Promise.all([
+  const [metrics, residue, allocation, repair] = await Promise.all([
     guarded("metrics", fetchJsonArtifact),
+    guarded("residue", fetchJsonArtifact),
     guarded("allocation", fetchJsonArtifact),
     guarded("repair", fetchJsonArtifact),
   ]);
   if (state.segmentationArtifacts.token !== token) return;
   nextArtifacts.metrics = metrics || allocation || repair || null;
+  if (residue?.summary) {
+    nextArtifacts.metrics = {
+      ...(nextArtifacts.metrics || {}),
+      english_residue: residue.summary,
+      summary: {
+        ...((nextArtifacts.metrics || {}).summary || {}),
+        english_residue_blocking_count: residue.summary.english_residue_blocking_count ?? 0,
+        english_residue_review_count: residue.summary.english_residue_review_count ?? 0,
+        english_residue_preserved_count: residue.summary.english_residue_preserved_count ?? 0,
+      },
+    };
+  }
   nextArtifacts.allocation = allocation || null;
   nextArtifacts.repair = repair || null;
   nextArtifacts.signature = projectSegmentationSignature(project);
@@ -1964,6 +2015,8 @@ async function loadEntityArtifactsForProject(project) {
     metrics: getProjectFile(project, ENTITY_ARTIFACT_FILES.metrics),
     review: getProjectFile(project, ENTITY_ARTIFACT_FILES.review),
     qa: getProjectFile(project, ENTITY_ARTIFACT_FILES.qa),
+    residue: getProjectFile(project, ENTITY_ARTIFACT_FILES.residue),
+    residueReport: getProjectFile(project, ENTITY_ARTIFACT_FILES.residueReport),
     normalized: getProjectFile(project, ENTITY_ARTIFACT_FILES.normalized),
     decisions: getProjectFile(project, ENTITY_ARTIFACT_FILES.decisions),
   };
@@ -1975,6 +2028,7 @@ async function loadEntityArtifactsForProject(project) {
     metrics: null,
     reviewRows: [],
     qaRows: [],
+    residueRows: [],
     normalizedSegments: [],
     decisions: null,
     missing: Object.entries(files).filter(([, file]) => !file).map(([name]) => ENTITY_ARTIFACT_FILES[name]),
@@ -1993,18 +2047,33 @@ async function loadEntityArtifactsForProject(project) {
     }
   };
 
-  const [metrics, reviewRows, qaRows, normalized, decisions] = await Promise.all([
+  const [metrics, reviewRows, qaRows, residueRows, residueReport, normalized, decisions] = await Promise.all([
     guarded("metrics", fetchJsonArtifact),
     guarded("review", fetchTsvArtifact),
     guarded("qa", fetchTsvArtifact),
+    guarded("residue", fetchTsvArtifact),
+    guarded("residueReport", fetchJsonArtifact),
     guarded("normalized", fetchJsonArtifact),
     guarded("decisions", fetchJsonArtifact),
   ]);
 
   if (state.entityArtifacts.token !== token) return;
   nextArtifacts.metrics = metrics || null;
+  if (!nextArtifacts.metrics && residueReport) nextArtifacts.metrics = { summary: residueReport.summary || {} };
+  if (nextArtifacts.metrics && residueReport?.summary) {
+    nextArtifacts.metrics = {
+      ...nextArtifacts.metrics,
+      summary: {
+        ...(nextArtifacts.metrics.summary || {}),
+        english_residue_count: residueReport.summary.english_residue_blocking_count ?? 0,
+        english_residue_review_count: residueReport.summary.english_residue_review_count ?? 0,
+        english_residue_preserved_count: residueReport.summary.english_residue_preserved_count ?? 0,
+      },
+    };
+  }
   nextArtifacts.reviewRows = reviewRows || [];
   nextArtifacts.qaRows = qaRows || [];
+  nextArtifacts.residueRows = residueRows || [];
   nextArtifacts.normalizedSegments = Array.isArray(normalized?.segments) ? normalized.segments : [];
   nextArtifacts.decisions = decisions || null;
   nextArtifacts.signature = projectEntitySignature(project);
@@ -2023,6 +2092,7 @@ function refreshEntityArtifactsForSelectedProject() {
       metrics: null,
       reviewRows: [],
       qaRows: [],
+      residueRows: [],
       normalizedSegments: [],
       decisions: null,
       missing: [],

@@ -5,6 +5,7 @@ import os
 import time
 from typing import Callable
 
+from .english_residue_policy import analyze_english_residue
 from .models import Segment
 from .style_rules import build_style_guidance
 from .text_quality import find_text_pollution
@@ -16,6 +17,7 @@ from .translate import (
     is_allowable_non_chinese_translation,
     parse_json_payload,
     resolve_openai_base_url,
+    resolve_openai_timeout_seconds,
     short_error_message,
     style_glossary_hints,
 )
@@ -120,6 +122,10 @@ def validate_span_translations(
     translations: dict[int, str],
     *,
     dst_lang: str | None,
+    glossary_text: str = "",
+    english_residue_validation_enabled: bool = True,
+    english_residue_preserve_threshold: int = 85,
+    english_residue_review_threshold: int = 70,
 ) -> dict[str, list[int]]:
     expected_ids = {segment.id for segment in span_segments}
     returned_ids = set(translations)
@@ -130,6 +136,7 @@ def validate_span_translations(
         "empty": [],
         "target_without_chinese": [],
         "text_pollution": [],
+        "english_residue": [],
     }
     for segment_id in sorted(expected_ids & returned_ids):
         target_text = translations.get(segment_id, "").strip()
@@ -145,7 +152,55 @@ def validate_span_translations(
             issues["target_without_chinese"].append(segment_id)
         if find_text_pollution(target_text, dst_lang=dst_lang):
             issues["text_pollution"].append(segment_id)
+        if english_residue_validation_enabled:
+            residue_decisions = analyze_english_residue(
+                target_text,
+                source_text=source_text,
+                reference_text=source_text,
+                dst_lang=dst_lang,
+                glossary_text=glossary_text,
+                preserve_threshold=english_residue_preserve_threshold,
+                review_threshold=english_residue_review_threshold,
+            )
+            if any(item.decision != "preserve" for item in residue_decisions):
+                issues["english_residue"].append(segment_id)
     return {key: value for key, value in issues.items() if value}
+
+
+def parse_span_json_payload(raw_text: str) -> dict:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    payload = json.loads(text)
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list):
+        return {"intent_zh": "", "translations": payload, "span_note": ""}
+    raise ValueError("Span translation response JSON must be an object.")
+
+
+def request_span_translation_with_chat_completions(client, *, model: str, prompt: str) -> str:
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": "Return valid JSON only."},
+            {
+                "role": "user",
+                "content": (
+                    f"{prompt}\n\n"
+                    "Return compact JSON in this exact shape: "
+                    '{"intent_zh":"...","translations":[{"id":1,"target_text":"...","note":"..."}],"span_note":"..."}'
+                ),
+            },
+        ],
+        response_format={"type": "json_object"},
+    )
+    return (response.choices[0].message.content or "").strip()
 
 
 def select_span_translation_candidates(
@@ -155,6 +210,8 @@ def select_span_translation_candidates(
     max_spans: int = DEFAULT_MAX_SPANS,
     max_segments_per_span: int = DEFAULT_MAX_SEGMENTS_PER_SPAN,
 ) -> list[dict]:
+    if max_spans <= 0:
+        return []
     locked_ids = locked_ids or set()
     candidates: list[dict] = []
     for span in (source_spans or {}).get("spans") or []:
@@ -172,9 +229,7 @@ def select_span_translation_candidates(
         item["segment_ids"] = unlocked_ids
         candidates.append(item)
     candidates.sort(key=lambda item: (-int(item.get("risk_score") or 0), int(item.get("start_segment_id") or 0)))
-    if max_spans > 0:
-        candidates = candidates[:max_spans]
-    return candidates
+    return candidates[:max_spans]
 
 
 def translate_source_span_with_openai(
@@ -190,6 +245,9 @@ def translate_source_span_with_openai(
     base_url: str | None = None,
     max_retries: int = 2,
     context_window: int = 4,
+    english_residue_validation_enabled: bool = True,
+    english_residue_preserve_threshold: int = 85,
+    english_residue_review_threshold: int = 70,
 ) -> dict:
     try:
         from openai import OpenAI
@@ -223,7 +281,7 @@ def translate_source_span_with_openai(
         style_prompt_text=style_prompt_text,
     )
 
-    client_kwargs = {"timeout": 600.0}
+    client_kwargs = {"timeout": resolve_openai_timeout_seconds(), "max_retries": 0}
     if base_url:
         client_kwargs["base_url"] = base_url
     client = OpenAI(**client_kwargs)
@@ -233,21 +291,28 @@ def translate_source_span_with_openai(
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
-            response = client.responses.create(
-                model=model,
-                input=prompt,
-                text={
-                    "format": {
-                        "type": "json_schema",
-                        "name": "subtitle_span_translation",
-                        "strict": True,
-                        "schema": schema,
+            if base_url:
+                raw_text = request_span_translation_with_chat_completions(
+                    client,
+                    model=model,
+                    prompt=prompt,
+                )
+            else:
+                response = client.responses.create(
+                    model=model,
+                    input=prompt,
+                    text={
+                        "format": {
+                            "type": "json_schema",
+                            "name": "subtitle_span_translation",
+                            "strict": True,
+                            "schema": schema,
+                        },
+                        "verbosity": "low",
                     },
-                    "verbosity": "low",
-                },
-            )
-            raw_text = response.output_text.strip()
-            payload = json.loads(raw_text)
+                )
+                raw_text = response.output_text.strip()
+            payload = parse_span_json_payload(raw_text)
             translations_payload = payload.get("translations") if isinstance(payload, dict) else parse_json_payload(raw_text)
             translations = {
                 int(item["id"]): str(item["target_text"]).strip()
@@ -256,7 +321,15 @@ def translate_source_span_with_openai(
             }
             for extra_id in sorted(set(translations) - set(span_ids)):
                 translations.pop(extra_id, None)
-            issues = validate_span_translations(span_segments, translations, dst_lang=dst_lang)
+            issues = validate_span_translations(
+                span_segments,
+                translations,
+                dst_lang=dst_lang,
+                glossary_text=glossary_text,
+                english_residue_validation_enabled=english_residue_validation_enabled,
+                english_residue_preserve_threshold=english_residue_preserve_threshold,
+                english_residue_review_threshold=english_residue_review_threshold,
+            )
             if issues:
                 raise TranslationValidationError(issues)
             for segment in span_segments:
@@ -304,6 +377,9 @@ def translate_source_spans(
     max_retries: int = 2,
     locked_ids: set[int] | None = None,
     max_spans: int = DEFAULT_MAX_SPANS,
+    english_residue_validation_enabled: bool = True,
+    english_residue_preserve_threshold: int = 85,
+    english_residue_review_threshold: int = 70,
     progress_callback: SpanTranslateProgressCallback | None = None,
 ) -> tuple[set[int], dict]:
     locked_ids = set(locked_ids or set())
@@ -347,6 +423,9 @@ def translate_source_spans(
             model=model,
             base_url=resolved_base_url,
             max_retries=max_retries,
+            english_residue_validation_enabled=english_residue_validation_enabled,
+            english_residue_preserve_threshold=english_residue_preserve_threshold,
+            english_residue_review_threshold=english_residue_review_threshold,
         )
         results.append(result)
         if result.get("status") == "translated":

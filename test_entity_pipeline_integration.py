@@ -59,6 +59,8 @@ def test_run_pipeline_writes_entity_outputs_from_existing_segments(tmp_path, mon
     assert (project_dir / "06f_entity_review.tsv").exists()
     assert (project_dir / "06g_entity_normalized_segments.json").exists()
     assert (project_dir / "07h_entity_qa.tsv").exists()
+    assert (project_dir / "07k_english_residue_report.json").exists()
+    assert (project_dir / "07k_english_residue_review.tsv").exists()
     assert (project_dir / "08b_ass_entity_audit.json").exists()
     assert (project_dir / "00_entity_decisions.json").exists()
 
@@ -76,9 +78,15 @@ def test_run_pipeline_writes_entity_outputs_from_existing_segments(tmp_path, mon
     entity_qa_tsv = (project_dir / "07h_entity_qa.tsv").read_text(encoding="utf-8-sig")
     assert "non_canonical_reference_name" in entity_qa_tsv or "entity_residue_in_target" in entity_qa_tsv
 
+    residue_report = json.loads((project_dir / "07k_english_residue_report.json").read_text(encoding="utf-8"))
+    assert residue_report["summary"]["english_residue_total_count"] >= 0
+    assert "07k_english_residue_review.tsv" in (project_dir / "10_manifest_bilingual.json").read_text(encoding="utf-8")
+
     assert "06e_entity_decisions.json" in manifest["files"]
     assert "06f_entity_review.tsv" in manifest["files"]
     assert "06g_entity_normalized_segments.json" in manifest["files"]
     assert "07h_entity_qa.tsv" in manifest["files"]
+    assert "07k_english_residue_report.json" in manifest["files"]
+    assert "07k_english_residue_review.tsv" in manifest["files"]
     assert "08b_ass_entity_audit.json" in manifest["files"]
     assert "00_entity_decisions.json" in manifest["files"]

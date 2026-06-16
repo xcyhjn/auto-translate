@@ -456,3 +456,62 @@ Rollback:
 Next:
 
 - Keep the docs and logs aligned with the new classifier and commit only the task-related files.
+
+## 2026-06-17 04:22 +08:00 - English Residue Scoring And Strict Chinese Localization
+
+Hypothesis:
+
+- English residue in Chinese subtitles should not be controlled by prompt wording alone. A shared scorer can decide whether each Latin span is allowed to remain, and low-score residue should block translation repair instead of becoming passive QA noise.
+
+What:
+
+- Added `english_residue_policy.py`.
+- Added scoring categories for:
+  - explicit hard preserve
+  - code/path/software identifiers
+  - auto glossary soft preserve
+  - proper names
+  - common translatable places/languages/history terms
+  - function/discourse words
+- Wired the scorer into:
+  - `translate.py`
+  - `span_translate.py`
+  - `qa.py`
+  - `pipeline_core.py`
+  - `entity_normalization.py`
+  - `qa_outputs.py`
+  - `web/app.js`
+- Added `07k_english_residue_report.json` and `07k_english_residue_review.tsv`.
+- Added frontend cards and review table entries for English residue metrics.
+
+Self-correction:
+
+- First pass treated all glossary `policy=preserve` terms as hard preserve.
+- Russian sample showed auto-generated glossary entries such as `Dmitri`, `Moscow`, `God`, and `Yuri Andreevich Knorosov` would be over-preserved.
+- Revised policy:
+  - common translatable names/places/ordinary words override auto preserve
+  - ASR/Youtube auto preserve becomes `glossary_soft_preserve`
+  - only hard/manual preserve stays 100
+  - code/identifier-like terms such as `L5` can still preserve
+
+Validation:
+
+- `python -m py_compile english_residue_policy.py translate.py span_translate.py qa.py qa_outputs.py entity_normalization.py pipeline_core.py pipeline_runner.py ui_server.py`
+- `node --check web\app.js`
+- `pytest -q test_english_residue_policy.py test_qa_outputs.py test_entity_pipeline_contract.py test_entity_pipeline_integration.py test_workflow_profiles.py test_ui_server_config.py`
+  - `23 passed in 0.63s`
+- Offline Russian sample scoring from existing `05_translated_segments.json`:
+  - `english_residue_total_count = 224`
+  - `english_residue_blocking_count = 222`
+  - `english_residue_review_count = 1`
+  - `english_residue_preserved_count = 1`
+  - preserved sample: `L5` as `code_or_identifier`
+
+Rollback:
+
+- None.
+
+Next:
+
+- Re-run translation with the strict scorer enabled so low-score English residue triggers model repair.
+- Add project-specific `00_entity_decisions.json` or glossary `policy=translate` entries for recurring names if automatic transliteration is not stable enough.

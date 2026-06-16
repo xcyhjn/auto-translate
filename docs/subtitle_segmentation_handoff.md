@@ -269,6 +269,66 @@ Result:
 - Four remaining 1-2 word terminal English cues in the sample are not flagged because they look like independent short sentences or proper-name cues, e.g. `He wonders.` and `Juan Kokom.`
 - The display merge is intentionally conservative: strong pauses, severe length overflow, and uppercase independent short sentences are not force-merged.
 
+## Phase 2.3 Update - English Residue Scoring And Strict Chinese Localization - 2026-06-17
+
+### Problem
+
+Chinese subtitles still leak Latin text because prompt-level instructions are too soft. The project needed a single shared rule for:
+
+- whether a Latin residue may stay
+- when a name/place should be translated
+- when a residue is merely a review item
+
+### Strategy
+
+- Add `english_residue_policy.py` as the shared scorer.
+- Score every Latin residue in Chinese subtitles on a 0-100 scale.
+- Default thresholds:
+  - preserve only at `>= 85`
+  - review at `70-84`
+  - below `70` must translate
+- Make common places, languages, history terms, and ordinary words override auto glossary preserve.
+- Treat auto-generated glossary preserve entries as soft preserve unless they are explicit hard/manual preserves.
+
+### Files Changed
+
+- `english_residue_policy.py`
+- `translate.py`
+- `span_translate.py`
+- `qa.py`
+- `qa_outputs.py`
+- `entity_normalization.py`
+- `pipeline_core.py`
+- `pipeline_runner.py`
+- `ui_server.py`
+- `web/app.js`
+- `test_english_residue_policy.py`
+- `test_entity_pipeline_integration.py`
+- `test_entity_pipeline_contract.py`
+
+### Validation
+
+- `python -m py_compile english_residue_policy.py translate.py span_translate.py qa.py qa_outputs.py entity_normalization.py pipeline_core.py pipeline_runner.py ui_server.py`
+- `node --check web\app.js`
+- `pytest -q test_english_residue_policy.py test_qa_outputs.py test_entity_pipeline_contract.py test_entity_pipeline_integration.py test_workflow_profiles.py test_ui_server_config.py`
+  - `23 passed in 0.63s`
+- Offline sample scoring on `output/Russian-book-about-a-dying-god/05_translated_segments.json`:
+  - `english_residue_total_count = 224`
+  - `english_residue_blocking_count = 222`
+  - `english_residue_review_count = 1`
+  - `english_residue_preserved_count = 1`
+  - `L5` is preserved as an identifier
+
+### Known Remaining Issue
+
+- Auto-generated glossary entries for names like `Dmitri` and `Moscow` must not be treated as hard preserve.
+- The scorer now demotes them, but project-specific glossary cleanup will still be useful for recurring names that keep bouncing between transliteration and preservation.
+
+### Next Step
+
+- Re-run a full pipeline sample with the new scorer enabled and inspect `07k_english_residue_report.json`.
+- If a recurring name/place should stay in Chinese, move it into explicit project decisions or glossary translate policy instead of relying on auto preserve.
+
 ## Phase 2.2 Update - Discourse Particle Protection - 2026-06-17
 
 ### Problem

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 
+from .english_residue_policy import analyze_english_residue
 from .models import Segment, SubtitleRules
 from .subtitle_io import DisplayCue, wrap_chinese_text, normalize_inline_text
 from .text_quality import (
@@ -363,6 +364,8 @@ def build_quality_metrics(
     zh_max_lines: int = 2,
     require_bound_zh: bool = True,
     sample_limit: int = 20,
+    english_residue_preserve_threshold: int = 85,
+    english_residue_review_threshold: int = 70,
 ) -> dict:
     require_chinese = is_chinese_target_language(dst_lang)
     metrics = {
@@ -375,6 +378,9 @@ def build_quality_metrics(
             "text_pollution_count": 0,
             "short_english_leak_count": 0,
             "entity_residue_count": 0,
+            "english_residue_count": 0,
+            "english_residue_preserved_count": 0,
+            "english_residue_review_count": 0,
             "untranslated_discourse_marker_count": 0,
             "literal_chinese_artifact_count": 0,
             "source_target_semantic_conflict_count": 0,
@@ -384,6 +390,7 @@ def build_quality_metrics(
             "text_pollution_samples": [],
             "short_english_leak_samples": [],
             "entity_residue_samples": [],
+            "english_residue_samples": [],
             "untranslated_discourse_marker_samples": [],
             "literal_chinese_artifact_samples": [],
             "source_target_semantic_conflict_samples": [],
@@ -484,6 +491,32 @@ def build_quality_metrics(
                     "leaks": entity_like_residue,
                     "source_text": source_text,
                     "target_text": target_text,
+                },
+            )
+        residue_decisions = analyze_english_residue(
+            target_text,
+            source_text=source_text,
+            reference_text=segment.reference_text or source_text,
+            dst_lang=dst_lang,
+            glossary_path=glossary_path,
+            preserve_threshold=english_residue_preserve_threshold,
+            review_threshold=english_residue_review_threshold,
+        )
+        if residue_decisions:
+            blocking_residue = [item for item in residue_decisions if item.decision == "translate"]
+            review_residue = [item for item in residue_decisions if item.decision == "review"]
+            preserved_residue = [item for item in residue_decisions if item.decision == "preserve"]
+            if blocking_residue:
+                metrics["translation"]["english_residue_count"] += 1
+            metrics["translation"]["english_residue_review_count"] += len(review_residue)
+            metrics["translation"]["english_residue_preserved_count"] += len(preserved_residue)
+            append_sample(
+                metrics["translation"]["english_residue_samples"],
+                {
+                    "segment_id": segment.id,
+                    "source_text": source_text,
+                    "target_text": target_text,
+                    "decisions": [item.to_dict() for item in residue_decisions],
                 },
             )
         discourse_markers = find_untranslated_discourse_markers(target_text, dst_lang=dst_lang)
@@ -675,6 +708,7 @@ def build_quality_metrics(
         + metrics["translation"]["text_pollution_count"]
         + metrics["translation"]["short_english_leak_count"]
         + metrics["translation"]["untranslated_discourse_marker_count"]
+        + metrics["translation"]["english_residue_count"]
         + metrics["translation"]["source_target_semantic_conflict_count"]
         + metrics["display"]["empty_chinese_cue_count"]
         + metrics["display"]["reference_hidden_count"]
@@ -690,6 +724,7 @@ def build_quality_metrics(
             metrics["glossary"]["bad_alias_in_source_count"]
             + metrics["translation"]["literal_chinese_artifact_count"]
             + metrics["glossary"]["preserve_missing_count"]
+            + metrics["translation"]["english_residue_review_count"]
             + metrics["display"]["chinese_line_soft_over_count"]
             + metrics["display"]["chinese_cps_soft_over_count"]
             + metrics["display"]["english_line_too_long_count"]
