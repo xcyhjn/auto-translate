@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -25,7 +26,72 @@ from .translate import (
 
 SpanTranslateProgressCallback = Callable[[str, dict], None]
 DEFAULT_MAX_SPANS = 16
-DEFAULT_MAX_SEGMENTS_PER_SPAN = 12
+DEFAULT_MAX_SEGMENTS_PER_SPAN = 4
+DEFAULT_MAX_SPAN_DURATION = 12.0
+DEFAULT_MIN_RISK_SCORE = 10
+SPAN_TRANSLATION_POLICY_VERSION = "span_translation_v2"
+
+
+def _stable_hash(payload: object) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def build_span_translation_fingerprint(
+    segments: list[Segment],
+    source_spans: dict | None,
+    *,
+    glossary_text: str = "",
+    model: str = "",
+    style_prompt_text: str = "",
+    max_spans: int = DEFAULT_MAX_SPANS,
+    max_segments_per_span: int = DEFAULT_MAX_SEGMENTS_PER_SPAN,
+    max_duration: float = DEFAULT_MAX_SPAN_DURATION,
+    min_risk_score: int = DEFAULT_MIN_RISK_SCORE,
+    english_residue_validation_enabled: bool = True,
+    english_residue_preserve_threshold: int = 85,
+    english_residue_review_threshold: int = 70,
+) -> dict:
+    source_payload = [
+        {
+            "id": segment.id,
+            "start": round(float(segment.start), 3),
+            "end": round(float(segment.end), 3),
+            "source_text": segment.source_text,
+        }
+        for segment in segments
+    ]
+    span_payload = [
+        {
+            "span_id": span.get("span_id"),
+            "segment_ids": span.get("segment_ids") or [],
+            "duration": span.get("duration"),
+            "risk_score": span.get("risk_score"),
+            "risk_reasons": span.get("risk_reasons") or {},
+            "translation_strategy": span.get("translation_strategy"),
+            "source_joined": span.get("source_joined") or "",
+        }
+        for span in (source_spans or {}).get("spans") or []
+        if isinstance(span, dict)
+    ]
+    config = {
+        "max_spans": int(max_spans or 0),
+        "max_segments_per_span": int(max_segments_per_span or 0),
+        "max_duration": round(float(max_duration or 0.0), 3),
+        "min_risk_score": int(min_risk_score or 0),
+        "english_residue_validation_enabled": bool(english_residue_validation_enabled),
+        "english_residue_preserve_threshold": int(english_residue_preserve_threshold or 0),
+        "english_residue_review_threshold": int(english_residue_review_threshold or 0),
+    }
+    return {
+        "policy_version": SPAN_TRANSLATION_POLICY_VERSION,
+        "source_segments_hash": _stable_hash(source_payload),
+        "source_spans_hash": _stable_hash(span_payload),
+        "glossary_hash": _stable_hash(glossary_text or ""),
+        "style_prompt_hash": _stable_hash(style_prompt_text or ""),
+        "model": model,
+        "config": config,
+    }
 
 
 def build_span_translation_schema() -> dict:
@@ -209,6 +275,8 @@ def select_span_translation_candidates(
     *,
     max_spans: int = DEFAULT_MAX_SPANS,
     max_segments_per_span: int = DEFAULT_MAX_SEGMENTS_PER_SPAN,
+    max_duration: float = DEFAULT_MAX_SPAN_DURATION,
+    min_risk_score: int = DEFAULT_MIN_RISK_SCORE,
 ) -> list[dict]:
     if max_spans <= 0:
         return []
@@ -220,7 +288,14 @@ def select_span_translation_candidates(
         if str(span.get("translation_strategy") or "") != "span_first":
             continue
         segment_ids = [int(value) for value in span.get("segment_ids") or [] if int(value) > 0]
-        if not segment_ids or len(segment_ids) > max_segments_per_span:
+        segment_count = int(span.get("segment_count") or len(segment_ids))
+        risk_score = int(span.get("risk_score") or 0)
+        duration = float(span.get("duration") or 0.0)
+        if not segment_ids or len(segment_ids) > max_segments_per_span or segment_count > max_segments_per_span:
+            continue
+        if max_duration > 0 and duration > max_duration:
+            continue
+        if risk_score < min_risk_score:
             continue
         unlocked_ids = [segment_id for segment_id in segment_ids if segment_id not in locked_ids]
         if not unlocked_ids:
@@ -377,13 +452,29 @@ def translate_source_spans(
     max_retries: int = 2,
     locked_ids: set[int] | None = None,
     max_spans: int = DEFAULT_MAX_SPANS,
+    max_segments_per_span: int = DEFAULT_MAX_SEGMENTS_PER_SPAN,
+    max_duration: float = DEFAULT_MAX_SPAN_DURATION,
+    min_risk_score: int = DEFAULT_MIN_RISK_SCORE,
     english_residue_validation_enabled: bool = True,
     english_residue_preserve_threshold: int = 85,
     english_residue_review_threshold: int = 70,
     progress_callback: SpanTranslateProgressCallback | None = None,
 ) -> tuple[set[int], dict]:
     locked_ids = set(locked_ids or set())
-    candidates = select_span_translation_candidates(source_spans, locked_ids, max_spans=max_spans)
+    selection_policy = {
+        "max_spans": int(max_spans or 0),
+        "max_segments_per_span": int(max_segments_per_span or 0),
+        "max_duration": round(float(max_duration or 0.0), 3),
+        "min_risk_score": int(min_risk_score or 0),
+    }
+    candidates = select_span_translation_candidates(
+        source_spans,
+        locked_ids,
+        max_spans=max_spans,
+        max_segments_per_span=max_segments_per_span,
+        max_duration=max_duration,
+        min_risk_score=min_risk_score,
+    )
     if not candidates:
         return set(), {
             "schema_version": 1,
@@ -393,6 +484,7 @@ def translate_source_spans(
                 "translated_span_count": 0,
                 "translated_segment_count": 0,
                 "failed_count": 0,
+                "selection_policy": selection_policy,
             },
             "results": [],
         }
@@ -450,6 +542,7 @@ def translate_source_spans(
             "translated_span_count": translated_span_count,
             "translated_segment_count": len(translated_ids),
             "failed_count": failed_count,
+            "selection_policy": selection_policy,
         },
         "results": results,
     }

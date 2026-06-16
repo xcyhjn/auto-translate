@@ -575,3 +575,58 @@ Next:
 
 - Consider making `span_translation_max_spans=0` unnecessary by validating span-locked translations before they enter `locked_translation_ids`.
 - Consider deleting old timestamped generation backups after manual review if disk clutter matters.
+
+## 2026-06-17 08:20 +08:00 - Span Pretranslation Narrowing
+
+Hypothesis:
+
+- Span pretranslation should be an exception path. The Russian sample had 144 `span_first` spans because `open_clause` and `short_open_fragment` were enough to trigger span-first; long 8-segment/20s spans made the workflow slow and fragile.
+
+What:
+
+- Tightened `source_spans.py` so `span_first` now requires:
+  - segment count <= 4
+  - duration <= 12s
+  - risk score >= 10
+  - a strong reason such as repeated short phrase, ASR suspicion, or function-word boundary plus continuation.
+- Changed long or ordinary open-fragment spans to `span_context` instead of `span_first`.
+- Added span translation selection caps in `span_translate.py`:
+  - `max_segments_per_span = 4`
+  - `max_duration = 12.0`
+  - `min_risk_score = 10`
+- Reduced default `span_translation_max_spans` from 16 to 4 in pipeline/UI config.
+- Synced the frontend translation settings form so it exposes the new max segments, max duration, and min risk fields instead of silently submitting old defaults.
+- Added `source_spans_v2` policy version; stale `04a_source_spans.json` is recomputed before span translation/allocation.
+- Added `span_translation_v2` fingerprint to `05a_span_translated_segments.json`; checkpoint reuse now depends on source text/timing, source spans, glossary, style prompt, model, residue policy, and span selection config.
+- Fixed `force_retranslate_existing_segments=True` so it no longer reuses the span checkpoint.
+- Added `test_span_translation_flow.py`.
+
+Self-correction:
+
+- First pass used `min_risk_score = 30`, which reduced the Russian sample to `span_first = 0`. That was too aggressive because current risk scores are on a lower scale.
+- Adjusted the threshold to `10`; the sample now keeps only the short high-risk cases and blocks long span pretranslation.
+
+Validation:
+
+- `python -m py_compile source_spans.py span_translate.py pipeline_core.py pipeline_runner.py ui_server.py`
+- `$env:PYTHONPATH='D:\'; python -m pytest test_span_translation_flow.py test_terminology_short_circuit.py test_english_residue_policy.py test_semantic_qa_phase2.py -q`
+  - `30 passed in 0.34s`
+- `node --check web\app.js`
+- `$env:PYTHONPATH='D:\'; python -m pytest test_span_translation_flow.py test_ui_server_config.py -q`
+  - `10 passed in 0.31s`
+- Offline Russian sample source-span recalculation from current `03_timed_source_segments.json`:
+  - before: `span_first_count = 144`
+  - after: `span_first_count = 3`
+  - after: `span_context_count = 160`
+  - after candidate budget 16 still yields only 3 candidates
+  - max span-first duration: `11.56s`
+  - max span-first segment count: `4`
+
+Rollback:
+
+- None.
+
+Next:
+
+- Convert span pretranslation outputs from immediate locks into QA-gated proposals.
+- Add real child-span splitting for long spans if a later workflow needs span-first translation instead of context-only handling.

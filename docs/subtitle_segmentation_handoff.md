@@ -447,3 +447,63 @@ The first strict English residue implementation exposed three bypasses during ac
 - This regeneration disabled span-first translation with `span_translation_max_spans=0` to avoid locked translations bypassing strict residue validation.
 - The long-term fix should validate span translations again before adding IDs to `locked_translation_ids`, so span-first allocation can be safely re-enabled.
 - `07j_segmentation_qa_metrics.json` still reports segmentation QA blockers/warnings unrelated to English residue cleanup.
+
+## Phase 3.1 Update - Span Pretranslation Narrowing - 2026-06-17
+
+### Problem
+
+The span pretranslation path was too broad and too early:
+
+- The Russian sample had `span_first_count = 144` out of 176 source spans.
+- Many span-first items were long 8-segment spans near 20 seconds.
+- Ordinary `open_clause` / `short_open_fragment` reasons could trigger pretranslation.
+- Successful span pretranslation immediately locked segment IDs, preventing the main translation pass from repairing those cues.
+- `05a_span_translated_segments.json` could be reused when only segment IDs matched, even after prompt/config/glossary/residue-policy changes.
+
+### Changes Made
+
+- `source_spans.py`
+  - Added `source_spans_v2` policy version.
+  - Added hard span-first gates: max 4 segments, max 12s, min risk score 10.
+  - Added strong-reason gating so ordinary open fragments become `span_context`.
+- `span_translate.py`
+  - Added candidate filters for max segment count, max duration, and minimum risk.
+  - Added `span_translation_v2` fingerprint generation and selection-policy reporting.
+- `pipeline_core.py`
+  - Added stale source-span policy detection.
+  - Added fingerprint-gated span checkpoint reuse.
+  - Stopped span checkpoint reuse when `force_retranslate_existing_segments=True`.
+- `pipeline_runner.py` / `ui_server.py`
+  - Reduced default `span_translation_max_spans` from 16 to 4.
+  - Added config passthrough for `span_translation_max_segments`, `span_translation_max_duration`, and `span_translation_min_risk_score`.
+- `web/index.html` / `web/app.js`
+  - Synced the frontend form/defaults for the new span pretranslation limits.
+- `test_span_translation_flow.py`
+  - Covers long-span downgrade, short high-risk retention, candidate filtering, and checkpoint fingerprint mismatch.
+
+### Validation
+
+- `python -m py_compile source_spans.py span_translate.py pipeline_core.py pipeline_runner.py ui_server.py`
+- `$env:PYTHONPATH='D:\'; python -m pytest test_span_translation_flow.py test_terminology_short_circuit.py test_english_residue_policy.py test_semantic_qa_phase2.py -q`
+  - `30 passed`
+- `node --check web\app.js`
+- `$env:PYTHONPATH='D:\'; python -m pytest test_span_translation_flow.py test_ui_server_config.py -q`
+  - `10 passed`
+- Offline Russian sample recalculation from current `03_timed_source_segments.json`:
+  - before: `span_first_count = 144`
+  - after: `span_first_count = 3`
+  - after: `span_context_count = 160`
+  - old budget 16 now yields only 3 candidates
+  - max span-first duration: `11.56s`
+  - max span-first segment count: `4`
+
+### Self-Correction
+
+- First implementation used `span_translation_min_risk_score = 30`, which reduced the sample to `span_first = 0`.
+- The current score scale is lower than that; threshold was corrected to `10` while keeping duration/segment/strong-reason gates.
+
+### Remaining Issues
+
+- Span pretranslation still writes locked translations when it succeeds. The next implementation should make it proposal-first and QA-gated before adding IDs to `locked_translation_ids`.
+- Long spans are currently downgraded to context instead of split into child span-first units. That is safer and faster for now, but not a full semantic allocation solution.
+- Existing output directories may still contain old `04a_source_spans.json` counts until the pipeline rewrites the file; runtime translation/allocation now recalculates stale files before use.

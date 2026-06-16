@@ -17,6 +17,9 @@ from .text_quality import find_repeated_short_source_phrases, find_source_asr_su
 
 MAX_SOURCE_SPAN_SIZE = 8
 MAX_SOURCE_SPAN_DURATION = 18.0
+SPAN_FIRST_MAX_SEGMENTS = 4
+SPAN_FIRST_MAX_DURATION = 12.0
+SPAN_FIRST_MIN_RISK_SCORE = 10
 SOFT_JOIN_GAP = 0.35
 MEDIUM_JOIN_GAP = 0.75
 LONG_SOURCE_CHARS = 120
@@ -24,6 +27,7 @@ COMPLEX_SOURCE_COMMAS = 2
 COMMA_RE = re.compile(r"[,;:]")
 INTERNAL_SENTENCE_RE = re.compile(r"(?<!\b[ap])(?<!\b[mM])(?<!\bMr)(?<!\bDr)([.!?])\s+(?=[A-Z0-9])")
 LATIN_WORD_COUNT_RE = re.compile(r"[A-Za-z0-9']+")
+SOURCE_SPAN_POLICY_VERSION = "source_spans_v2"
 
 
 def source_word_count(text: str) -> int:
@@ -93,21 +97,63 @@ def should_join(current: Segment, following: Segment, current_reasons: set[str],
     return False
 
 
-def span_strategy(reason_counts: Counter[str], source_joined: str, segment_count: int) -> str:
+def source_span_risk_score(reason_counts: Counter[str], source_joined: str, duration: float) -> int:
+    risk_score = (
+        reason_counts.get("suspicious_asr_word", 0) * 5
+        + sum(int(count) * 5 for reason, count in reason_counts.items() if str(reason).startswith("source_asr_"))
+        + reason_counts.get("repeated_short_phrase", 0) * 3
+        + reason_counts.get("ends_with_function_word", 0) * 3
+        + reason_counts.get("short_open_fragment", 0) * 3
+        + reason_counts.get("internal_sentence_boundary", 0) * 2
+        + reason_counts.get("starts_with_continuation", 0) * 2
+        + reason_counts.get("open_clause", 0)
+        + max(0, len(source_joined) - LONG_SOURCE_CHARS) // 30
+    )
+    if duration > MAX_SOURCE_SPAN_DURATION:
+        risk_score += 2
+        reason_counts["long_duration"] += 1
+    return risk_score
+
+
+def has_strong_span_first_reason(reason_counts: Counter[str]) -> bool:
+    if reason_counts.get("repeated_short_phrase"):
+        return True
+    if reason_counts.get("ends_with_function_word") and reason_counts.get("starts_with_continuation"):
+        return True
+    if reason_counts.get("ends_with_function_word") and reason_counts.get("tight_previous_continuation"):
+        return True
+    if any(reason.startswith("source_asr_") for reason in reason_counts):
+        return True
+    return False
+
+
+def span_strategy(
+    reason_counts: Counter[str],
+    source_joined: str,
+    segment_count: int,
+    *,
+    duration: float,
+    risk_score: int,
+) -> str:
     if reason_counts.get("suspicious_asr_word"):
         return "source_repair_review"
     if any(reason.startswith("source_asr_") for reason in reason_counts):
         return "source_repair_review"
-    if reason_counts.get("repeated_short_phrase") and segment_count >= 1:
+    if (
+        segment_count <= SPAN_FIRST_MAX_SEGMENTS
+        and duration <= SPAN_FIRST_MAX_DURATION
+        and risk_score >= SPAN_FIRST_MIN_RISK_SCORE
+        and has_strong_span_first_reason(reason_counts)
+    ):
         return "span_first"
+    if reason_counts.get("internal_sentence_boundary"):
+        return "span_context"
     if segment_count >= 2 and (
         reason_counts.get("starts_with_continuation")
         or reason_counts.get("ends_with_function_word")
         or reason_counts.get("short_open_fragment")
         or reason_counts.get("open_clause", 0) >= 2
     ):
-        return "span_first"
-    if reason_counts.get("internal_sentence_boundary"):
         return "span_context"
     if len(source_joined) >= LONG_SOURCE_CHARS or source_joined.count(",") >= COMPLEX_SOURCE_COMMAS:
         return "span_context"
@@ -123,21 +169,14 @@ def build_source_span(segments: list[Segment], start: int, end: int, reasons_by_
     )
     source_joined = normalize_inline(" ".join(segment.source_text for segment in span_segments))
     duration = max(0.0, float(span_segments[-1].end) - float(span_segments[0].start))
-    strategy = span_strategy(reason_counts, source_joined, len(span_segments))
-    risk_score = (
-        reason_counts.get("suspicious_asr_word", 0) * 5
-        + sum(int(count) * 5 for reason, count in reason_counts.items() if str(reason).startswith("source_asr_"))
-        + reason_counts.get("repeated_short_phrase", 0) * 3
-        + reason_counts.get("ends_with_function_word", 0) * 3
-        + reason_counts.get("short_open_fragment", 0) * 3
-        + reason_counts.get("internal_sentence_boundary", 0) * 2
-        + reason_counts.get("starts_with_continuation", 0) * 2
-        + reason_counts.get("open_clause", 0)
-        + max(0, len(source_joined) - LONG_SOURCE_CHARS) // 30
+    risk_score = source_span_risk_score(reason_counts, source_joined, duration)
+    strategy = span_strategy(
+        reason_counts,
+        source_joined,
+        len(span_segments),
+        duration=duration,
+        risk_score=risk_score,
     )
-    if duration > MAX_SOURCE_SPAN_DURATION:
-        risk_score += 2
-        reason_counts["long_duration"] += 1
     return {
         "span_id": f"srcspan-{index:04d}",
         "start_segment_id": span_segments[0].id,
@@ -205,6 +244,7 @@ def detect_source_spans(segments: list[Segment], *, max_span_size: int = MAX_SOU
     strategy_counts = Counter(str(span["translation_strategy"]) for span in spans)
     return {
         "schema_version": 1,
+        "policy_version": SOURCE_SPAN_POLICY_VERSION,
         "summary": {
             "segment_count": len(segments),
             "span_count": len(spans),

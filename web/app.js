@@ -97,7 +97,10 @@ const DEFAULT_UI_CONFIG = {
   force_retranslate_existing_segments: false,
   skip_burn: false,
   repair_high_risk_spans: true,
-  span_translation_max_spans: 16,
+  span_translation_max_spans: 4,
+  span_translation_max_segments: 4,
+  span_translation_max_duration: 12.0,
+  span_translation_min_risk_score: 10,
   span_repair_max_spans: 12,
   semantic_zh_allocation_enabled: true,
   semantic_zh_allocation_max_spans: 16,
@@ -710,7 +713,10 @@ function readFormConfig() {
     force_retranslate_existing_segments: el("force_retranslate_existing_segments").checked,
     skip_burn: el("skip_burn").checked,
     repair_high_risk_spans: el("repair_high_risk_spans").checked,
-    span_translation_max_spans: Number(el("span_translation_max_spans")?.value || 16),
+    span_translation_max_spans: Number(el("span_translation_max_spans")?.value || 4),
+    span_translation_max_segments: Number(el("span_translation_max_segments")?.value || 4),
+    span_translation_max_duration: Number(el("span_translation_max_duration")?.value || 12.0),
+    span_translation_min_risk_score: Number(el("span_translation_min_risk_score")?.value || 10),
     span_repair_max_spans: Number(el("span_repair_max_spans").value || 12),
     semantic_zh_allocation_enabled: el("semantic_zh_allocation_enabled")?.checked !== false,
     semantic_zh_allocation_max_spans: Number(el("semantic_zh_allocation_max_spans")?.value || 16),
@@ -788,7 +794,10 @@ function fillForm(config) {
   el("force_retranslate_existing_segments").checked = Boolean(config.force_retranslate_existing_segments);
   el("skip_burn").checked = Boolean(config.skip_burn);
   el("repair_high_risk_spans").checked = config.repair_high_risk_spans !== false;
-  if (el("span_translation_max_spans")) el("span_translation_max_spans").value = config.span_translation_max_spans ?? 16;
+  if (el("span_translation_max_spans")) el("span_translation_max_spans").value = config.span_translation_max_spans ?? 4;
+  if (el("span_translation_max_segments")) el("span_translation_max_segments").value = config.span_translation_max_segments ?? 4;
+  if (el("span_translation_max_duration")) el("span_translation_max_duration").value = config.span_translation_max_duration ?? 12.0;
+  if (el("span_translation_min_risk_score")) el("span_translation_min_risk_score").value = config.span_translation_min_risk_score ?? 10;
   el("span_repair_max_spans").value = config.span_repair_max_spans ?? 12;
   if (el("semantic_zh_allocation_enabled")) el("semantic_zh_allocation_enabled").checked = config.semantic_zh_allocation_enabled !== false;
   if (el("semantic_zh_allocation_max_spans")) el("semantic_zh_allocation_max_spans").value = config.semantic_zh_allocation_max_spans ?? 16;

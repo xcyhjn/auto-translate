@@ -105,7 +105,10 @@ DEFAULT_CONFIG = {
     "preview_seconds": None,
     "skip_burn": False,
     "repair_high_risk_spans": True,
-    "span_translation_max_spans": 16,
+    "span_translation_max_spans": 4,
+    "span_translation_max_segments": 4,
+    "span_translation_max_duration": 12.0,
+    "span_translation_min_risk_score": 10,
     "span_repair_max_spans": 12,
     "semantic_zh_allocation_enabled": True,
     "semantic_zh_allocation_max_spans": 16,
@@ -598,11 +601,24 @@ def normalize_config(config: dict) -> dict:
     normalized["semantic_zh_allocation_enabled"] = bool(normalized.get("semantic_zh_allocation_enabled", True))
     normalized["short_complete_sentence_display_grouping"] = bool(normalized.get("short_complete_sentence_display_grouping", True))
     normalized["english_residue_validation_enabled"] = bool(normalized.get("english_residue_validation_enabled", True))
-    for key in ("span_translation_max_spans", "span_repair_max_spans", "semantic_zh_allocation_max_spans"):
+    for key in (
+        "span_translation_max_spans",
+        "span_translation_max_segments",
+        "span_translation_min_risk_score",
+        "span_repair_max_spans",
+        "semantic_zh_allocation_max_spans",
+    ):
         try:
             normalized[key] = max(0, int(normalized.get(key, DEFAULT_CONFIG[key]) or 0))
         except (TypeError, ValueError):
             normalized[key] = DEFAULT_CONFIG[key]
+    try:
+        normalized["span_translation_max_duration"] = max(
+            0.0,
+            float(normalized.get("span_translation_max_duration", DEFAULT_CONFIG["span_translation_max_duration"]) or 0.0),
+        )
+    except (TypeError, ValueError):
+        normalized["span_translation_max_duration"] = DEFAULT_CONFIG["span_translation_max_duration"]
     for key in ("english_residue_preserve_threshold", "english_residue_review_threshold"):
         try:
             normalized[key] = max(0, min(100, int(normalized.get(key, DEFAULT_CONFIG[key]) or DEFAULT_CONFIG[key])))
@@ -2367,7 +2383,10 @@ def execute_pipeline_job(video_path: str, config: dict, task_id: str | None = No
             preview_seconds=int(config["preview_seconds"]) if config["preview_seconds"] else None,
             skip_burn=bool(config.get("skip_burn", False)),
             repair_high_risk_spans=bool(config.get("repair_high_risk_spans", True)),
-            span_translation_max_spans=int(config.get("span_translation_max_spans", 16) or 0),
+            span_translation_max_spans=int(config.get("span_translation_max_spans", 4) or 0),
+            span_translation_max_segments=int(config.get("span_translation_max_segments", 4) or 4),
+            span_translation_max_duration=float(config.get("span_translation_max_duration", 12.0) or 12.0),
+            span_translation_min_risk_score=int(config.get("span_translation_min_risk_score", 10) or 10),
             span_repair_max_spans=int(config.get("span_repair_max_spans", 12) or 12),
             semantic_zh_allocation_enabled=bool(config.get("semantic_zh_allocation_enabled", True)),
             semantic_zh_allocation_max_spans=int(config.get("semantic_zh_allocation_max_spans", 16) or 0),

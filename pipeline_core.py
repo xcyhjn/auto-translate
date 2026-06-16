@@ -49,9 +49,9 @@ from .segment_io import load_segments, save_segments, save_segments_payload
 from .segmentation_qa import build_segmentation_qa_metrics
 from .semantic_allocation import build_semantic_allocation_report
 from .source_repair import repair_source_segments
-from .source_spans import detect_source_spans
+from .source_spans import SOURCE_SPAN_POLICY_VERSION, detect_source_spans
 from .span_repair import repair_difficult_spans
-from .span_translate import translate_source_spans
+from .span_translate import build_span_translation_fingerprint, translate_source_spans
 from .subtitle_io import (
     prepare_bilingual_ass_segments,
     write_bilingual_ass_from_display_cues,
@@ -155,9 +155,25 @@ def empty_span_translation_report() -> dict:
     }
 
 
+def load_current_source_spans(path: Path, segments: list[Segment]) -> dict:
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = None
+        if (
+            isinstance(payload, dict)
+            and payload.get("policy_version") == SOURCE_SPAN_POLICY_VERSION
+        ):
+            return payload
+    return detect_source_spans(segments)
+
+
 def load_span_translation_checkpoint(
     path: Path,
     expected_segments: list[Segment],
+    *,
+    expected_fingerprint: dict | None = None,
 ) -> tuple[list[Segment], set[int]] | None:
     if not path.exists():
         return None
@@ -167,6 +183,16 @@ def load_span_translation_checkpoint(
         return None
     if [segment.id for segment in checkpoint_segments] != [segment.id for segment in expected_segments]:
         return None
+    if expected_fingerprint is not None:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        if summary.get("fingerprint") != expected_fingerprint:
+            return None
     locked_ids = {
         segment.id
         for segment in checkpoint_segments
@@ -479,7 +505,10 @@ def run_pipeline(
     preview_seconds: int | None = None,
     skip_burn: bool = False,
     repair_high_risk_spans: bool = True,
-    span_translation_max_spans: int = 16,
+    span_translation_max_spans: int = 4,
+    span_translation_max_segments: int = 4,
+    span_translation_max_duration: float = 12.0,
+    span_translation_min_risk_score: int = 10,
     span_repair_max_spans: int = 12,
     semantic_zh_allocation_enabled: bool = True,
     semantic_zh_allocation_max_spans: int = 16,
@@ -1090,14 +1119,36 @@ def run_pipeline(
         )
         if not dual_axis_mode:
             source_spans_path = output_dir / "04a_source_spans.json"
-            source_spans_for_translation = (
-                json.loads(source_spans_path.read_text(encoding="utf-8"))
-                if source_spans_path.exists()
-                else detect_source_spans(translation_segments)
+            source_spans_for_translation = load_current_source_spans(source_spans_path, translation_segments)
+            span_glossary_text = "\n\n".join(
+                item
+                for item in [
+                    dataset_bundle.get("glossary_text", ""),
+                    load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
+                ]
+                if item.strip()
+            )
+            span_translation_fingerprint = build_span_translation_fingerprint(
+                translation_segments,
+                source_spans_for_translation,
+                glossary_text=span_glossary_text,
+                model=translation_model,
+                style_prompt_text=style_prompt_for_translation,
+                max_spans=span_translation_max_spans,
+                max_segments_per_span=span_translation_max_segments,
+                max_duration=span_translation_max_duration,
+                min_risk_score=span_translation_min_risk_score,
+                english_residue_validation_enabled=english_residue_validation_enabled,
+                english_residue_preserve_threshold=english_residue_preserve_threshold,
+                english_residue_review_threshold=english_residue_review_threshold,
             )
             span_checkpoint = (
-                load_span_translation_checkpoint(output_dir / "05a_span_translated_segments.json", translation_segments)
-                if (load_existing_segments or force_retranslate_existing_segments)
+                load_span_translation_checkpoint(
+                    output_dir / "05a_span_translated_segments.json",
+                    translation_segments,
+                    expected_fingerprint=span_translation_fingerprint,
+                )
+                if load_existing_segments and not force_retranslate_existing_segments
                 else None
             )
             if span_checkpoint:
@@ -1124,21 +1175,15 @@ def run_pipeline(
                     source_spans_for_translation,
                     src_lang=src_lang,
                     dst_lang=dst_lang,
-                    glossary_text=(
-                        "\n\n".join(
-                            item
-                            for item in [
-                                dataset_bundle.get("glossary_text", ""),
-                                load_glossary(str(auto_glossary_path)) if auto_glossary_path else "",
-                            ]
-                            if item.strip()
-                        )
-                    ),
+                    glossary_text=span_glossary_text,
                     model=translation_model,
                     style_prompt_text=style_prompt_for_translation,
                     base_url=openai_base_url,
                     max_retries=translation_retries,
                     max_spans=span_translation_max_spans,
+                    max_segments_per_span=span_translation_max_segments,
+                    max_duration=span_translation_max_duration,
+                    min_risk_score=span_translation_min_risk_score,
                     english_residue_validation_enabled=english_residue_validation_enabled,
                     english_residue_preserve_threshold=english_residue_preserve_threshold,
                     english_residue_review_threshold=english_residue_review_threshold,
@@ -1153,7 +1198,10 @@ def run_pipeline(
                 translation_segments,
                 output_dir / "05a_span_translated_segments.json",
                 input_file=str(input_path),
-                summary=span_translation_report["summary"],
+                summary={
+                    **span_translation_report["summary"],
+                    "fingerprint": span_translation_fingerprint,
+                },
             )
             write_stage_json(
                 output_dir / "05a_span_translation_report.json",
@@ -1455,11 +1503,7 @@ def run_pipeline(
     )
 
     source_spans_path = output_dir / "04a_source_spans.json"
-    source_spans_for_allocation = (
-        json.loads(source_spans_path.read_text(encoding="utf-8"))
-        if source_spans_path.exists()
-        else detect_source_spans(translated_segments)
-    )
+    source_spans_for_allocation = load_current_source_spans(source_spans_path, translated_segments)
     semantic_allocation_report = build_semantic_allocation_report(
         translated_segments,
         source_spans_for_allocation,
