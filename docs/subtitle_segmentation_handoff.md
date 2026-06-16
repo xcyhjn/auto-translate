@@ -268,3 +268,69 @@ Result:
 - The sample still has other QA blockers (`pass=false`) from mixed-sentence/short-fragment/function-edge metrics. They are separate from orphan terminal tails.
 - Four remaining 1-2 word terminal English cues in the sample are not flagged because they look like independent short sentences or proper-name cues, e.g. `He wonders.` and `Juan Kokom.`
 - The display merge is intentionally conservative: strong pauses, severe length overflow, and uppercase independent short sentences are not force-merged.
+
+## Phase 2.2 Update - Discourse Particle Protection - 2026-06-17
+
+### Problem
+
+After blocking orphan terminal tails, we still needed to protect genuine standalone discourse particles and short response cues:
+
+- `Yeah.`
+- `No.`
+- `Oh.`
+- `Well.`
+
+These should not be merged into the previous cue just because they are short and terminal.
+
+### Strategy
+
+- Add a shared terminal-short-cue classifier in `terminal_tail.py`.
+- Split short terminal English cues into three categories:
+  - `content_tail`
+  - `standalone_particle`
+  - `ambiguous_particle`
+- Keep `content_tail` merge behavior.
+- Preserve `standalone_particle` as an independent cue.
+- Send `ambiguous_particle` to QA/review instead of silently merging.
+- Let open left fragments still absorb content words such as `no.` in `The answer is / no.`
+
+### Files Changed
+
+- `terminal_tail.py`
+  - New shared classifier and particle lexicons.
+- `timing.py`
+  - Uses the classifier in merge and split scoring.
+- `zh_reading_axis.py`
+  - Uses the classifier for display-only orphan-tail merging.
+- `segmentation_qa.py`
+  - Adds:
+    - `standalone_discourse_particle_count`
+    - `ambiguous_discourse_tail_count`
+  - Keeps `orphan_terminal_tail_count` as the blocking metric for content tails.
+- `web/app.js`
+  - Adds frontend QA cards for:
+    - `独立语气词`
+    - `歧义语气词`
+- Tests:
+  - `test_timing_segmentation.py`
+  - `test_semantic_qa_phase2.py`
+
+### Validation
+
+- `python -m py_compile terminal_tail.py timing.py zh_reading_axis.py segmentation_qa.py pipeline_core.py`
+- `node --check web/app.js`
+- `pytest -q test_timing_segmentation.py test_semantic_qa_phase2.py test_zh_reading_axis.py test_subtitle_output_modes.py test_asr_repair_flow.py`
+
+Result:
+
+- `45 passed`
+- Russian sample regenerated successfully.
+- `orphan_terminal_tail_count = 0`
+- `standalone_discourse_particle_count = 0` on this sample
+- `ambiguous_discourse_tail_count = 0` on this sample
+
+### Remaining Notes
+
+- The Russian sample currently does not contain strong discourse-particle examples, so the new counters stay at zero there.
+- The classifier is intentionally conservative. Short uppercase cues like `He wonders.` and proper-name cues remain untouched.
+- Remaining non-particle QA blockers are still separate work.

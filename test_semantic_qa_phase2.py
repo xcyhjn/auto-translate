@@ -174,6 +174,31 @@ def test_orphan_terminal_tail_display_merge_preserves_real_short_sentence() -> N
     assert report["summary"]["group_count"] == 0
 
 
+def test_orphan_terminal_tail_display_merge_preserves_standalone_particle() -> None:
+    cues = [
+        DisplayCue(start=0.0, end=0.7, en_text="Are you coming?", zh_text="\u4f60\u6765\u5417\uff1f", source_segment_id=1),
+        DisplayCue(start=1.0, end=1.2, en_text="No.", zh_text="\u4e0d\u3002", source_segment_id=2),
+    ]
+
+    merged, report = merge_orphan_tail_display_cues(cues)
+
+    assert [cue.en_text for cue in merged] == ["Are you coming?", "No."]
+    assert report["summary"]["group_count"] == 0
+
+
+def test_orphan_terminal_tail_display_merge_absorbs_particle_word_after_open_fragment() -> None:
+    cues = [
+        DisplayCue(start=0.0, end=0.55, en_text="The answer is", zh_text="\u7b54\u6848\u662f", source_segment_id=1),
+        DisplayCue(start=0.62, end=0.82, en_text="no.", zh_text="\u4e0d\u3002", source_segment_id=2),
+    ]
+
+    merged, report = merge_orphan_tail_display_cues(cues)
+
+    assert [cue.en_text for cue in merged] == ["The answer is no."]
+    assert merged[0].zh_text == "\u7b54\u6848\u662f\u4e0d\u3002"
+    assert report["summary"]["group_count"] == 1
+
+
 def test_orphan_terminal_tail_counts_as_blocking_metric() -> None:
     segments = [
         Segment(id=1, start=0.0, end=1.0, source_text="that was made into an even more famous video game"),
@@ -204,3 +229,41 @@ def test_suspicious_closed_left_tail_counts_as_blocking_metric() -> None:
 
     assert metrics["segmentation"]["orphan_terminal_tail_count"] == 1
     assert metrics["summary"]["pass"] is False
+
+
+def test_discourse_particle_metrics_split_standalone_and_ambiguous() -> None:
+    segments = [
+        Segment(id=1, start=0.0, end=0.7, source_text="I don't know."),
+        Segment(id=2, start=1.0, end=1.2, source_text="Yeah."),
+        Segment(id=3, start=1.5, end=1.9, source_text="Is that"),
+        Segment(id=4, start=2.0, end=2.2, source_text="right?"),
+    ]
+    cues = [
+        DisplayCue(start=0.0, end=0.7, en_text="I don't know.", zh_text="\u6211\u4e0d\u77e5\u9053\u3002", source_segment_id=1),
+        DisplayCue(start=1.0, end=1.2, en_text="Yeah.", zh_text="\u55ef\u3002", source_segment_id=2),
+        DisplayCue(start=1.5, end=1.9, en_text="Is that", zh_text="\u90a3\u662f", source_segment_id=3),
+        DisplayCue(start=2.0, end=2.2, en_text="right?", zh_text="\u5bf9\u5417\uff1f", source_segment_id=4),
+    ]
+
+    metrics = build_segmentation_qa_metrics(segments, cues)
+
+    assert metrics["segmentation"]["standalone_discourse_particle_count"] == 1
+    assert metrics["segmentation"]["ambiguous_discourse_tail_count"] == 0
+    assert metrics["segmentation"]["orphan_terminal_tail_count"] == 1
+
+
+def test_ambiguous_discourse_particle_is_review_not_blocker() -> None:
+    segments = [
+        Segment(id=1, start=0.0, end=0.8, source_text="I guess."),
+        Segment(id=2, start=1.0, end=1.2, source_text="Right?"),
+    ]
+    cues = [
+        DisplayCue(start=0.0, end=0.8, en_text="I guess.", zh_text="\u6211\u731c\u662f\u5427\u3002", source_segment_id=1),
+        DisplayCue(start=1.0, end=1.2, en_text="Right?", zh_text="\u5bf9\u5427\uff1f", source_segment_id=2),
+    ]
+
+    metrics = build_segmentation_qa_metrics(segments, cues)
+
+    assert metrics["segmentation"]["ambiguous_discourse_tail_count"] == 1
+    assert metrics["segmentation"]["orphan_terminal_tail_count"] == 0
+    assert metrics["summary"]["warning_issue_count"] >= 1

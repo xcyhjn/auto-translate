@@ -196,3 +196,76 @@ def test_lowercase_tail_after_suspicious_terminal_is_absorbed() -> None:
     assert [item.source_text for item in refined] == [
         "These are rare and go for a lot of money on the property market."
     ]
+
+
+def test_standalone_discourse_particle_is_not_tail_merged() -> None:
+    segments = [
+        make_segment(
+            "I don't know.",
+            [
+                ("I", 0.0, 0.1),
+                ("don't", 0.1, 0.35),
+                ("know.", 0.35, 0.7),
+            ],
+        ),
+        make_segment("Yeah.", [("Yeah.", 1.0, 1.35)]),
+    ]
+
+    refined = refine_timing(segments, style=BilingualSubtitleStyle(en_max_single_line_chars=42))
+
+    assert [item.source_text for item in refined] == ["I don't know.", "Yeah."]
+
+
+def test_question_response_particle_is_not_tail_merged() -> None:
+    segments = [
+        make_segment(
+            "Are you coming?",
+            [
+                ("Are", 0.0, 0.12),
+                ("you", 0.12, 0.25),
+                ("coming?", 0.25, 0.7),
+            ],
+        ),
+        make_segment("No.", [("No.", 1.0, 1.2)]),
+    ]
+
+    refined = refine_timing(segments, style=BilingualSubtitleStyle(en_max_single_line_chars=42))
+
+    assert [item.source_text for item in refined] == ["Are you coming?", "No."]
+
+
+def test_two_word_discourse_particle_is_not_tail_merged() -> None:
+    segments = [
+        make_segment(
+            "I can do it.",
+            [
+                ("I", 0.0, 0.1),
+                ("can", 0.1, 0.22),
+                ("do", 0.22, 0.35),
+                ("it.", 0.35, 0.6),
+            ],
+        ),
+        make_segment("All right.", [("All", 0.9, 1.05), ("right.", 1.05, 1.25)]),
+    ]
+
+    refined = refine_timing(segments, style=BilingualSubtitleStyle(en_max_single_line_chars=42))
+
+    assert [item.source_text for item in refined] == ["I can do it.", "All right."]
+
+
+def test_particle_word_after_open_fragment_is_absorbed_as_content_tail() -> None:
+    segments = [
+        make_segment(
+            "The answer is",
+            [
+                ("The", 0.0, 0.1),
+                ("answer", 0.1, 0.35),
+                ("is", 0.35, 0.55),
+            ],
+        ),
+        make_segment("no.", [("no.", 0.62, 0.82)]),
+    ]
+
+    refined = refine_timing(segments, style=BilingualSubtitleStyle(en_max_single_line_chars=42))
+
+    assert [item.source_text for item in refined] == ["The answer is no."]

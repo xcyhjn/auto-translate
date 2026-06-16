@@ -3,6 +3,11 @@ from __future__ import annotations
 import re
 
 from .models import BilingualSubtitleStyle, Segment, SubtitleRules, Word
+from .terminal_tail import (
+    TERMINAL_CONTENT_TAIL,
+    TERMINAL_STANDALONE_PARTICLE,
+    classify_terminal_short_text,
+)
 from .utils import normalize_text
 
 
@@ -272,6 +277,16 @@ def is_terminal_orphan_tail(words: list[Word], rules: SubtitleRules) -> bool:
     return count <= 1 or duration < rules.orphan_duration_threshold
 
 
+def classify_terminal_short_words(
+    left_words: list[Word],
+    right_words: list[Word],
+) -> str:
+    left_text = words_to_source_text(left_words)
+    right_text = words_to_source_text(right_words)
+    gap = word_gap(left_words[-1], right_words[0]) if left_words and right_words else None
+    return classify_terminal_short_text(left_text, right_text, gap=gap)
+
+
 def can_absorb_terminal_orphan_tail(
     left_words: list[Word],
     right_words: list[Word],
@@ -284,6 +299,8 @@ def can_absorb_terminal_orphan_tail(
     if not left_words or not right_words:
         return False
     if not is_terminal_orphan_tail(right_words, rules):
+        return False
+    if classify_terminal_short_words(left_words, right_words) != TERMINAL_CONTENT_TAIL:
         return False
     left_text = words_to_source_text(left_words)
     if ends_with_sentence_terminal(left_text):
@@ -331,6 +348,7 @@ def merge_segments(left: Segment, right: Segment) -> Segment:
         and ends_with_sentence_terminal(right.source_text)
         and source_word_count(right.source_text) <= 2
         and (right.source_text or "").strip()[:1].islower()
+        and classify_terminal_short_text(left.source_text, right.source_text) == TERMINAL_CONTENT_TAIL
     ):
         text = re.sub(
             r"([A-Za-z])\.\s+([a-z][A-Za-z0-9'-]*(?:\s+[a-z][A-Za-z0-9'-]*)?[.!?])$",
@@ -482,7 +500,10 @@ def score_duration_split(words: list[Word], split_index: int, rules: SubtitleRul
         score += 280
     if is_orphan_fragment(right_words, rules):
         score += 360
-    if is_terminal_orphan_tail(right_words, rules) and not can_absorb_terminal_orphan_tail(
+    right_short_classification = classify_terminal_short_words(left_words, right_words)
+    if right_short_classification == TERMINAL_STANDALONE_PARTICLE:
+        score -= 160
+    elif is_terminal_orphan_tail(right_words, rules) and not can_absorb_terminal_orphan_tail(
         left_words,
         right_words,
         rules,
@@ -593,7 +614,10 @@ def score_display_split(
         short_text_penalty += 260
     if is_orphan_fragment(right_words, rules):
         short_text_penalty += 360
-    if is_terminal_orphan_tail(right_words, rules) and not can_absorb_terminal_orphan_tail(
+    right_short_classification = classify_terminal_short_words(left_words, right_words)
+    if right_short_classification == TERMINAL_STANDALONE_PARTICLE:
+        short_text_penalty -= 180
+    elif is_terminal_orphan_tail(right_words, rules) and not can_absorb_terminal_orphan_tail(
         left_words,
         right_words,
         rules,
@@ -659,7 +683,11 @@ def score_display_group(
         score += (min(18, max(8, max_chars // 4)) - length) * 20
     if is_orphan_fragment(group, rules):
         score += 300
-    if is_terminal_orphan_tail(group, rules) and start_index > 0:
+    previous_words = words[:start_index]
+    group_short_classification = classify_terminal_short_words(previous_words, group) if previous_words else ""
+    if group_short_classification == TERMINAL_STANDALONE_PARTICLE:
+        score -= 160
+    elif is_terminal_orphan_tail(group, rules) and start_index > 0:
         score += 5000
 
     last_word = re.sub(r"[^A-Za-z']+", "", group[-1].word.lower())

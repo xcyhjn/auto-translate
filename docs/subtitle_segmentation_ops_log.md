@@ -410,3 +410,49 @@ Rollback:
 Next:
 
 - Keep the QA card visible in the frontend and commit only task-related files. Remaining non-orphan segmentation blockers should be handled in a separate pass.
+
+## 2026-06-17 04:10 +08:00 - Discourse Particle Protection, First Pass
+
+Hypothesis:
+
+- The orphan-tail fix should not swallow real standalone response particles such as `Yeah.` / `No.` / `Oh.` / `Well.`. These cues deserve their own classification instead of being treated as content tails.
+
+What:
+
+- Added `terminal_tail.py` as a shared classifier for short terminal cues.
+- Split terminal short cues into:
+  - `content_tail`
+  - `standalone_particle`
+  - `ambiguous_particle`
+- Wired the classifier into:
+  - `timing.py`
+  - `zh_reading_axis.py`
+  - `segmentation_qa.py`
+  - `web/app.js`
+- Added tests for:
+  - `I don't know. / Yeah.`
+  - `Are you coming? / No.`
+  - `The answer is / no.`
+  - `I guess. / Right?`
+
+Result:
+
+- Targeted tests passed.
+- Wider regression suite passed:
+  - `45 passed`
+- Russian sample regenerated successfully with:
+  - `orphan_terminal_tail_count = 0`
+  - `standalone_discourse_particle_count = 0`
+  - `ambiguous_discourse_tail_count = 0`
+
+Failure analysis:
+
+- The sample did not contain many strong discourse-particle examples, so the new counters stayed at zero in that corpus. That is acceptable; the classifier is still validated by unit tests.
+
+Rollback:
+
+- None.
+
+Next:
+
+- Keep the docs and logs aligned with the new classifier and commit only the task-related files.

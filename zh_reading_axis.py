@@ -6,6 +6,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .models import BilingualSubtitleStyle, Segment, Word
+from .terminal_tail import (
+    TERMINAL_CONTENT_TAIL,
+    classify_terminal_short_text,
+)
 from .subtitle_io import (
     DisplayCue,
     ass_color,
@@ -463,15 +467,12 @@ def can_merge_orphan_tail_display_pair(
     max_group_duration: float,
     en_max_chars: int,
 ) -> bool:
-    if not current_text or not is_terminal_orphan_tail_text(next_text):
+    classification = classify_terminal_short_text(current_text, next_text, gap=gap)
+    if classification != TERMINAL_CONTENT_TAIL:
         return False
     if gap > max_gap or group_duration > max_group_duration:
         return False
     if visible_text_length(combined_en) > en_max_chars:
-        return False
-    if ends_sentence(current_text) and cue_source_word_count(current_text) < 4:
-        return False
-    if ends_sentence(current_text) and not next_text[:1].islower():
         return False
     return True
 

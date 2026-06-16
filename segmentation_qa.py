@@ -5,6 +5,12 @@ import re
 
 from .models import Segment
 from .subtitle_io import DisplayCue, normalize_inline_text, visible_text_length
+from .terminal_tail import (
+    TERMINAL_AMBIGUOUS_PARTICLE,
+    TERMINAL_CONTENT_TAIL,
+    TERMINAL_STANDALONE_PARTICLE,
+    classify_terminal_short_text,
+)
 from .text_quality import contains_chinese, find_short_english_leaks
 
 
@@ -88,12 +94,16 @@ def build_segmentation_qa_metrics(
             "mixed_sentence_count": 0,
             "function_edge_count": 0,
             "orphan_terminal_tail_count": 0,
+            "standalone_discourse_particle_count": 0,
+            "ambiguous_discourse_tail_count": 0,
             "too_short_count": 0,
             "too_long_count": 0,
             "short_fragment_samples": [],
             "mixed_sentence_samples": [],
             "function_edge_samples": [],
             "orphan_terminal_tail_samples": [],
+            "standalone_discourse_particle_samples": [],
+            "ambiguous_discourse_tail_samples": [],
             "too_short_samples": [],
             "too_long_samples": [],
         },
@@ -181,13 +191,9 @@ def build_segmentation_qa_metrics(
     for previous, current in zip(sorted_cues, sorted_cues[1:]):
         previous_text = normalize_inline_text(previous.en_text)
         current_text = normalize_inline_text(current.en_text)
-        previous_terminal = bool(TERMINAL_RE.search(previous_text))
-        suspicious_closed_left = (
-            previous_terminal
-            and source_word_count(previous_text) >= 4
-            and current_text[:1].islower()
-        )
-        if previous_text and (not previous_terminal or suspicious_closed_left) and is_terminal_orphan_tail_text(current_text):
+        gap = max(0.0, float(current.start) - float(previous.end))
+        classification = classify_terminal_short_text(previous_text, current_text, gap=gap)
+        if classification == TERMINAL_CONTENT_TAIL and is_terminal_orphan_tail_text(current_text):
             metrics["segmentation"]["orphan_terminal_tail_count"] += 1
             append_sample(
                 "orphan_terminal_tail_samples",
@@ -195,6 +201,33 @@ def build_segmentation_qa_metrics(
                     "segment_id": current.source_segment_id,
                     "previous_text": previous_text,
                     "source_text": current_text,
+                    "classification": classification,
+                    "start": round(float(current.start), 3),
+                    "end": round(float(current.end), 3),
+                },
+            )
+        elif classification == TERMINAL_STANDALONE_PARTICLE:
+            metrics["segmentation"]["standalone_discourse_particle_count"] += 1
+            append_sample(
+                "standalone_discourse_particle_samples",
+                {
+                    "segment_id": current.source_segment_id,
+                    "previous_text": previous_text,
+                    "source_text": current_text,
+                    "classification": classification,
+                    "start": round(float(current.start), 3),
+                    "end": round(float(current.end), 3),
+                },
+            )
+        elif classification == TERMINAL_AMBIGUOUS_PARTICLE:
+            metrics["segmentation"]["ambiguous_discourse_tail_count"] += 1
+            append_sample(
+                "ambiguous_discourse_tail_samples",
+                {
+                    "segment_id": current.source_segment_id,
+                    "previous_text": previous_text,
+                    "source_text": current_text,
+                    "classification": classification,
                     "start": round(float(current.start), 3),
                     "end": round(float(current.end), 3),
                 },
@@ -209,7 +242,11 @@ def build_segmentation_qa_metrics(
             + metrics["segmentation"]["too_short_count"]
             + metrics["segmentation"]["too_long_count"]
         ),
-        "warning_issue_count": metrics["allocation"]["review_count"] + metrics["source_repair"]["review_count"],
+        "warning_issue_count": (
+            metrics["allocation"]["review_count"]
+            + metrics["source_repair"]["review_count"]
+            + metrics["segmentation"]["ambiguous_discourse_tail_count"]
+        ),
         "pass": (
             metrics["segmentation"]["mixed_sentence_count"] == 0
             and metrics["segmentation"]["short_fragment_count"] == 0
