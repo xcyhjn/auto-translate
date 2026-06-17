@@ -659,7 +659,7 @@ def normalize_config(config: dict) -> dict:
 
 def read_config() -> dict:
     if CONFIG_PATH.exists():
-        return normalize_config(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+        return normalize_config(json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig")))
     return normalize_config(DEFAULT_CONFIG)
 
 
