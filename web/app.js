@@ -2177,12 +2177,18 @@ function renderAbEvalReportPreview(report) {
                           source: sample.source,
                           manual_target: sample.manual_target,
                           best_variant: sample.best_variant,
+                          delta_vs_baseline: sample.best_score_delta_vs_baseline,
                           metrics: sample.metrics,
                         },
                         null,
                         2
                       )
                     )}</pre>
+                    ${
+                      sample.record_id
+                        ? `<button class="mini-btn" type="button" data-ab-eval-record-kind="${escapeHtml(sample.record_kind || sample.kind || "style")}" data-ab-eval-record-id="${escapeHtml(sample.record_id)}">打开样本详情</button>`
+                        : ""
+                    }
                   </div>
                 `
               )
@@ -2641,6 +2647,14 @@ function renderLearningQualityPanel() {
   });
   root.querySelectorAll("[data-ab-eval-report]").forEach((button) => {
     button.addEventListener("click", () => loadLocalFeedbackAbEvalReport());
+  });
+  root.querySelectorAll("[data-ab-eval-record-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openDiagnosticFeedbackRecord(
+        button.getAttribute("data-ab-eval-record-kind") || "style",
+        button.getAttribute("data-ab-eval-record-id") || "",
+      );
+    });
   });
   root.querySelectorAll("[data-diagnostic-record-id]").forEach((button) => {
     button.addEventListener("click", () => {

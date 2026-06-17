@@ -13,6 +13,7 @@ from .feedback_dataset import (
     dataset_paths,
     ensure_dataset_layout,
     read_jsonl,
+    span_record_key,
     style_record_key,
     style_text_similarity,
     utc_now,
@@ -108,6 +109,8 @@ def select_eval_samples(dataset_dir: Path, *, sample_kind: str, sample_count: in
 def style_sample_from_record(record: dict) -> dict:
     return {
         "sample_id": style_record_key(record),
+        "record_id": style_record_key(record),
+        "record_kind": "style",
         "kind": "style",
         "project_id": str(record.get("project_id") or ""),
         "segment_id": record.get("segment_id"),
@@ -129,8 +132,11 @@ def span_sample_from_record(record: dict) -> dict:
     segment_ids = [str(item) for item in record.get("segment_ids") or []]
     machine_joined = " ".join(str(machine_by_id.get(key, "")) for key in segment_ids if str(machine_by_id.get(key, "")).strip())
     manual_joined = " ".join(str(manual_by_id.get(key, "")) for key in segment_ids if str(manual_by_id.get(key, "")).strip())
+    record_id = span_record_key(record)
     return {
-        "sample_id": "::".join([str(record.get("project_id") or ""), str(record.get("span_id") or ""), ",".join(segment_ids)]),
+        "sample_id": record_id,
+        "record_id": record_id,
+        "record_kind": "span",
         "kind": "span",
         "project_id": str(record.get("project_id") or ""),
         "span_id": str(record.get("span_id") or ""),
@@ -450,9 +456,13 @@ def run_translation_ab_eval(
         best_variant = max(metrics, key=lambda key: float(metrics[key].get("adjusted_score") or 0.0)) if metrics else ""
         if best_variant:
             variant_wins.update([best_variant])
+        baseline_score = float(metrics.get("baseline", {}).get("adjusted_score") or 0.0)
+        best_score = float(metrics.get(best_variant, {}).get("adjusted_score") or 0.0) if best_variant else 0.0
         sample_reports.append(
             {
                 "sample_id": sample.get("sample_id"),
+                "record_id": sample.get("record_id") or sample.get("sample_id"),
+                "record_kind": sample.get("record_kind") or sample.get("kind"),
                 "kind": sample.get("kind"),
                 "project_id": sample.get("project_id"),
                 "source": sample.get("source"),
@@ -461,6 +471,7 @@ def run_translation_ab_eval(
                 "outputs": outputs,
                 "metrics": metrics,
                 "best_variant": best_variant,
+                "best_score_delta_vs_baseline": round(best_score - baseline_score, 4),
                 "errors": errors,
             }
         )

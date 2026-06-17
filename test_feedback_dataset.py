@@ -17,6 +17,8 @@ from autosub_zh.feedback_dataset import (
     summarize_learning,
     validate_dataset,
     write_jsonl,
+    span_record_key,
+    style_record_key,
 )
 from autosub_zh.feedback_ab_eval import (
     ab_eval_action_recommendation_codes,
@@ -380,6 +382,9 @@ def test_translation_ab_eval_preview_and_run_do_not_mutate_learning_jsonl(tmp_pa
     assert report["ok"] is True
     assert report["sample_count"] == 1
     assert report["summary"]["style_feedback_win_count"] >= 1
+    assert report["samples"][0]["record_kind"] == "style"
+    assert report["samples"][0]["record_id"] == style_record_key(style_record)
+    assert report["samples"][0]["best_score_delta_vs_baseline"] > 0
     assert paths["latest_translation_ab_eval"].exists()
     assert paths["translation_ab_eval_history"].exists()
     assert paths["translation_edits"].read_text(encoding="utf-8") == before_learning_jsonl
@@ -390,6 +395,51 @@ def test_translation_ab_eval_preview_and_run_do_not_mutate_learning_jsonl(tmp_pa
     assert history["total_recorded_runs"] == 1
     assert history["latest_runs"][0]["summary"]["style_feedback_win_count"] >= 1
     assert "increase_eval_sample_count" in ab_eval_action_recommendation_codes(preview, latest)
+
+
+def test_translation_ab_eval_span_sample_links_back_to_feedback_record(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    paths = dataset_paths(dataset_dir)
+    paths["root"].mkdir(parents=True, exist_ok=True)
+    span_record = {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "project_id": "span_project",
+        "span_id": "srcspan-0001",
+        "segment_ids": [1, 2],
+        "source_joined": "He stopped, and then the river changed.",
+        "risk_reasons": {"ends_with_function_word": 1},
+        "translation_strategy": "span_first",
+        "context_before": [],
+        "context_after": [],
+        "machine_target_by_id": {"1": "他停了，而且", "2": "河流改变了"},
+        "manual_target_by_id": {"1": "他停顿了一下", "2": "河流随即变了样"},
+        "edit_tags": ["semantic_reallocation"],
+        "learning_risk": "low",
+        "learning_recommendation": "eval_candidate",
+        "classification_reasons": [],
+        "accepted": True,
+        "use_for_span_prompt": False,
+        "use_for_eval": True,
+    }
+    write_jsonl(paths["span_translation_examples"], [span_record])
+    build_gold_sets(dataset_dir)
+
+    def fake_translator(chunk, kwargs):
+        return {chunk[0].id: "他停顿了一下，河流随即变了样"}
+
+    report = run_translation_ab_eval(
+        dataset_dir,
+        sample_kind="span",
+        sample_count=1,
+        model="fake-model",
+        translation_prompt="Base prompt",
+        translator=fake_translator,
+    )
+
+    assert report["sample_count"] == 1
+    assert report["samples"][0]["record_kind"] == "span"
+    assert report["samples"][0]["record_id"] == span_record_key(span_record)
 
 
 def test_collect_span_style_defaults_to_review_only_samples(tmp_path: Path) -> None:
