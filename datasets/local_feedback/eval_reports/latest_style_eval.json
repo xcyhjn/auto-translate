@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-06-17T09:18:43.303386+00:00",
+  "sample_count": 0,
+  "sample_insufficient": true,
+  "sample_note": "Need at least 20 reviewed subtitle feedback samples before judging translation style trends.",
+  "metrics": {
+    "avg_machine_manual_similarity": 0.0,
+    "avg_abs_char_delta": 0.0,
+    "surface_edit_rate": 0.0,
+    "semantic_or_style_signal_rate": 0.0,
+    "unsafe_sample_rate": 0.0
+  },
+  "feedback_type_counts": [],
+  "learning_risk_counts": [],
+  "learning_recommendation_counts": [],
+  "edit_tag_counts": [],
+  "strategy_counts": [],
+  "quality_flag_counts": [],
+  "high_value_cases": [],
+  "unsafe_cases": []
+}

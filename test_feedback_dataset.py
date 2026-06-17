@@ -9,6 +9,7 @@ from autosub_zh.feedback_dataset import (
     collect_style_project,
     dataset_paths,
     eval_bilibili,
+    eval_style,
     read_jsonl,
     save_bilibili_feedback_label,
     summarize_learning,
@@ -126,9 +127,63 @@ def test_collect_style_defaults_to_review_only_samples(tmp_path: Path) -> None:
     assert record["use_for_style_prompt"] is False
     assert record["use_for_eval"] is False
     assert "needs_human_acceptance" in record["quality_flags"]
+    assert isinstance(record["features"], dict)
+    assert record["feedback_types"]
+    assert record["learning_risk"] in {"low", "medium", "high"}
+    assert record["learning_recommendation"] in {"review_only", "style_prompt_candidate", "eval_candidate"}
+    assert isinstance(record["classification_reasons"], list)
 
     summary = summarize_learning(dataset_dir)
     assert summary["style_learning_count"] == 0
+
+
+def test_style_gold_eval_reports_feedback_health(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    project = tmp_path / "style_project"
+    project.mkdir()
+    segments = {
+        "segments": [
+            {
+                "id": 1,
+                "start": 1.0,
+                "end": 3.0,
+                "source_text": "This sentence needs a compact subtitle.",
+                "target_text": "杩欎釜鍙ュ瓙闇€瑕佷竴涓畝鐭殑瀛楀箷缈昏瘧",
+                "reference_text": "",
+                "confidence": None,
+                "source": "asr",
+                "words": [],
+            }
+        ]
+    }
+    (project / "05_translated_segments.json").write_text(json.dumps(segments, ensure_ascii=False), encoding="utf-8")
+    (project / "08_bilingual_zh_en.ass").write_text(
+        "\n".join(
+            [
+                "[Events]",
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+                "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,绠€鐭€佽嚜鐒剁殑瀛楀箷",
+            ]
+        ),
+        encoding="utf-8-sig",
+    )
+
+    collect_style_project(project, dataset_dir)
+    paths = dataset_paths(dataset_dir)
+    records = read_jsonl(paths["translation_edits"])
+    records[0]["accepted"] = True
+    records[0]["use_for_eval"] = True
+    records[0]["use_for_style_prompt"] = False
+    write_jsonl(paths["translation_edits"], records)
+
+    gold = build_gold_sets(dataset_dir)
+    assert gold["style_gold_count"] == 1
+
+    report = eval_style(dataset_dir)
+    assert report["sample_count"] == 1
+    assert report["sample_insufficient"] is True
+    assert report["metrics"]["semantic_or_style_signal_rate"] > 0
+    assert paths["latest_style_eval"].exists()
 
 
 def test_validate_rejects_eval_learning_overlap(tmp_path: Path) -> None:

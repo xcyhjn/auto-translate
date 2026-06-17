@@ -22,6 +22,17 @@ SCHEMA_VERSION = 1
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DATASET_DIR = BASE_DIR / "datasets" / "local_feedback"
 BILIBILI_LABELS = {"duplicate", "not_duplicate", "same_topic", "manual_review"}
+STYLE_FEEDBACK_TYPES = {
+    "bad_example",
+    "linebreak_fix",
+    "qa_repair",
+    "semantic_fix",
+    "style_edit",
+    "surface_edit",
+    "term_fix",
+}
+STYLE_LEARNING_RISKS = {"low", "medium", "high"}
+STYLE_LEARNING_RECOMMENDATIONS = {"eval_candidate", "review_only", "style_prompt_candidate"}
 
 
 def utc_now() -> str:
@@ -84,6 +95,7 @@ def dataset_paths(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict[str, Path]:
         "style_gold": dataset_dir / "eval_sets" / "translation_style_gold.jsonl",
         "eval_reports": dataset_dir / "eval_reports",
         "latest_bilibili_eval": dataset_dir / "eval_reports" / "latest_bilibili_eval.json",
+        "latest_style_eval": dataset_dir / "eval_reports" / "latest_style_eval.json",
         "learned_bilibili_hints": dataset_dir / "learned_bilibili_hints.json",
         "learned_style_guidelines": dataset_dir / "learned_style_guidelines.md",
         "learning_summary": dataset_dir / "learning_summary.md",
@@ -123,7 +135,7 @@ Principles:
 - JSONL files are append-friendly and versionable.
 - New samples default to review-only flags.
 - A sample must not be used for learning and eval at the same time.
-- The first learning layer is explainable hints, few-shot examples, and offline eval.
+- The first learning layer is explainable subtitle-translation hints, few-shot examples, and offline eval.
 
 Main files:
 - `bilibili_duplicate_labels.jsonl`: Bilibili duplicate-search candidate labels.
@@ -131,6 +143,7 @@ Main files:
 - `term_entity_decisions.jsonl`: reserved for terminology/entity decisions.
 - `qa_repair_examples.jsonl`: reserved for QA repair examples.
 - `eval_sets/`: frozen gold samples copied from reviewed feedback.
+- `eval_reports/latest_style_eval.json`: latest offline subtitle-translation feedback eval.
 - `eval_reports/latest_bilibili_eval.json`: latest offline Bilibili replay eval.
 
 Typical commands:
@@ -141,6 +154,7 @@ python -m autosub_zh.feedback_dataset collect-bilibili --project "D:\\autosub_zh
 python -m autosub_zh.feedback_dataset collect-style --project "D:\\autosub_zh\\output\\project"
 python -m autosub_zh.feedback_dataset validate
 python -m autosub_zh.feedback_dataset build-gold
+python -m autosub_zh.feedback_dataset eval-style
 python -m autosub_zh.feedback_dataset eval-bilibili
 python -m autosub_zh.feedback_dataset summarize
 ```
@@ -371,6 +385,77 @@ def style_quality_flags(pair: dict, tags: list[str], features: dict) -> list[str
     return list(dict.fromkeys(flags))
 
 
+def classify_style_feedback(pair: dict, tags: list[str], features: dict, operation_summary: dict) -> dict:
+    strategies = {str(item) for item in operation_summary.get("strategies") or [] if str(item).strip()}
+    feedback_types: list[str] = []
+    reasons: list[str] = []
+    changed = bool(pair.get("changed"))
+    overlap_ratio = float(pair.get("overlap_ratio") or 0.0)
+    source = str(pair.get("source_text") or "")
+    machine = str(pair.get("machine_target_text") or "")
+    manual = str(pair.get("manual_target_text") or "")
+    char_delta = int(features.get("char_delta") or 0)
+
+    if not changed:
+        feedback_types.append("bad_example")
+        reasons.append("machine and manual text are unchanged")
+    if overlap_ratio < 0.5:
+        feedback_types.append("bad_example")
+        reasons.append("subtitle alignment overlap is low")
+    if not source.strip() or not machine.strip() or not manual.strip():
+        feedback_types.append("bad_example")
+        reasons.append("source, machine, or manual text is empty")
+
+    if features.get("surface_only"):
+        feedback_types.append("surface_edit")
+        reasons.append("manual edit only changes surface formatting or punctuation")
+    if "manual_linebreak" in tags or "rebalance_lines" in strategies:
+        feedback_types.append("linebreak_fix")
+        reasons.append("manual edit adjusts subtitle line breaking")
+    if {"compressed", "expanded", "punctuation_tuned"} & set(tags) or {"compress", "expand", "keep_core_clause", "reduce_clause_count"} & strategies:
+        feedback_types.append("style_edit")
+        reasons.append("manual edit changes subtitle style or density")
+    if {"preserve_english", "mixed_naming"} & set(tags) or "preserve_term" in strategies:
+        feedback_types.append("term_fix")
+        reasons.append("manual edit preserves or changes terminology/entity handling")
+    if abs(char_delta) >= 6 and not features.get("surface_only"):
+        feedback_types.append("semantic_fix")
+        reasons.append("manual edit changes enough text to be useful for translation preference learning")
+    if "fixed_open_ending" in tags or "close_open_clause" in strategies or operation_summary.get("drops_open_ending"):
+        feedback_types.append("qa_repair")
+        reasons.append("manual edit repairs an unfinished subtitle clause")
+    if changed and not feedback_types:
+        feedback_types.append("style_edit")
+        reasons.append("manual edit changes translation wording")
+
+    feedback_types = [item for item in dict.fromkeys(feedback_types) if item in STYLE_FEEDBACK_TYPES]
+    if "bad_example" in feedback_types:
+        learning_risk = "high"
+    elif feedback_types == ["surface_edit"] or set(feedback_types) <= {"surface_edit", "linebreak_fix"}:
+        learning_risk = "medium"
+    else:
+        learning_risk = "low"
+
+    recommendation = "review_only"
+    high_signal_types = {"qa_repair", "semantic_fix", "style_edit", "term_fix"}
+    if learning_risk == "low" and high_signal_types & set(feedback_types):
+        recommendation = "style_prompt_candidate"
+    elif learning_risk == "low" and "linebreak_fix" in feedback_types:
+        recommendation = "eval_candidate"
+
+    return {
+        "feedback_types": feedback_types,
+        "learning_risk": learning_risk,
+        "learning_recommendation": recommendation,
+        "classification_reasons": list(dict.fromkeys(reasons)),
+    }
+
+
+def is_unsafe_style_learning_record(record: dict) -> bool:
+    feedback_types = set(str(item) for item in record.get("feedback_types") or [])
+    return record.get("learning_risk") == "high" or "bad_example" in feedback_types
+
+
 def collect_style_project(project: Path, dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
     paths = ensure_dataset_layout(dataset_dir)
     project = project.resolve()
@@ -385,6 +470,8 @@ def collect_style_project(project: Path, dataset_dir: Path = DEFAULT_DATASET_DIR
     for pair in changed_pairs:
         tags = detect_edit_tags(pair)
         features = build_style_features(pair)
+        operation_summary = build_edit_operation_summary(pair)
+        classification = classify_style_feedback(pair, tags, features, operation_summary)
         records.append(
             {
                 "schema_version": SCHEMA_VERSION,
@@ -405,8 +492,10 @@ def collect_style_project(project: Path, dataset_dir: Path = DEFAULT_DATASET_DIR
                 "machine_target_text": pair.get("machine_target_text") or "",
                 "manual_target_text": pair.get("manual_target_text") or "",
                 "edit_tags": tags,
-                "operation_summary": build_edit_operation_summary(pair),
+                "features": features,
+                "operation_summary": operation_summary,
                 "quality_flags": style_quality_flags(pair, tags, features),
+                **classification,
                 "accepted": False,
                 "use_for_style_prompt": False,
                 "use_for_eval": False,
@@ -469,8 +558,13 @@ def validate_style_record(record: dict, path: str, errors: list[str]) -> None:
             "machine_target_text",
             "manual_target_text",
             "edit_tags",
+            "features",
             "operation_summary",
             "quality_flags",
+            "feedback_types",
+            "learning_risk",
+            "learning_recommendation",
+            "classification_reasons",
             "accepted",
             "use_for_style_prompt",
             "use_for_eval",
@@ -482,8 +576,24 @@ def validate_style_record(record: dict, path: str, errors: list[str]) -> None:
         errors.append(f"{path}: unsupported schema_version {record.get('schema_version')!r}")
     if not isinstance(record.get("edit_tags"), list):
         errors.append(f"{path}: edit_tags must be a list")
+    if not isinstance(record.get("features"), dict):
+        errors.append(f"{path}: features must be an object")
+    if not isinstance(record.get("operation_summary"), dict):
+        errors.append(f"{path}: operation_summary must be an object")
     if not isinstance(record.get("quality_flags"), list):
         errors.append(f"{path}: quality_flags must be a list")
+    if not isinstance(record.get("feedback_types"), list):
+        errors.append(f"{path}: feedback_types must be a list")
+    else:
+        invalid_types = [item for item in record.get("feedback_types") or [] if item not in STYLE_FEEDBACK_TYPES]
+        if invalid_types:
+            errors.append(f"{path}: invalid feedback_types {invalid_types!r}")
+    if record.get("learning_risk") not in STYLE_LEARNING_RISKS:
+        errors.append(f"{path}: invalid learning_risk {record.get('learning_risk')!r}")
+    if record.get("learning_recommendation") not in STYLE_LEARNING_RECOMMENDATIONS:
+        errors.append(f"{path}: invalid learning_recommendation {record.get('learning_recommendation')!r}")
+    if not isinstance(record.get("classification_reasons"), list):
+        errors.append(f"{path}: classification_reasons must be a list")
     for flag in ("accepted", "use_for_style_prompt", "use_for_eval"):
         if not isinstance(record.get(flag), bool):
             errors.append(f"{path}: {flag} must be boolean")
@@ -491,6 +601,8 @@ def validate_style_record(record: dict, path: str, errors: list[str]) -> None:
         errors.append(f"{path}: use_for_eval and use_for_style_prompt must stay separate")
     if (record.get("use_for_eval") or record.get("use_for_style_prompt")) and not record.get("accepted"):
         errors.append(f"{path}: accepted must be true before use_for_eval/use_for_style_prompt")
+    if is_unsafe_style_learning_record(record) and (record.get("use_for_eval") or record.get("use_for_style_prompt")):
+        errors.append(f"{path}: high-risk/bad style samples cannot be used for eval or style prompt")
 
 
 def validate_dataset(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
@@ -576,6 +688,7 @@ def build_gold_sets(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
         record
         for record in read_jsonl(paths["translation_edits"])
         if record.get("use_for_eval") is True and record.get("use_for_style_prompt") is not True and record.get("accepted") is True
+        and not is_unsafe_style_learning_record(record)
     ]
     write_jsonl(paths["bilibili_gold"], unique_records(bilibili_records, bilibili_record_key))
     write_jsonl(paths["style_gold"], unique_records(style_records, style_record_key))
@@ -650,14 +763,17 @@ def summarize_learning(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
         record
         for record in style_records
         if record.get("accepted") is True and record.get("use_for_style_prompt") is True and record.get("use_for_eval") is not True
+        and not is_unsafe_style_learning_record(record)
     ]
     tag_counts: Counter[str] = Counter()
     strategy_counts: Counter[str] = Counter()
+    feedback_type_counts: Counter[str] = Counter()
     for record in style_learning:
         tag_counts.update(str(item) for item in record.get("edit_tags") or [] if str(item).strip())
+        feedback_type_counts.update(str(item) for item in record.get("feedback_types") or [] if str(item).strip())
         operation_summary = record.get("operation_summary") if isinstance(record.get("operation_summary"), dict) else {}
         strategy_counts.update(str(item) for item in operation_summary.get("strategies") or [] if str(item).strip())
-    style_guidelines = build_style_guidelines(tag_counts, strategy_counts, len(style_learning))
+    style_guidelines = build_style_guidelines(tag_counts, strategy_counts, feedback_type_counts, len(style_learning))
     paths["learned_style_guidelines"].write_text(style_guidelines, encoding="utf-8")
 
     summary_text = build_learning_summary(
@@ -680,7 +796,12 @@ def summarize_learning(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
     }
 
 
-def build_style_guidelines(tag_counts: Counter[str], strategy_counts: Counter[str], sample_count: int) -> str:
+def build_style_guidelines(
+    tag_counts: Counter[str],
+    strategy_counts: Counter[str],
+    feedback_type_counts: Counter[str],
+    sample_count: int,
+) -> str:
     lines = [
         "# Learned Style Guidelines",
         "",
@@ -698,6 +819,8 @@ def build_style_guidelines(tag_counts: Counter[str], strategy_counts: Counter[st
         return "\n".join(lines).strip() + "\n"
     lines.extend(["## Observed Signals", ""])
     lines.append(f"- Accepted style samples: {sample_count}")
+    for item in counter_items(feedback_type_counts, limit=12):
+        lines.append(f"- Feedback type `{item['value']}`: {item['count']}")
     for item in counter_items(tag_counts, limit=12):
         lines.append(f"- Tag `{item['value']}`: {item['count']}")
     for item in counter_items(strategy_counts, limit=12):
@@ -711,6 +834,8 @@ def build_style_guidelines(tag_counts: Counter[str], strategy_counts: Counter[st
         lines.append("- Treat manual line breaks as timing and readability signals, not mere punctuation edits.")
     if tag_counts.get("fixed_open_ending") or strategy_counts.get("close_open_clause"):
         lines.append("- Avoid unfinished clause endings; close the meaning within the current subtitle when possible.")
+    if feedback_type_counts.get("semantic_fix"):
+        lines.append("- Prefer the human-edited meaning when machine output was literal, vague, or semantically thin.")
     if not any(line.startswith("- ") for line in lines[-6:]):
         lines.append("- Review accepted examples directly; current tags are too sparse for a strong style rule.")
     return "\n".join(lines).strip() + "\n"
@@ -893,6 +1018,101 @@ def score_distribution(scores: list[int]) -> dict:
     return buckets
 
 
+def style_text_similarity(machine: str, manual: str) -> float:
+    machine_chars = [char for char in str(machine or "") if not char.isspace()]
+    manual_chars = [char for char in str(manual or "") if not char.isspace()]
+    if not machine_chars and not manual_chars:
+        return 1.0
+    if not machine_chars or not manual_chars:
+        return 0.0
+    machine_counter = Counter(machine_chars)
+    manual_counter = Counter(manual_chars)
+    shared = sum((machine_counter & manual_counter).values())
+    total = max(sum(machine_counter.values()), sum(manual_counter.values()))
+    return round(shared / total, 4) if total else 0.0
+
+
+def eval_style(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
+    paths = ensure_dataset_layout(dataset_dir)
+    gold_records = read_jsonl(paths["style_gold"])
+
+    tag_counts: Counter[str] = Counter()
+    strategy_counts: Counter[str] = Counter()
+    feedback_type_counts: Counter[str] = Counter()
+    risk_counts: Counter[str] = Counter()
+    recommendation_counts: Counter[str] = Counter()
+    quality_flag_counts: Counter[str] = Counter()
+    similarities: list[float] = []
+    char_deltas: list[int] = []
+    high_value_cases: list[dict] = []
+    unsafe_cases: list[dict] = []
+
+    for record in gold_records:
+        tag_counts.update(str(item) for item in record.get("edit_tags") or [] if str(item).strip())
+        feedback_types = [str(item) for item in record.get("feedback_types") or [] if str(item).strip()]
+        feedback_type_counts.update(feedback_types)
+        risk_counts.update([str(record.get("learning_risk") or "unknown")])
+        recommendation_counts.update([str(record.get("learning_recommendation") or "unknown")])
+        quality_flag_counts.update(str(item) for item in record.get("quality_flags") or [] if str(item).strip())
+        operation_summary = record.get("operation_summary") if isinstance(record.get("operation_summary"), dict) else {}
+        strategy_counts.update(str(item) for item in operation_summary.get("strategies") or [] if str(item).strip())
+
+        machine = str(record.get("machine_target_text") or "")
+        manual = str(record.get("manual_target_text") or "")
+        similarities.append(style_text_similarity(machine, manual))
+        char_deltas.append(abs(len(manual) - len(machine)))
+
+        case = {
+            "project_id": record.get("project_id"),
+            "segment_id": record.get("segment_id"),
+            "feedback_types": feedback_types,
+            "learning_risk": record.get("learning_risk") or "",
+            "edit_tags": record.get("edit_tags") or [],
+            "strategies": operation_summary.get("strategies") or [],
+        }
+        if is_unsafe_style_learning_record(record):
+            unsafe_cases.append(case)
+        elif {"qa_repair", "semantic_fix", "style_edit", "term_fix"} & set(feedback_types):
+            high_value_cases.append(case)
+
+    sample_count = len(gold_records)
+    metrics = {
+        "avg_machine_manual_similarity": round(sum(similarities) / sample_count, 4) if sample_count else 0.0,
+        "avg_abs_char_delta": round(sum(char_deltas) / sample_count, 2) if sample_count else 0.0,
+        "surface_edit_rate": safe_ratio(feedback_type_counts.get("surface_edit", 0), sample_count),
+        "semantic_or_style_signal_rate": safe_ratio(
+            feedback_type_counts.get("semantic_fix", 0)
+            + feedback_type_counts.get("style_edit", 0)
+            + feedback_type_counts.get("term_fix", 0)
+            + feedback_type_counts.get("qa_repair", 0),
+            sample_count,
+        ),
+        "unsafe_sample_rate": safe_ratio(len(unsafe_cases), sample_count),
+    }
+    report = {
+        "schema_version": SCHEMA_VERSION,
+        "created_at": utc_now(),
+        "sample_count": sample_count,
+        "sample_insufficient": sample_count < 20,
+        "sample_note": (
+            "Need at least 20 reviewed subtitle feedback samples before judging translation style trends."
+            if sample_count < 20
+            else "Gold set is large enough for a first subtitle feedback trend check."
+        ),
+        "metrics": metrics,
+        "feedback_type_counts": counter_items(feedback_type_counts),
+        "learning_risk_counts": counter_items(risk_counts),
+        "learning_recommendation_counts": counter_items(recommendation_counts),
+        "edit_tag_counts": counter_items(tag_counts),
+        "strategy_counts": counter_items(strategy_counts),
+        "quality_flag_counts": counter_items(quality_flag_counts),
+        "high_value_cases": high_value_cases[:20],
+        "unsafe_cases": unsafe_cases[:20],
+    }
+    write_json(paths["latest_style_eval"], report)
+    return report
+
+
 def print_result(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
@@ -914,6 +1134,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("dedupe", help="Deduplicate dataset JSONL files.")
     subparsers.add_parser("build-gold", help="Copy reviewed eval records into frozen gold-set files.")
     subparsers.add_parser("summarize", help="Generate explainable learned hint files.")
+    subparsers.add_parser("eval-style", help="Run offline subtitle translation feedback eval from the gold set.")
     subparsers.add_parser("eval-bilibili", help="Run offline Bilibili replay eval from the gold set.")
     return parser
 
@@ -945,6 +1166,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "summarize":
             print_result(summarize_learning(dataset_dir))
+            return 0
+        if args.command == "eval-style":
+            print_result(eval_style(dataset_dir))
             return 0
         if args.command == "eval-bilibili":
             print_result(eval_bilibili(dataset_dir))

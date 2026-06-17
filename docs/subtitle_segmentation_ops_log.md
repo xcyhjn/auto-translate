@@ -871,3 +871,38 @@ Known unrelated dirty files left untouched:
 - `ui_server_live_stderr.log`
 - `ui_server_live_stdout.log`
 - `test_asr_gpu_fallback.py`
+
+## 2026-06-17 17:45 +08:00 - Subtitle Translation Feedback Refocus
+
+User direction:
+
+- Refocus local feedback learning on subtitle translation quality, not Bilibili search.
+- Keep Bilibili duplicate search as an auxiliary feedback stream only.
+- Build a local dataset that can later support prompt/RAG tuning, offline eval, and only after enough reviewed data, possible custom training.
+
+What:
+
+- Added subtitle feedback classification fields to `translation_edit_examples.jsonl` records:
+  - `features`
+  - `feedback_types`
+  - `learning_risk`
+  - `learning_recommendation`
+  - `classification_reasons`
+- Added feedback type classes:
+  - `style_edit`
+  - `term_fix`
+  - `semantic_fix`
+  - `qa_repair`
+  - `linebreak_fix`
+  - `surface_edit`
+  - `bad_example`
+- Added guardrails so high-risk/bad examples cannot be used for style prompt learning or eval gold sets.
+- Added `eval-style` command and `datasets/local_feedback/eval_reports/latest_style_eval.json`.
+- Updated handoff docs to state subtitle translation feedback is the primary learning objective.
+
+Validation target:
+
+- New samples remain review-only by default.
+- Human must set `accepted=true` and exactly one of `use_for_style_prompt` or `use_for_eval`.
+- `build-gold` excludes high-risk/bad subtitle samples.
+- `eval-style` reports sample sufficiency, signal distribution, unsafe cases, and high-value cases.

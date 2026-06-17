@@ -1,8 +1,8 @@
-# Local Feedback Learning Handoff
+# Subtitle Translation Feedback Learning Handoff
 
 ## Assumptions for This MVP
 
-- Subtitle ASS feedback is the first learning target; Bilibili duplicate search remains the first retrieval/ranking eval target.
+- Subtitle translation feedback is the first learning target; Bilibili duplicate search is only an auxiliary retrieval/ranking feedback stream.
 - Missing duplicates are more costly than false positives, so uncertain matches stay in manual review.
 - Feedback is versioned in JSONL; this MVP also adds a small UI entry for Bilibili labels and ASS feedback collection.
 - Feedback collection and current eval run offline by default, but the workflow may use external APIs or embeddings later when useful.
@@ -43,16 +43,16 @@ Minimum viable loop:
 
 1. Normalize local feedback schemas in `datasets/local_feedback/`.
 2. Collect subtitle edit examples from the manually edited ASS and use machine segments only as the baseline for alignment.
-3. Collect Bilibili candidates from existing output projects.
+3. Classify each subtitle edit as style, terminology, semantic, QA repair, linebreak, surface edit, or unsafe example.
 4. Keep new samples review-only by default.
 5. Let humans mark samples for eval or learning, either by JSONL or UI buttons.
-6. Build frozen gold files and run offline replay eval.
-7. Generate explainable hint files before wiring anything back into workflow logic.
+6. Build frozen gold files and run offline subtitle feedback eval.
+7. Generate explainable style guidance before wiring anything back into workflow logic.
 
 ## Added Files
 
-- `feedback_dataset.py`: CLI and Python module for collection, validation, dedupe, gold-set build, summary, and Bilibili replay eval.
-- `test_feedback_dataset.py`: regression tests for collection, label preservation, eval replay, and train/eval separation.
+- `feedback_dataset.py`: CLI and Python module for collection, validation, dedupe, gold-set build, subtitle feedback eval, summary, and Bilibili replay eval.
+- `test_feedback_dataset.py`: regression tests for collection, label preservation, subtitle eval, replay eval, and train/eval separation.
 - `datasets/local_feedback/`: local feedback dataset root.
 - `POST /api/bilibili-duplicate-feedback`: saves UI labels into local JSONL.
 - `POST /api/collect-style-feedback`: collects ASS edit feedback into local JSONL.
@@ -65,6 +65,7 @@ Dataset files:
 - `qa_repair_examples.jsonl`
 - `eval_sets/bilibili_duplicate_gold.jsonl`
 - `eval_sets/translation_style_gold.jsonl`
+- `eval_reports/latest_style_eval.json`
 - `eval_reports/latest_bilibili_eval.json`
 - `learned_bilibili_hints.json`
 - `learned_style_guidelines.md`
@@ -95,8 +96,13 @@ Translation edit records contain:
 - `machine_target_text`
 - `manual_target_text`
 - `edit_tags`
+- `features`
 - `operation_summary`
 - `quality_flags`
+- `feedback_types`: `style_edit`, `term_fix`, `semantic_fix`, `qa_repair`, `linebreak_fix`, `surface_edit`, or `bad_example`
+- `learning_risk`: `low`, `medium`, or `high`
+- `learning_recommendation`: `review_only`, `style_prompt_candidate`, or `eval_candidate`
+- `classification_reasons`
 - `accepted`
 - `use_for_style_prompt`
 - `use_for_eval`
@@ -112,6 +118,7 @@ python -m autosub_zh.feedback_dataset collect-bilibili --project "D:\autosub_zh\
 python -m autosub_zh.feedback_dataset collect-style --project "D:\autosub_zh\output\SomeProject"
 python -m autosub_zh.feedback_dataset validate
 python -m autosub_zh.feedback_dataset build-gold
+python -m autosub_zh.feedback_dataset eval-style
 python -m autosub_zh.feedback_dataset eval-bilibili
 python -m autosub_zh.feedback_dataset summarize
 ```
@@ -133,11 +140,24 @@ Style review flow:
 
 1. Edit `translation_edit_examples.jsonl`.
 2. Treat the ASS as the source of human feedback; `05_translated_segments.json` is only the machine baseline used for alignment.
-3. Set `accepted=true` only for edits that are useful examples.
-4. Set either `use_for_style_prompt=true` or `use_for_eval=true`, not both.
-5. Run `validate` and `summarize`.
+3. Review `feedback_types`, `learning_risk`, and `classification_reasons`.
+4. Set `accepted=true` only for edits that are useful examples.
+5. Set either `use_for_style_prompt=true` or `use_for_eval=true`, not both.
+6. Do not use `bad_example` or `learning_risk=high` samples for learning/eval.
+7. Run `validate`, `build-gold`, `eval-style`, and `summarize`.
 
 ## Eval
+
+`eval-style` reads `eval_sets/translation_style_gold.jsonl` and writes:
+
+- sample count and sample sufficiency
+- feedback type distribution
+- learning risk and recommendation distribution
+- edit tag and strategy distribution
+- average machine/manual text similarity
+- average absolute character delta
+- unsafe cases that should not enter the gold set
+- high-value cases for future prompt examples or training data
 
 `eval-bilibili` reads `eval_sets/bilibili_duplicate_gold.jsonl`, regenerates query plans, replays scoring over saved candidates, and writes:
 
@@ -156,8 +176,9 @@ If there are fewer than three positive sources, the report is marked `sample_ins
 
 - Current sample counts are too small for deep-learning fine-tuning.
 - The project needs high-quality labels and stable eval sets before model training.
-- Bilibili duplicate search should be treated as retrieval/ranking first: query generation, lexical/semantic hints, candidate reranking, optional embedding/cross-encoder, and active learning.
-- Current subtitle style learning is a prompt/RAG prototype; it should become a reusable dataset before any training.
+- Subtitle translation feedback should be treated as supervised preference/style data first: collect accepted edits, separate eval, then only later consider fine-tuning.
+- Bilibili duplicate search should be treated as retrieval/ranking first and should not dominate the local learning roadmap.
+- Current subtitle style learning is a prompt/RAG prototype; it should become a reusable dataset before any model training.
 - All automatic learning must stay explainable, switchable, and reversible.
 - Learning samples and eval samples must stay separate.
 
@@ -166,4 +187,5 @@ If there are fewer than three positive sources, the report is marked `sample_ins
 - Add a subtitle-focused UI review surface for accepting ASS edit examples into style learning or eval.
 - Add term/entity feedback extraction from `06e_entity_decisions.json` and `08b_ass_entity_audit.json`.
 - Add QA repair examples from final ASS QA and editor review TSVs.
-- Add a feature flag such as `enable_local_feedback_learning` before consuming `learned_bilibili_hints.json` in the workflow.
+- Add a feature flag such as `enable_local_translation_feedback` before consuming `learned_style_guidelines.md` in translation prompts.
+- After at least 50 accepted subtitle examples and 20 frozen eval examples, run ablation tests before considering LoRA/fine-tuning.
