@@ -72,3 +72,34 @@ def test_large_duration_gap_is_penalized() -> None:
     assert "duration_mismatch_penalty" in scored["reason_codes"]
     assert "candidate_too_short" in scored["reason_codes"]
     assert scored["score"] < 60
+
+
+def test_philosophy_title_translation_scores_target_candidate() -> None:
+    meta = {
+        "video_id": "r6pWz2FnFOk",
+        "video_url": "https://www.youtube.com/watch?v=r6pWz2FnFOk",
+        "title": "The World Of Philosophy Is Incredible",
+        "description": "#philosophy #science #funny\nmusic by Ben Parr",
+        "author": "Xandros",
+        "published_at": "2026-06-06 05:00:36",
+        "duration": 2506,
+    }
+    plan = build_bilibili_query_plan(meta)
+    candidate = {
+        "title": "哲学的世界令人惊叹 - Xandros - 中配",
+        "url": "https://www.bilibili.com/video/BV1MWJK6SE4X",
+        "bvid": "BV1MWJK6SE4X",
+        "uploader": "旁白_B",
+        "duration": "41:46",
+        "published_at": "2026-06-15 00:58:37",
+        "description": "Xandros philosophy 中文配音",
+        "matched_queries": ["哲学的世界令人惊叹"],
+        "source_search_url": "https://search.bilibili.com/video?keyword=x",
+    }
+
+    scored = score_bilibili_candidate(candidate, meta, plan)
+
+    assert scored["score"] >= 60
+    assert scored["confidence"] in {"medium_confidence_review", "high_confidence_possible_duplicate"}
+    assert "title_translation_phrase_hit" in scored["reason_codes"]
+    assert "single_generic_term_penalty" not in scored["reason_codes"]

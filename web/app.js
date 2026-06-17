@@ -2362,6 +2362,15 @@ function bilibiliDecisionLabel(decision) {
   return labels[decision] || "未检测";
 }
 
+function bilibiliSearchStateLabel(searchState, decision) {
+  const labels = {
+    matched_candidates: bilibiliDecisionLabel(decision),
+    searched_no_parseable_candidates: "已搜索，未发现可解析候选",
+    search_unavailable: "搜索通道受限，可手动复核",
+  };
+  return labels[searchState] || bilibiliDecisionLabel(decision);
+}
+
 function renderBilibiliDuplicate() {
   const card = el("bilibiliDuplicateCard");
   const stateValue = state.bilibiliDuplicate;
@@ -2375,6 +2384,7 @@ function renderBilibiliDuplicate() {
   const status = stateValue.status || "idle";
   const report = stateValue.report || {};
   const decision = report.decision || "";
+  const searchState = report.search_state || "";
   const candidates = Array.isArray(report.candidates) ? report.candidates.slice(0, 5) : [];
   const query = (report.queries || report.query_plan || [])[0] || {};
   const best = report.best_candidate || candidates[0] || null;
@@ -2388,18 +2398,22 @@ function renderBilibiliDuplicate() {
     isFailure ? "proxy-bad" : high || medium ? "proxy-ok" : low ? "alert-warn" : ""
   }`;
 
+  const searchMeta = searchState === "search_unavailable"
+    ? `搜索通道受限 · 候选 ${candidates.length} 个 · Top score ${report.scoring_summary?.top_score ?? 0}`
+    : searchSummary.searched
+      ? `已搜索 ${searchSummary.successful_query_count || 0}/${searchSummary.attempted_query_count || 0} 个查询 · 可解析候选 ${searchSummary.parsed_candidate_count || 0} 个 · Top score ${report.scoring_summary?.top_score ?? 0}`
+      : `未触发搜索 · 候选 ${candidates.length} 个 · Top score ${report.scoring_summary?.top_score ?? 0}`;
+
   const title = isFailure
     ? "Bilibili 检测失败"
     : isRunning
       ? "Bilibili 检测中"
-      : bilibiliDecisionLabel(decision);
+      : bilibiliSearchStateLabel(searchState, decision);
   const meta = isRunning
     ? "正在生成查询并轻量搜索 B 站"
     : isFailure
       ? escapeHtml(stateValue.error || "检测失败")
-      : searchSummary.searched
-        ? `已搜索 ${searchSummary.successful_query_count || 0}/${searchSummary.attempted_query_count || 0} 个查询 · 解析候选 ${searchSummary.parsed_candidate_count || 0} 个 · Top score ${report.scoring_summary?.top_score ?? 0}`
-        : `未触发搜索 · 候选 ${candidates.length} 个 · Top score ${report.scoring_summary?.top_score ?? 0}`;
+      : searchMeta;
 
   const bestHtml = best
     ? `<div class="bilibili-best">

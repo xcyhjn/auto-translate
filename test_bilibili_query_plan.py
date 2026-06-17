@@ -32,3 +32,21 @@ def test_query_plan_dedupes_queries_and_preserves_search_urls() -> None:
 
     assert len(keys) == len(set(keys))
     assert all(item["search_url"].startswith("https://search.bilibili.com/video?keyword=") for item in plan)
+
+
+def test_philosophy_title_generates_title_first_chinese_queries() -> None:
+    meta = {
+        "title": "The World Of Philosophy Is Incredible",
+        "description": "#philosophy #science #funny\nmusic by Ben Parr",
+        "author": "Xandros",
+    }
+
+    plan = build_bilibili_query_plan(meta)
+    texts = [item["text"] for item in plan]
+
+    assert "哲学的世界令人惊叹" in texts
+    assert "哲学 世界 令人惊叹" in texts
+    assert "哲学 中配" in texts
+    assert "Xandros 中配" in texts
+    assert not any("音乐" in text for text in texts[:6])
+    assert all(item["api_url"].startswith("https://api.bilibili.com/x/web-interface/search/type?") for item in plan)

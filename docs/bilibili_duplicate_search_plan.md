@@ -12,12 +12,12 @@ Many Bilibili uploads are retitled, translated, or rewritten. Searching only the
 
 ## Query strategy
 The search plan generates a small set of deduplicated queries, capped at 12 total:
-- original YouTube title
-- cleaned title without brackets / episode markers
-- core English noun phrases
-- translated Chinese topic terms
+- title-first Chinese semantic variants, including direct translation, loose translation, and topic-only combinations
+- original YouTube title and cleaned title without brackets / episode markers
+- core English title phrases
 - mixed Chinese/English variants that keep proper names in English
-- semantic variants such as direct translation, loose translation, and topic-only combinations
+- author/channel names only as weak context, not as primary queries
+- description/tag terms only as fallback when the title has no usable semantic concepts
 
 The implementation is rule-based first. It can be extended later with optional LLM-generated query variants, but failure to generate extra variants never blocks the search.
 
@@ -43,6 +43,16 @@ New API:
 The user does not need to click the YouTube info button first. If `youtube_meta` is already available, the API reuses it; otherwise it fetches YouTube metadata internally before building Bilibili queries. The search still depends on metadata, because title and duration are required for useful query generation and scoring.
 
 If the search runs but does not find parseable candidates, the UI should say so explicitly and keep the manual search links. Only a total inability to search should be treated as a failure.
+
+Search channel behavior:
+- prefer `api.bilibili.com/x/web-interface/search/type` structured video search
+- use the HTML search page only as a fallback after API failure
+- treat captcha/risk HTML pages as `search_unavailable`, not as successful empty searches
+
+Search states:
+- `matched_candidates`
+- `searched_no_parseable_candidates`
+- `search_unavailable`
 
 Artifacts written into the selected output folder:
 - `00b_bilibili_duplicate_search.json`
@@ -88,6 +98,7 @@ Validation should cover:
 - Bilibili HTML can change.
 - Search pages can render dynamically.
 - Proxy connectivity may fail.
+- Bilibili may return captcha/risk pages for HTML search.
 
 Fallback behavior:
 - keep the raw search URL

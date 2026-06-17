@@ -13,12 +13,20 @@ import httpx
 
 
 BILIBILI_SEARCH_URL = "https://search.bilibili.com/video?keyword={keyword}"
+BILIBILI_SEARCH_API_URL = "https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword={keyword}"
 BILIBILI_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
 )
 MAX_QUERY_COUNT = 12
 MAX_RESULTS_PER_QUERY = 10
+
+
+class BilibiliSearchChannelLimited(RuntimeError):
+    def __init__(self, message: str, *, channel: str = "search", reason_code: str = "search_channel_limited") -> None:
+        super().__init__(message)
+        self.channel = channel
+        self.reason_code = reason_code
 
 EN_STOP_WORDS = {
     "a",
@@ -77,6 +85,8 @@ NEGATIVE_MARKERS = {
 
 SOURCE_MARKERS = {"转载", "搬运", "翻译", "中字", "字幕", "授权", "原视频", "youtube", "YouTube"}
 
+SOURCE_MARKERS.update({"中配", "中文配音", "配音", "中字", "字幕", "转载", "搬运"})
+
 CONCEPTS: dict[str, dict[str, list[str]]] = {
     "russian": {"en": ["russian", "russia"], "zh": ["俄罗斯", "俄国", "俄语"]},
     "book": {"en": ["book", "novel", "fiction"], "zh": ["书", "小说", "文学"]},
@@ -91,9 +101,23 @@ CONCEPTS: dict[str, dict[str, list[str]]] = {
     "mystery": {"en": ["mystery", "secret"], "zh": ["谜", "秘密"]},
 }
 
+CONCEPTS.update(
+    {
+        "philosophy": {"en": ["philosophy", "philosophical"], "zh": ["哲学"]},
+        "world": {"en": ["world", "worlds"], "zh": ["世界"]},
+        "incredible": {"en": ["incredible", "amazing", "astonishing"], "zh": ["令人惊叹", "惊叹"]},
+        "science": {"en": ["science", "scientific"], "zh": ["科学"]},
+        "funny": {"en": ["funny", "humor", "humour", "comedy"], "zh": ["搞笑", "有趣"]},
+    }
+)
+
 
 def build_search_url(query: str) -> str:
     return BILIBILI_SEARCH_URL.format(keyword=quote(query.strip()))
+
+
+def build_search_api_url(query: str) -> str:
+    return BILIBILI_SEARCH_API_URL.format(keyword=quote(query.strip()))
 
 
 def strip_html(value: str) -> str:
@@ -180,6 +204,14 @@ def zh_terms_for_concepts(concepts: list[str]) -> list[str]:
 def phrase_variants_for_concepts(concepts: list[str]) -> list[str]:
     concept_set = set(concepts)
     variants: list[str] = []
+    if {"philosophy", "world", "incredible"}.issubset(concept_set):
+        variants.extend(
+            [
+                "哲学的世界令人惊叹",
+                "哲学 世界 令人惊叹",
+                "哲学 中配",
+            ]
+        )
     if {"russian", "dying", "god", "book"}.issubset(concept_set):
         variants.extend(
             [
@@ -200,6 +232,39 @@ def phrase_variants_for_concepts(concepts: list[str]) -> list[str]:
         variants.append("电影 解说")
     if {"music"}.issubset(concept_set):
         variants.append("音乐 专辑")
+    return variants
+
+
+def title_semantic_query_variants(title_concepts: list[str], author: str) -> list[tuple[str, str, list[str], str]]:
+    variants: list[tuple[str, str, list[str], str]] = []
+    for phrase in phrase_variants_for_concepts(title_concepts):
+        variants.append(
+            (
+                "title_translation",
+                phrase,
+                title_concepts,
+                "标题语义优先生成的中文意译/关键词重组",
+            )
+        )
+    zh_terms = dedupe_strings(zh_terms_for_concepts(title_concepts), limit=6)
+    if zh_terms:
+        variants.append(
+            (
+                "title_keywords_zh",
+                " ".join(zh_terms),
+                title_concepts,
+                "标题核心关键词中文化",
+            )
+        )
+    if author and "philosophy" in title_concepts:
+        variants.append(
+            (
+                "author_title_context",
+                f"{author} 中配",
+                [author, "中配"],
+                "作者名仅作为标题语义的弱补充",
+            )
+        )
     return variants
 
 
@@ -227,16 +292,19 @@ def build_bilibili_query_plan(youtube_meta: dict, glossary: dict | None = None) 
     cleaned_title = clean_title(title)
     title_tokens = english_tokens(cleaned_title or title)
     description_tokens = english_tokens(description)[:24]
-    core_tokens = [
+    title_core_tokens = [
         token
         for token in title_tokens
         if token not in GENERIC_TOKENS and not token.isdigit()
     ][:8]
+    core_tokens = title_core_tokens[:]
     if len(core_tokens) < 3:
         core_tokens = (core_tokens + [token for token in description_tokens if token not in core_tokens])[:8]
 
-    concepts = concept_hits_for_tokens(core_tokens + description_tokens)
-    zh_terms = zh_terms_for_concepts(concepts)
+    title_concepts = concept_hits_for_tokens(title_core_tokens or title_tokens)
+    description_concepts = concept_hits_for_tokens(description_tokens)
+    concepts = title_concepts or concept_hits_for_tokens(core_tokens) or description_concepts
+    zh_terms = zh_terms_for_concepts(title_concepts or concepts)
     proper_phrases = extract_proper_phrases(title)
     query_specs: list[tuple[str, str, list[str], str]] = []
 
@@ -246,7 +314,9 @@ def build_bilibili_query_plan(youtube_meta: dict, glossary: dict | None = None) 
     add("original_title", title, title_tokens, "原始 YouTube 标题")
     if cleaned_title and normalize_query_key(cleaned_title) != normalize_query_key(title):
         add("cleaned_title", cleaned_title, core_tokens, "去括号、集数和标点后的标题")
-    for variant in phrase_variants_for_concepts(concepts):
+    for kind, text, terms, reason in title_semantic_query_variants(title_concepts, author):
+        add(kind, text, terms, reason)
+    for variant in ([] if title_concepts else phrase_variants_for_concepts(concepts)):
         add("semantic_variant", variant, concepts, "本地规则生成的中文/中英混合语义变体")
 
     if core_tokens:
@@ -297,6 +367,7 @@ def build_bilibili_query_plan(youtube_meta: dict, glossary: dict | None = None) 
                 "terms": dedupe_strings([str(term) for term in terms], limit=8),
                 "reason": reason,
                 "search_url": build_search_url(cleaned),
+                "api_url": build_search_api_url(cleaned),
             }
         )
         if len(deduped) >= MAX_QUERY_COUNT:
@@ -388,6 +459,7 @@ def _candidate_from_json_snippet(snippet: str, *, query: str, search_url: str) -
     return {
         "title": title,
         "url": _normalize_bilibili_url("", bvid),
+        "bvid": bvid,
         "uploader": strip_html(uploader),
         "duration": duration,
         "duration_seconds": parse_duration_to_seconds(duration),
@@ -396,6 +468,7 @@ def _candidate_from_json_snippet(snippet: str, *, query: str, search_url: str) -
         "snippet": strip_html(description),
         "matched_queries": [query],
         "source_search_url": search_url,
+        "search_channel": "html",
     }
 
 
@@ -442,6 +515,7 @@ def _extract_html_candidates(html_text: str, *, query: str, search_url: str) -> 
             {
                 "title": title,
                 "url": _normalize_bilibili_url(match.group("href"), match.group("bvid")),
+                "bvid": match.group("bvid"),
                 "uploader": uploader,
                 "duration": duration,
                 "duration_seconds": parse_duration_to_seconds(duration),
@@ -450,9 +524,79 @@ def _extract_html_candidates(html_text: str, *, query: str, search_url: str) -> 
                 "snippet": snippet,
                 "matched_queries": [query],
                 "source_search_url": search_url,
+                "search_channel": "html",
             }
         )
     return candidates
+
+
+def is_bilibili_captcha_page(html_text: str) -> bool:
+    text = html_text or ""
+    lowered = text.lower()
+    return (
+        "验证码_哔哩哔哩" in text
+        or "安全验证" in text
+        or "bili-captcha" in lowered
+        or "geetest" in lowered
+        or "risk" in lowered and "captcha" in lowered
+    )
+
+
+def parse_bilibili_api_results(
+    payload: dict,
+    *,
+    query: str = "",
+    search_url: str = "",
+    api_url: str = "",
+) -> list[dict]:
+    if not isinstance(payload, dict):
+        raise ValueError("Bilibili search API returned a non-object payload")
+    code = payload.get("code")
+    if code not in (0, None):
+        message = payload.get("message") or payload.get("msg") or "unknown error"
+        raise RuntimeError(f"Bilibili search API returned code {code}: {message}")
+
+    data = payload.get("data") or {}
+    raw_results = data.get("result") or []
+    candidates: list[dict] = []
+    if not isinstance(raw_results, list):
+        return candidates
+
+    for item in raw_results:
+        if not isinstance(item, dict):
+            continue
+        bvid = str(item.get("bvid") or "").strip()
+        title = strip_html(str(item.get("title") or ""))
+        if not bvid.startswith("BV") or not title:
+            continue
+        url = _normalize_bilibili_url(str(item.get("arcurl") or item.get("url") or ""), bvid)
+        duration = str(item.get("duration") or item.get("length") or "").strip()
+        published_at = item.get("pubdate") or item.get("senddate") or item.get("created") or ""
+        if str(published_at).isdigit() and len(str(published_at)) >= 9:
+            try:
+                published_at = datetime.fromtimestamp(int(published_at), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                published_at = str(published_at)
+        description = strip_html(str(item.get("description") or item.get("desc") or ""))
+        uploader = strip_html(str(item.get("author") or item.get("upname") or item.get("uname") or ""))
+        candidates.append(
+            {
+                "title": title,
+                "url": url,
+                "bvid": bvid,
+                "uploader": uploader,
+                "duration": duration,
+                "duration_seconds": parse_duration_to_seconds(duration),
+                "published_at": str(published_at or ""),
+                "description": description,
+                "snippet": description,
+                "matched_queries": [query],
+                "source_search_url": search_url,
+                "source_api_url": api_url,
+                "search_channel": "api",
+            }
+        )
+    return dedupe_candidates(candidates)[:MAX_RESULTS_PER_QUERY]
 
 
 def dedupe_candidates(candidates: list[dict]) -> list[dict]:
@@ -496,12 +640,14 @@ def search_bilibili(
     timeout_seconds: float = 8.0,
 ) -> list[dict]:
     search_url = build_search_url(query)
+    api_url = build_search_api_url(query)
     headers = {
         "User-Agent": BILIBILI_USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept": "application/json,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
         "Referer": "https://www.bilibili.com/",
     }
+    api_error: Exception | None = None
     with httpx.Client(
         timeout=timeout_seconds,
         proxy=proxy_url or None,
@@ -509,9 +655,29 @@ def search_bilibili(
         follow_redirects=True,
         headers=headers,
     ) as client:
+        try:
+            response = client.get(api_url)
+            response.raise_for_status()
+            candidates = parse_bilibili_api_results(
+                response.json(),
+                query=query,
+                search_url=search_url,
+                api_url=api_url,
+            )
+            return candidates[:max_results]
+        except Exception as exc:
+            api_error = exc
+
         response = client.get(search_url)
         response.raise_for_status()
+        if is_bilibili_captcha_page(response.text):
+            raise BilibiliSearchChannelLimited(
+                f"Bilibili search channel limited by captcha/risk page after API failure: {api_error}",
+                channel="html",
+            )
     candidates = parse_bilibili_search_results(response.text, query=query, search_url=search_url)
+    for candidate in candidates:
+        candidate.setdefault("search_channel", "html")
     return candidates[:max_results]
 
 
@@ -550,7 +716,9 @@ def score_bilibili_candidate(candidate: dict, youtube_meta: dict, query_plan: li
         if token not in GENERIC_TOKENS
     ]
     candidate_tokens = set(english_tokens(title))
-    source_concepts = concept_hits_for_tokens(source_tokens + english_tokens(source_description)[:24])
+    source_title_concepts = concept_hits_for_tokens(source_tokens)
+    source_description_concepts = concept_hits_for_tokens(english_tokens(source_description)[:24])
+    source_concepts = source_title_concepts or source_description_concepts
     candidate_title_concepts = concept_hits_for_text(title)
     candidate_all_concepts = concept_hits_for_text(combined_text)
     matched_concepts = [concept for concept in source_concepts if concept in candidate_all_concepts]
@@ -576,6 +744,12 @@ def score_bilibili_candidate(candidate: dict, youtube_meta: dict, query_plan: li
         title_score += 7.0
         reason_codes.append("title_translation_phrase_hit")
         evidence.append("候选标题命中“垂死/死去的神”翻译变体")
+    elif {"philosophy", "world", "incredible"}.issubset(set(source_title_concepts)) and (
+        "哲学的世界令人惊叹" in title or ("哲学" in title_lower and "世界" in title_lower and "惊叹" in title_lower)
+    ):
+        title_score += 12.0
+        reason_codes.append("title_translation_phrase_hit")
+        evidence.append("标题命中哲学的世界令人惊叹")
     elif len(matched_title_concepts) >= 3:
         title_score += 5.0
         reason_codes.append("title_semantic_variant_hit")
@@ -587,7 +761,7 @@ def score_bilibili_candidate(candidate: dict, youtube_meta: dict, query_plan: li
         if matched_concepts:
             reason_codes.append("semantic_keyword_hit")
             evidence.append(f"标题/简介语义关键词命中：{', '.join(matched_concepts)}")
-    description_concepts = concept_hits_for_tokens(english_tokens(source_description)[:32])
+    description_concepts = source_description_concepts
     description_hits = [concept for concept in description_concepts if concept in candidate_all_concepts]
     if description_hits:
         semantic_score += min(7.0, 7.0 * len(description_hits) / max(1, len(set(description_concepts))))
@@ -684,11 +858,18 @@ def summarize_query_runs(query_runs: list[dict], errors: list[dict]) -> dict:
     successful_count = sum(1 for run in query_runs if run.get("ok") is True)
     parsed_count = sum(int(run.get("parsed_count") or 0) for run in query_runs)
     manual_fallback_count = sum(1 for run in query_runs if run.get("fallback_manual_review"))
+    channel_limited_count = sum(
+        1
+        for error in errors
+        if error.get("error_code") == "search_channel_limited"
+        or "search channel limited" in str(error.get("error") or "").lower()
+    )
     return {
         "attempted_query_count": attempted_count,
         "successful_query_count": successful_count,
         "parsed_candidate_count": parsed_count,
         "manual_fallback_query_count": manual_fallback_count,
+        "channel_limited_query_count": channel_limited_count,
         "error_count": len(errors),
         "searched": successful_count > 0,
     }
@@ -709,6 +890,16 @@ def decision_for_candidates(candidates: list[dict], errors: list[dict], search_s
     if errors:
         return "search_unavailable_manual_review"
     return "no_candidates_manual_review"
+
+
+def search_state_for_report(candidates: list[dict], errors: list[dict], search_summary: dict | None = None) -> str:
+    if candidates:
+        return "matched_candidates"
+    if search_summary and search_summary.get("searched"):
+        return "searched_no_parseable_candidates"
+    if errors:
+        return "search_unavailable"
+    return "search_unavailable"
 
 
 def summarize_scores(candidates: list[dict]) -> dict:
@@ -769,23 +960,39 @@ def build_bilibili_duplicate_report(
                 candidate.setdefault("matched_queries", [])
                 candidate["matched_queries"] = dedupe_strings([*candidate["matched_queries"], query["text"]])
                 candidate.setdefault("source_search_url", query["search_url"])
+                candidate.setdefault("source_api_url", query.get("api_url") or build_search_api_url(query["text"]))
             all_candidates.extend(raw_candidates)
+            search_channel = raw_candidates[0].get("search_channel") if raw_candidates else "api"
             query_runs.append(
                 {
                     **query,
                     "ok": True,
                     "parsed_count": len(raw_candidates),
+                    "search_channel": search_channel,
                     "fallback_manual_review": len(raw_candidates) == 0,
                 }
             )
         except Exception as exc:
             message = str(exc)
-            errors.append({"query": query["text"], "search_url": query["search_url"], "error": message})
+            error_code = getattr(exc, "reason_code", "")
+            search_channel = getattr(exc, "channel", "")
+            errors.append(
+                {
+                    "query": query["text"],
+                    "search_url": query["search_url"],
+                    "api_url": query.get("api_url") or build_search_api_url(query["text"]),
+                    "search_channel": search_channel,
+                    "error_code": error_code,
+                    "error": message,
+                }
+            )
             query_runs.append(
                 {
                     **query,
                     "ok": False,
                     "parsed_count": 0,
+                    "search_channel": search_channel,
+                    "error_code": error_code,
                     "fallback_manual_review": True,
                     "error": message,
                 }
@@ -810,6 +1017,7 @@ def build_bilibili_duplicate_report(
         "best_candidate": scored_candidates[0] if scored_candidates else None,
         "search_summary": search_summary,
         "decision": decision_for_candidates(scored_candidates, errors, search_summary),
+        "search_state": search_state_for_report(scored_candidates, errors, search_summary),
         "errors": errors,
         "proxy_info": {
             "proxy_url": proxy_url or "",

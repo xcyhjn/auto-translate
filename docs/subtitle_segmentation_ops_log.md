@@ -772,3 +772,39 @@ Validation:
   - `searched = true`
   - `successful_query_count = 7`
   - `parsed_candidate_count = 0`
+
+## 2026-06-17 18:30 +08:00 - Bilibili Title-First JSON Search
+
+Observation:
+
+- YouTube `r6pWz2FnFOk` was missed even though Bilibili `BV1MWJK6SE4X` exists.
+- The old query plan favored the English title plus description/tag concepts, so `music` from the description produced weak queries.
+- Direct Bilibili HTML search can return a captcha page, which previously looked like a successful empty parse.
+
+What:
+
+- Added title-first semantic query generation:
+  - `哲学的世界令人惊叹`
+  - `哲学 世界 令人惊叹`
+  - `哲学 中配`
+  - `Xandros 中配`
+- Added philosophy/world/incredible concept mappings for query generation and scoring.
+- Switched live search to prefer `api.bilibili.com/x/web-interface/search/type`.
+- Kept HTML search as fallback, but captcha/risk pages now become a channel-limited error.
+- Added report `search_state`:
+  - `matched_candidates`
+  - `searched_no_parseable_candidates`
+  - `search_unavailable`
+- Kept manual search links in query artifacts and UI.
+
+Validation:
+
+- `python -m py_compile bilibili_search.py ui_server.py`
+- `node --check web\app.js`
+- `pytest test_bilibili_query_plan.py test_bilibili_candidate_scoring.py test_bilibili_search_parsing.py test_ui_server_bilibili_api.py`
+  - `16 passed in 1.31s`
+- Live regression with YouTube `r6pWz2FnFOk`:
+  - `search_state = matched_candidates`
+  - `decision = medium_confidence_review`
+  - all 6 selected queries succeeded through the API
+  - top candidate: `BV1MWJK6SE4X`, score `76`, title `哲学 的 世界令人惊叹 - Xandros - 中配`
