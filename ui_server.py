@@ -3250,6 +3250,104 @@ def bulk_update_local_feedback_records(payload: dict, dataset_dir: Path | None =
     }
 
 
+def feedback_updates_for_ab_eval_action(action: str, prompt_flag: str) -> dict:
+    if action == "clear_prompt":
+        return {prompt_flag: False}
+    if action == "return_pending":
+        return {"accepted": False, prompt_flag: False, "use_for_eval": False}
+    if action == "use_for_eval":
+        return {"accepted": True, prompt_flag: False, "use_for_eval": True}
+    if action == "accept_only":
+        return {"accepted": True, prompt_flag: False, "use_for_eval": False}
+    raise ValueError(f"Unsupported A/B eval apply action: {action}")
+
+
+def apply_local_feedback_ab_eval_action(payload: dict, dataset_dir: Path | None = None) -> dict:
+    dataset_dir = Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR)
+    action = str(payload.get("action") or "").strip().lower().replace("-", "_")
+    raw_refs = payload.get("record_refs") if isinstance(payload.get("record_refs"), list) else []
+    limit = max(1, min(50, int(payload.get("limit") or 50)))
+    if not raw_refs:
+        raise ValueError("record_refs required")
+
+    refs: list[dict] = []
+    seen_refs: set[tuple[str, str]] = set()
+    for item in raw_refs:
+        if not isinstance(item, dict):
+            continue
+        kind = "span" if str(item.get("kind") or item.get("record_kind") or "style").strip().lower() == "span" else "style"
+        record_id = str(item.get("record_id") or "").strip()
+        if not record_id:
+            continue
+        key = (kind, record_id)
+        if key in seen_refs:
+            continue
+        refs.append({"kind": kind, "record_id": record_id})
+        seen_refs.add(key)
+        if len(refs) >= limit:
+            break
+    if not refs:
+        raise ValueError("record_refs must include at least one record_id")
+
+    refs_by_kind: dict[str, set[str]] = {"style": set(), "span": set()}
+    for ref in refs:
+        refs_by_kind[ref["kind"]].add(ref["record_id"])
+
+    updated_rows: list[dict] = []
+    skipped: list[dict] = []
+    updated_count = 0
+
+    for kind, record_ids in refs_by_kind.items():
+        if not record_ids:
+            continue
+        spec = feedback_kind_spec(kind, dataset_dir)
+        prompt_flag = str(spec["prompt_flag"])
+        updates = feedback_updates_for_ab_eval_action(action, prompt_flag)
+        found_ids: set[str] = set()
+        with jsonl_file_lock(spec["path"]):
+            records = read_jsonl(spec["path"])
+            next_records = list(records)
+            kind_updated_count = 0
+            for index, record in enumerate(records):
+                record_id = spec["key_func"](record)
+                if record_id not in record_ids:
+                    continue
+                found_ids.add(record_id)
+                next_record = dict(record)
+                next_record.update(updates)
+                validation_errors: list[str] = []
+                spec["validator"](next_record, f"{spec['path']}:{index + 1}", validation_errors)
+                if validation_errors:
+                    skipped.append({"record_id": record_id, "kind": kind, "reason": "; ".join(validation_errors[:2])})
+                    continue
+                next_records[index] = next_record
+                updated_count += 1
+                kind_updated_count += 1
+                updated_rows.append(attach_feedback_review_metadata(str(spec["kind"]), next_record, index, spec))
+            if kind_updated_count:
+                write_jsonl(spec["path"], next_records)
+        for missing_id in sorted(record_ids - found_ids):
+            skipped.append({"record_id": missing_id, "kind": kind, "reason": "Feedback record not found"})
+
+    latest_report = read_latest_ab_eval_report(dataset_dir)
+    return {
+        "ok": True,
+        "action": action,
+        "updated_count": updated_count,
+        "skipped_count": len(skipped),
+        "skipped_reasons": skipped[:20],
+        "records": updated_rows,
+        "quality_summary": build_learning_quality_summary(dataset_dir),
+        "action_summary": latest_report.get("action_summary") if isinstance(latest_report.get("action_summary"), dict) else {},
+        "report": {
+            "available": bool(latest_report.get("available")),
+            "created_at": latest_report.get("created_at", ""),
+            "summary": latest_report.get("summary") if isinstance(latest_report.get("summary"), dict) else {},
+            "action_summary": latest_report.get("action_summary") if isinstance(latest_report.get("action_summary"), dict) else {},
+        },
+    }
+
+
 def local_feedback_snapshot_path(dataset_dir: Path) -> Path:
     return dataset_dir / "eval_reports" / LEARNING_QUALITY_SNAPSHOT_NAME
 
@@ -3754,6 +3852,7 @@ def build_local_feedback_ab_eval_preview(payload: dict | None = None, dataset_di
         "available": bool(latest_report.get("available")),
         "created_at": latest_report.get("created_at", ""),
         "summary": latest_report.get("summary") if isinstance(latest_report.get("summary"), dict) else {},
+        "action_summary": latest_report.get("action_summary") if isinstance(latest_report.get("action_summary"), dict) else {},
     }
     preview["history"] = history
     preview["recommendation_codes"] = ab_eval_action_recommendation_codes(preview, latest_report)
@@ -4518,6 +4617,25 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                             **build_error_payload(
                                 exc,
                                 operation="local_feedback_ab_eval",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                self._json_response(result)
+                return
+
+            if parsed.path == "/api/local-feedback-ab-eval-apply":
+                try:
+                    result = apply_local_feedback_ab_eval_action(payload)
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                operation="local_feedback_ab_eval_apply",
                             ),
                         },
                         status=400,

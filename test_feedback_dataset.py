@@ -22,8 +22,10 @@ from autosub_zh.feedback_dataset import (
 )
 from autosub_zh.feedback_ab_eval import (
     ab_eval_action_recommendation_codes,
+    build_ab_eval_action_summary,
     build_ab_eval_preview,
     build_ab_eval_history_summary,
+    classify_ab_eval_sample_outcome,
     read_latest_ab_eval_report,
     run_translation_ab_eval,
 )
@@ -394,7 +396,60 @@ def test_translation_ab_eval_preview_and_run_do_not_mutate_learning_jsonl(tmp_pa
     history = build_ab_eval_history_summary(dataset_dir)
     assert history["total_recorded_runs"] == 1
     assert history["latest_runs"][0]["summary"]["style_feedback_win_count"] >= 1
+    assert latest["action_summary"]["helpful_candidate_count"] >= 1
+    assert latest["action_summary"]["affected_records"][0]["record_id"] == style_record_key(style_record)
     assert "increase_eval_sample_count" in ab_eval_action_recommendation_codes(preview, latest)
+
+
+def test_translation_ab_eval_action_summary_classifies_harmful_unsafe_and_span_weak() -> None:
+    harmful_sample = {
+        "sample_id": "s1",
+        "record_id": "r1",
+        "record_kind": "style",
+        "kind": "style",
+        "best_variant": "baseline",
+        "metrics": {
+            "baseline": {"adjusted_score": 0.9, "issue_flags": []},
+            "style_feedback": {"adjusted_score": 0.7, "issue_flags": []},
+        },
+    }
+    unsafe_sample = {
+        "sample_id": "s2",
+        "record_id": "r2",
+        "record_kind": "style",
+        "kind": "style",
+        "best_variant": "baseline",
+        "metrics": {
+            "baseline": {"adjusted_score": 0.9, "issue_flags": []},
+            "style_feedback": {"adjusted_score": 0.88, "issue_flags": ["english_residue"]},
+        },
+    }
+    span_sample = {
+        "sample_id": "s3",
+        "record_id": "r3",
+        "record_kind": "span",
+        "kind": "span",
+        "best_variant": "style_feedback",
+        "metrics": {
+            "baseline": {"adjusted_score": 0.6, "issue_flags": []},
+            "style_feedback": {"adjusted_score": 0.7, "issue_flags": []},
+            "style_span_feedback": {"adjusted_score": 0.65, "issue_flags": []},
+        },
+    }
+
+    assert classify_ab_eval_sample_outcome(harmful_sample)["outcome"] == "prompt_harmful_candidate"
+    assert classify_ab_eval_sample_outcome(unsafe_sample)["outcome"] == "unsafe_output_candidate"
+    assert classify_ab_eval_sample_outcome(span_sample)["outcome"] == "span_feedback_weak"
+
+    summary = build_ab_eval_action_summary({"samples": [harmful_sample, unsafe_sample, span_sample]})
+    assert summary["harmful_candidate_count"] == 1
+    assert summary["unsafe_candidate_count"] == 1
+    assert summary["span_weak_candidate_count"] == 1
+    assert [item["recommended_action"] for item in summary["affected_records"]] == [
+        "clear_prompt",
+        "return_pending",
+        "accept_only",
+    ]
 
 
 def test_translation_ab_eval_span_sample_links_back_to_feedback_record(tmp_path: Path) -> None:

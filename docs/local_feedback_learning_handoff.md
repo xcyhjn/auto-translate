@@ -213,3 +213,18 @@ If there are fewer than three positive sources, the report is marked `sample_ins
 - A duplicate means source, machine baseline, and manual ASS are all identical after normalization. Duplicates are review signals only; the system does not delete or mutate JSONL automatically.
 - The learning quality panel now shows ASS/Span conflicts, duplicates, and merge candidates as read-only local diagnostics. No translation request or model call is made.
 - Diagnostic records include `record_id` and can be opened from the learning quality panel; the UI switches to feedback review and opens the read-only detail drawer for manual review.
+
+## 2026-06-18 A/B Eval Action Loop v1
+
+- A/B reports now include an `action_summary` generated from deterministic metrics.
+- Sample outcomes are classified as `feedback_helpful_candidate`, `prompt_harmful_candidate`, `unsafe_output_candidate`, `span_feedback_weak`, or `needs_more_eval`.
+- Old `latest_translation_ab_eval.json` reports are normalized on read, so the frontend can show action summaries without requiring a new run.
+- Added `POST /api/local-feedback-ab-eval-apply` for explicit user actions:
+  - `clear_prompt`
+  - `return_pending`
+  - `use_for_eval`
+  - `accept_only`
+- The apply API only updates local learning JSONL metadata. It does not rebuild gold sets, does not touch `05_translated_segments.json` or `05a_span_translated_segments.json`, does not call a model, and does not run the subtitle pipeline.
+- The learning quality panel now shows an `A/B 样本行动区` with counts, recommended actions, per-record buttons, and batch buttons.
+- The feedback review page now includes A/B filter options for negative, unsafe, weak Span, and helpful samples. These filters use the latest A/B report and remain local UI filters.
+- `05/05a` remain machine baselines only.

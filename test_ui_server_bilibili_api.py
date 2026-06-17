@@ -1024,3 +1024,133 @@ def test_local_feedback_ab_eval_api_runs_with_mocked_report(monkeypatch, tmp_pat
     assert report_status == 200
     assert report_payload["available"] is True
     assert report_payload["summary"]["variant_wins"]["style_feedback"] == 1
+
+
+def test_local_feedback_ab_eval_report_normalizes_action_summary(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    (dataset / "eval_reports").mkdir(parents=True)
+    report = {
+        "ok": True,
+        "schema_version": 1,
+        "created_at": "2026-06-18T00:00:00+00:00",
+        "summary": {"recommendation": "possibly_harmful"},
+        "samples": [
+            {
+                "sample_id": "sample-1",
+                "record_id": "record-1",
+                "record_kind": "style",
+                "kind": "style",
+                "best_variant": "baseline",
+                "metrics": {
+                    "baseline": {"adjusted_score": 0.9, "issue_flags": []},
+                    "style_feedback": {"adjusted_score": 0.7, "issue_flags": []},
+                },
+            }
+        ],
+    }
+    ui_server.write_json(dataset / "eval_reports" / "latest_translation_ab_eval.json", report)
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _get_json(server, "/api/local-feedback-ab-eval-report")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["available"] is True
+    assert payload["action_summary"]["harmful_candidate_count"] == 1
+    assert payload["action_summary"]["affected_records"][0]["recommended_action"] == "clear_prompt"
+
+
+def test_local_feedback_ab_eval_apply_updates_style_and_span_metadata(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    (dataset / "eval_reports").mkdir(parents=True)
+    style_record = _style_feedback_record(1, accepted=True, prompt=True, eval_sample=False)
+    span_record = _span_feedback_record(2, accepted=True, prompt=True, eval_sample=False)
+    (dataset / "translation_edit_examples.jsonl").write_text(json.dumps(style_record, ensure_ascii=False) + "\n", encoding="utf-8")
+    (dataset / "span_translation_examples.jsonl").write_text(json.dumps(span_record, ensure_ascii=False) + "\n", encoding="utf-8")
+    (dataset / "eval_sets").mkdir(parents=True)
+    style_gold_before = json.dumps({"gold": "style"}, ensure_ascii=False) + "\n"
+    span_gold_before = json.dumps({"gold": "span"}, ensure_ascii=False) + "\n"
+    (dataset / "eval_sets" / "style_gold.jsonl").write_text(style_gold_before, encoding="utf-8")
+    (dataset / "eval_sets" / "span_translation_gold.jsonl").write_text(span_gold_before, encoding="utf-8")
+    style_id = ui_server.style_record_key(style_record)
+    span_id = ui_server.span_record_key(span_record)
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        clear_status, clear_payload = _post_json(
+            server,
+            "/api/local-feedback-ab-eval-apply",
+            {
+                "action": "clear_prompt",
+                "record_refs": [
+                    {"kind": "style", "record_id": style_id},
+                    {"kind": "span", "record_id": span_id},
+                ],
+            },
+        )
+        eval_status, eval_payload = _post_json(
+            server,
+            "/api/local-feedback-ab-eval-apply",
+            {
+                "action": "use_for_eval",
+                "record_refs": [{"kind": "span", "record_id": span_id}],
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert clear_status == 200
+    assert clear_payload["ok"] is True
+    assert clear_payload["updated_count"] == 2
+    assert eval_status == 200
+    assert eval_payload["updated_count"] == 1
+    saved_style = json.loads((dataset / "translation_edit_examples.jsonl").read_text(encoding="utf-8"))
+    saved_span = json.loads((dataset / "span_translation_examples.jsonl").read_text(encoding="utf-8"))
+    assert saved_style["accepted"] is True
+    assert saved_style["use_for_style_prompt"] is False
+    assert saved_style["use_for_eval"] is False
+    assert saved_span["accepted"] is True
+    assert saved_span["use_for_span_prompt"] is False
+    assert saved_span["use_for_eval"] is True
+    assert (dataset / "eval_sets" / "style_gold.jsonl").read_text(encoding="utf-8") == style_gold_before
+    assert (dataset / "eval_sets" / "span_translation_gold.jsonl").read_text(encoding="utf-8") == span_gold_before
+
+
+def test_local_feedback_ab_eval_apply_limit_and_return_pending(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    dataset.mkdir(parents=True)
+    records = [_style_feedback_record(index, accepted=True, prompt=True, eval_sample=False) for index in range(1, 4)]
+    (dataset / "translation_edit_examples.jsonl").write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n",
+        encoding="utf-8",
+    )
+    record_ids = [ui_server.style_record_key(record) for record in records]
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _post_json(
+            server,
+            "/api/local-feedback-ab-eval-apply",
+            {
+                "action": "return_pending",
+                "limit": 2,
+                "record_refs": [{"kind": "style", "record_id": record_id} for record_id in record_ids],
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["updated_count"] == 2
+    saved = [
+        json.loads(line)
+        for line in (dataset / "translation_edit_examples.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [record["accepted"] for record in saved] == [False, False, True]
+    assert [record["use_for_style_prompt"] for record in saved] == [False, False, True]

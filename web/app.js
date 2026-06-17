@@ -48,6 +48,7 @@
     message: "",
     sampleKind: "mixed",
     sampleCount: 5,
+    applying: "",
   },
   localFeedbackImpact: null,
   learningGuidelinesExpanded: false,
@@ -1596,8 +1597,15 @@ function renderFeedbackReviewPanel() {
     `;
     return;
   }
-  const records = Array.isArray(review.records) ? review.records : [];
-  const selectedIds = selectedFeedbackRecordIds();
+  const outcomeFilter = abEvalReviewStatusOutcome(review.status);
+  const outcomeMap = abEvalRecordOutcomeMap();
+  const records = (Array.isArray(review.records) ? review.records : []).filter((record) => {
+    if (!outcomeFilter) return true;
+    const outcome = outcomeMap.get(`${review.kind}:${record.record_id}`)?.outcome || "";
+    return outcome === outcomeFilter;
+  });
+  const visibleRecordIds = new Set(records.map((record) => record.record_id));
+  const selectedIds = selectedFeedbackRecordIds().filter((recordId) => visibleRecordIds.has(recordId));
   const selectedSet = new Set(selectedIds);
   const suggestionCounts = feedbackSuggestionCounts(records);
   const lowRiskIds = records
@@ -1616,8 +1624,11 @@ function renderFeedbackReviewPanel() {
           </div>
         </div>
         <p class="local-feedback-note">说明：05/05a 只作为机器基线参与差异对齐，不会作为人工学习目标写入。</p>
+        ${outcomeFilter ? `<p class="local-feedback-note">A/B 筛选依赖最新 A/B 报告；如果没有命中，请先在学习质量页运行或读取 A/B 报告。</p>` : ""}
+        ${renderFeedbackDetailDrawer()}
       </div>
     `;
+    wireFeedbackDetailAndActionButtons(root);
     return;
   }
   root.innerHTML = `
@@ -1658,6 +1669,7 @@ function renderFeedbackReviewPanel() {
               : `分段 ${record.segment_id ?? record.index ?? ""}`;
           const riskClass = record.learning_risk === "high" ? "danger" : record.learning_risk === "medium" ? "warn" : "ok";
           const suggestionClass = feedbackSuggestedActionClass(record.suggested_action);
+          const abRecord = outcomeMap.get(`${review.kind}:${record.record_id}`);
           return `
             <article class="feedback-record">
               <div class="feedback-record-head">
@@ -1677,6 +1689,7 @@ function renderFeedbackReviewPanel() {
                   <span class="entity-chip ${record.use_for_prompt ? "" : "muted"}">Prompt ${record.use_for_prompt ? "是" : "否"}</span>
                   <span class="entity-chip ${record.use_for_eval ? "" : "muted"}">Eval ${record.use_for_eval ? "是" : "否"}</span>
                   <span class="entity-chip ${riskClass}">风险 ${escapeHtml(record.learning_risk || "low")}</span>
+                  ${abRecord ? `<span class="entity-chip ${abEvalOutcomeClass(abRecord.outcome)}">A/B ${escapeHtml(abEvalOutcomeLabel(abRecord.outcome))}</span>` : ""}
                 </div>
               </div>
               <div class="feedback-comparison">
@@ -1712,7 +1725,7 @@ function renderFeedbackReviewPanel() {
   root.querySelectorAll("[data-feedback-select-record]").forEach((checkbox) => {
     checkbox.addEventListener("change", () => {
       const recordId = checkbox.getAttribute("data-feedback-select-record") || "";
-      const next = new Set(selectedFeedbackRecordIds());
+      const next = new Set(selectedIds);
       if (checkbox.checked) next.add(recordId);
       else next.delete(recordId);
       setFeedbackSelection([...next]);
@@ -1721,7 +1734,7 @@ function renderFeedbackReviewPanel() {
   root.querySelectorAll("[data-feedback-bulk-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const action = button.getAttribute("data-feedback-bulk-action") || "";
-      updateFeedbackReviewBulk(action, { record_ids: selectedFeedbackRecordIds() });
+      updateFeedbackReviewBulk(action, { record_ids: selectedIds });
     });
   });
   root.querySelectorAll("[data-feedback-bulk-suggested]").forEach((button) => {
@@ -1739,6 +1752,10 @@ function renderFeedbackReviewPanel() {
   root.querySelectorAll("[data-feedback-detail-id]").forEach((button) => {
     button.addEventListener("click", () => loadFeedbackRecordDetail(button.getAttribute("data-feedback-detail-id") || ""));
   });
+  wireFeedbackDetailAndActionButtons(root);
+}
+
+function wireFeedbackDetailAndActionButtons(root) {
   root.querySelectorAll("[data-feedback-detail-close]").forEach((button) => {
     button.addEventListener("click", () => {
       state.feedbackReview.detailRecordId = "";
@@ -1769,9 +1786,10 @@ async function refreshFeedbackReview() {
   state.feedbackReview.message = "";
   renderFeedbackReviewPanel();
   try {
+    const outcomeFilter = abEvalReviewStatusOutcome(state.feedbackReview.status);
     const params = new URLSearchParams({
       kind: state.feedbackReview.kind,
-      status: state.feedbackReview.status,
+      status: outcomeFilter ? "all" : state.feedbackReview.status,
       limit: "100",
     });
     const response = await fetch(`/api/local-feedback-records?${params.toString()}`);
@@ -2117,6 +2135,66 @@ function abEvalActionLabel(code) {
   return labels[code] || code;
 }
 
+function abEvalOutcomeLabel(outcome) {
+  const labels = {
+    feedback_helpful_candidate: "正向样本",
+    prompt_harmful_candidate: "负贡献",
+    unsafe_output_candidate: "输出风险",
+    span_feedback_weak: "Span 弱收益",
+    needs_more_eval: "继续观察",
+  };
+  return labels[outcome] || "继续观察";
+}
+
+function abEvalOutcomeClass(outcome) {
+  if (outcome === "feedback_helpful_candidate") return "ok";
+  if (outcome === "prompt_harmful_candidate" || outcome === "unsafe_output_candidate") return "danger";
+  if (outcome === "span_feedback_weak") return "warn";
+  return "muted";
+}
+
+function abEvalApplyActionLabel(action) {
+  const labels = {
+    clear_prompt: "移出 Prompt",
+    return_pending: "退回待审",
+    use_for_eval: "转入 Eval",
+    accept_only: "仅接受不注入",
+  };
+  return labels[action] || "处理样本";
+}
+
+function abEvalRefsForOutcome(actionSummary, outcome) {
+  return (actionSummary?.affected_records || [])
+    .filter((record) => !outcome || record.outcome === outcome)
+    .map((record) => ({ kind: record.kind || record.record_kind || "style", record_id: record.record_id }))
+    .filter((record) => record.record_id);
+}
+
+function latestAbEvalActionSummary() {
+  const report = state.localFeedbackAbEval.report || state.localFeedbackAbEval.preview?.latest_report || {};
+  return report.action_summary || {};
+}
+
+function abEvalRecordOutcomeMap() {
+  const map = new Map();
+  (latestAbEvalActionSummary().affected_records || []).forEach((record) => {
+    const kind = record.kind || record.record_kind || "style";
+    const recordId = record.record_id || "";
+    if (recordId) map.set(`${kind}:${recordId}`, record);
+  });
+  return map;
+}
+
+function abEvalReviewStatusOutcome(status) {
+  const map = {
+    ab_harmful: "prompt_harmful_candidate",
+    ab_unsafe: "unsafe_output_candidate",
+    ab_span_weak: "span_feedback_weak",
+    ab_helpful: "feedback_helpful_candidate",
+  };
+  return map[status] || "";
+}
+
 function renderAbEvalHistory(history) {
   const rows = Array.isArray(history?.latest_runs) ? history.latest_runs : [];
   if (!rows.length) return `<div class="entity-empty">暂无 A/B 历史。运行一次后会显示最近趋势。</div>`;
@@ -2149,6 +2227,7 @@ function renderAbEvalReportPreview(report) {
     return `<div class="entity-empty">${escapeHtml(report?.message || "暂无 A/B 小样本评估报告。")}</div>`;
   }
   const summary = report.summary || {};
+  const actionSummary = report.action_summary || {};
   const wins = summary.variant_wins || {};
   const samples = Array.isArray(report.samples) ? report.samples : [];
   return `
@@ -2162,6 +2241,7 @@ function renderAbEvalReportPreview(report) {
       <div><span>Span 平均变化</span><strong>${escapeHtml(summary.avg_style_span_feedback_delta ?? 0)}</strong></div>
       <div><span>异常输出率</span><strong>${escapeHtml(formatPercent(summary.unsafe_output_rate ?? 0))}</strong></div>
     </div>
+    ${renderAbEvalActionPanel(actionSummary)}
     ${
       samples.length
         ? `<div class="prompt-preview-grid">
@@ -2199,6 +2279,92 @@ function renderAbEvalReportPreview(report) {
   `;
 }
 
+function renderAbEvalActionPanel(actionSummary) {
+  const affected = Array.isArray(actionSummary?.affected_records) ? actionSummary.affected_records : [];
+  const applying = state.localFeedbackAbEval.applying || "";
+  const busy = state.localFeedbackAbEval.status === "applying";
+  if (!affected.length) {
+    return `
+      <div class="ab-eval-action-panel">
+        <div class="entity-section-head"><h5>A/B 样本行动区</h5><span>暂无可处理样本</span></div>
+        <p class="local-feedback-note">当前 A/B 报告没有明确负贡献、风险输出或 Span 弱收益样本。继续观察或扩大样本数即可。</p>
+      </div>
+    `;
+  }
+  const refsByOutcome = {
+    prompt_harmful_candidate: abEvalRefsForOutcome(actionSummary, "prompt_harmful_candidate"),
+    unsafe_output_candidate: abEvalRefsForOutcome(actionSummary, "unsafe_output_candidate"),
+    span_feedback_weak: abEvalRefsForOutcome(actionSummary, "span_feedback_weak"),
+    feedback_helpful_candidate: abEvalRefsForOutcome(actionSummary, "feedback_helpful_candidate"),
+  };
+  const actionButton = (label, action, refs, scope) => `
+    <button class="mini-btn" type="button" data-ab-eval-apply="${escapeHtml(action)}" data-ab-eval-apply-scope="${escapeHtml(scope)}" ${busy || !refs.length ? "disabled" : ""}>
+      ${escapeHtml(applying === `${action}:${scope}` ? "处理中..." : label)}
+    </button>
+  `;
+  return `
+    <div class="ab-eval-action-panel">
+      <div class="entity-section-head"><h5>A/B 样本行动区</h5><span>只改学习元数据</span></div>
+      <div class="feedback-bulk-summary">
+        <span class="entity-chip danger">负贡献 ${escapeHtml(actionSummary.harmful_candidate_count ?? 0)}</span>
+        <span class="entity-chip danger">输出风险 ${escapeHtml(actionSummary.unsafe_candidate_count ?? 0)}</span>
+        <span class="entity-chip warn">Span 弱收益 ${escapeHtml(actionSummary.span_weak_candidate_count ?? 0)}</span>
+        <span class="entity-chip ok">正向样本 ${escapeHtml(actionSummary.helpful_candidate_count ?? 0)}</span>
+      </div>
+      <div class="learning-quality-reasons">
+        ${actionSummary.harmful_candidate_count ? `<span>存在 ${escapeHtml(actionSummary.harmful_candidate_count)} 条 A/B 负贡献样本，建议先移出 Prompt，再运行 summarize / build-gold / eval。</span>` : ""}
+        ${actionSummary.unsafe_candidate_count ? `<span>存在 ${escapeHtml(actionSummary.unsafe_candidate_count)} 条输出风险样本，建议退回待审，避免污染 Prompt。</span>` : ""}
+        ${actionSummary.span_weak_candidate_count ? `<span>Span 弱收益较多时，优先检查 Span 样本标签和人工对齐质量。</span>` : ""}
+        ${actionSummary.helpful_candidate_count ? `<span>本地反馈胜出样本可转入 Eval，用来稳定验证学习收益。</span>` : ""}
+      </div>
+      <div class="feedback-record-actions">
+        ${actionButton("批量移出 Prompt", "clear_prompt", refsByOutcome.prompt_harmful_candidate, "prompt_harmful_candidate")}
+        ${actionButton("批量退回待审", "return_pending", refsByOutcome.unsafe_output_candidate, "unsafe_output_candidate")}
+        ${actionButton("批量仅接受", "accept_only", refsByOutcome.span_feedback_weak, "span_feedback_weak")}
+        ${actionButton("批量转入 Eval", "use_for_eval", refsByOutcome.feedback_helpful_candidate, "feedback_helpful_candidate")}
+      </div>
+      <p class="local-feedback-note">这些操作只修改本地学习样本元数据，不会调用翻译模型，不会启动字幕流程。05/05a 仍只作为机器基线，不作为人工学习目标。</p>
+      <div class="ab-eval-action-list">
+        ${affected
+          .slice(0, 12)
+          .map((record, index) => {
+            const kind = record.kind || record.record_kind || "style";
+            const scope = `record:${index}`;
+            return `
+              <article class="ab-eval-action-row">
+                <div class="feedback-record-head">
+                  <div>
+                    <h4>${escapeHtml(kind === "span" ? "Span 样本" : "ASS 样本")} · ${escapeHtml(record.project_id || "unknown project")}</h4>
+                    <p>${escapeHtml(record.record_id || "")}</p>
+                  </div>
+                  <div class="feedback-status-row">
+                    <span class="entity-chip ${abEvalOutcomeClass(record.outcome)}">${escapeHtml(abEvalOutcomeLabel(record.outcome))}</span>
+                    <span class="entity-chip muted">最佳 ${escapeHtml(record.best_variant || "-")}</span>
+                    <span class="entity-chip muted">Δ ${escapeHtml(record.feedback_delta_vs_baseline ?? record.best_score_delta_vs_baseline ?? 0)}</span>
+                  </div>
+                </div>
+                <div class="feedback-comparison ab-eval-action-copy">
+                  <div><span>原文</span><p>${escapeHtml(record.source || "")}</p></div>
+                  <div><span>人工 ASS</span><p>${escapeHtml(record.manual_target || "")}</p></div>
+                  <div><span>建议</span><p>${escapeHtml(record.reason || "")}</p></div>
+                </div>
+                ${(record.issue_flags || []).length ? `<div class="project-badges">${record.issue_flags.map((flag) => `<span class="project-badge danger">${escapeHtml(flag)}</span>`).join("")}</div>` : ""}
+                <div class="feedback-record-actions">
+                  <button class="mini-btn" type="button" data-ab-eval-record-kind="${escapeHtml(kind)}" data-ab-eval-record-id="${escapeHtml(record.record_id || "")}">打开样本详情</button>
+                  <button class="mini-btn" type="button" data-ab-eval-apply="clear_prompt" data-ab-eval-apply-scope="${escapeHtml(scope)}" ${busy ? "disabled" : ""}>移出 Prompt</button>
+                  <button class="mini-btn" type="button" data-ab-eval-apply="use_for_eval" data-ab-eval-apply-scope="${escapeHtml(scope)}" ${busy ? "disabled" : ""}>转入 Eval</button>
+                  <button class="mini-btn" type="button" data-ab-eval-apply="return_pending" data-ab-eval-apply-scope="${escapeHtml(scope)}" ${busy ? "disabled" : ""}>退回待审</button>
+                  <button class="mini-btn" type="button" data-ab-eval-apply="accept_only" data-ab-eval-apply-scope="${escapeHtml(scope)}" ${busy ? "disabled" : ""}>仅接受不注入</button>
+                </div>
+              </article>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderLocalFeedbackAbEvalCard() {
   const stateAb = state.localFeedbackAbEval || {};
   const preview = stateAb.preview || {};
@@ -2208,13 +2374,14 @@ function renderLocalFeedbackAbEvalCard() {
   const sampleKind = stateAb.sampleKind || preview.sample_kind || "mixed";
   const sampleCount = Number(stateAb.sampleCount || preview.sample_count || 5);
   const actionClass = stateAb.status === "error" ? " error" : stateAb.status === "success" ? " ok" : "";
+  const abBusy = ["running", "loading", "applying"].includes(stateAb.status);
   return `
     <section class="entity-section wide">
       <div class="entity-section-head"><h5>小样本 A/B 评估</h5><span>手动模型调用 / 不跑完整流程</span></div>
       <div class="ab-eval-controls">
         <label>
           <span>样本类型</span>
-          <select data-ab-eval-sample-kind ${stateAb.status === "running" ? "disabled" : ""}>
+          <select data-ab-eval-sample-kind ${abBusy ? "disabled" : ""}>
             <option value="mixed" ${sampleKind === "mixed" ? "selected" : ""}>ASS + Span 混合</option>
             <option value="style" ${sampleKind === "style" ? "selected" : ""}>只评估 ASS</option>
             <option value="span" ${sampleKind === "span" ? "selected" : ""}>只评估 Span</option>
@@ -2222,7 +2389,7 @@ function renderLocalFeedbackAbEvalCard() {
         </label>
         <label>
           <span>样本数</span>
-          <input data-ab-eval-sample-count type="number" min="1" max="10" value="${escapeHtml(sampleCount)}" ${stateAb.status === "running" ? "disabled" : ""} />
+          <input data-ab-eval-sample-count type="number" min="1" max="10" value="${escapeHtml(sampleCount)}" ${abBusy ? "disabled" : ""} />
         </label>
       </div>
       ${
@@ -2247,9 +2414,9 @@ function renderLocalFeedbackAbEvalCard() {
       }
       <p class="local-feedback-note">此操作会调用翻译模型，但不会启动完整字幕流程，不会修改学习 JSONL。05/05a 只作为机器基线，不作为人工学习目标。</p>
       <div class="learning-action-buttons">
-        <button class="mini-btn" type="button" data-ab-eval-refresh ${stateAb.status === "running" ? "disabled" : ""}>刷新预估</button>
-        <button class="mini-btn" type="button" data-ab-eval-run ${stateAb.status === "running" || preview.can_run === false ? "disabled" : ""}>运行 ${escapeHtml(sampleCount)} 条小样本 A/B</button>
-        <button class="mini-btn" type="button" data-ab-eval-report ${stateAb.status === "running" ? "disabled" : ""}>查看最新报告</button>
+        <button class="mini-btn" type="button" data-ab-eval-refresh ${abBusy ? "disabled" : ""}>刷新预估</button>
+        <button class="mini-btn" type="button" data-ab-eval-run ${abBusy || preview.can_run === false ? "disabled" : ""}>运行 ${escapeHtml(sampleCount)} 条小样本 A/B</button>
+        <button class="mini-btn" type="button" data-ab-eval-report ${abBusy ? "disabled" : ""}>查看最新报告</button>
       </div>
       <span class="local-feedback-action-status${actionClass}">${escapeHtml(stateAb.message || "等待手动运行。")}</span>
       ${renderAbEvalHistory(history)}
@@ -2342,9 +2509,66 @@ async function runLocalFeedbackAbEval() {
   renderLearningQualityPanel();
 }
 
+function abEvalRefsForApplyScope(scope) {
+  const actionSummary = latestAbEvalActionSummary();
+  if (scope && scope.startsWith("record:")) {
+    const index = Number(scope.slice("record:".length));
+    const record = (actionSummary.affected_records || [])[index];
+    if (!record?.record_id) return [];
+    return [{ kind: record.kind || record.record_kind || "style", record_id: record.record_id }];
+  }
+  return abEvalRefsForOutcome(actionSummary, scope || "");
+}
+
+async function applyLocalFeedbackAbEvalAction(action, scope) {
+  const refs = abEvalRefsForApplyScope(scope);
+  if (!refs.length) {
+    showToast("没有可处理的 A/B 样本。", "warn");
+    return;
+  }
+  state.localFeedbackAbEval.status = "applying";
+  state.localFeedbackAbEval.applying = `${action}:${scope}`;
+  state.localFeedbackAbEval.message = `${abEvalApplyActionLabel(action)}中...`;
+  renderLearningQualityPanel();
+  try {
+    const response = await fetch("/api/local-feedback-ab-eval-apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action,
+        record_refs: refs,
+        limit: 50,
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || `${abEvalApplyActionLabel(action)}失败`);
+    if (payload.quality_summary) state.learningQuality = payload.quality_summary;
+    if (payload.report) state.localFeedbackAbEval.report = payload.report;
+    const reportResponse = await fetch("/api/local-feedback-ab-eval-report");
+    const latestReport = await reportResponse.json().catch(() => null);
+    if (reportResponse.ok && latestReport) state.localFeedbackAbEval.report = latestReport;
+    refreshLocalFeedbackSummary();
+    refreshLocalFeedbackImpactPreview();
+    if (state.feedbackReview.kind) refreshFeedbackReview();
+    const skipped = Number(payload.skipped_count || 0);
+    state.localFeedbackAbEval.status = "success";
+    state.localFeedbackAbEval.message = `${abEvalApplyActionLabel(action)}完成：更新 ${payload.updated_count || 0} 条${skipped ? `，跳过 ${skipped} 条` : ""}。`;
+    showToast(state.localFeedbackAbEval.message);
+  } catch (error) {
+    state.localFeedbackAbEval.status = "error";
+    state.localFeedbackAbEval.message = `${abEvalApplyActionLabel(action)}失败：${error.message || error}`;
+    showToast(state.localFeedbackAbEval.message, "error");
+  } finally {
+    state.localFeedbackAbEval.applying = "";
+    if (state.localFeedbackAbEval.status === "applying") state.localFeedbackAbEval.status = "success";
+    renderLearningQualityPanel();
+  }
+}
+
 function jumpToFeedbackReview(kind) {
   state.feedbackReview.kind = kind === "span" ? "span" : "style";
   state.feedbackReview.status = "pending";
+  syncFeedbackReviewControls();
   document.querySelectorAll(".tab, .nav-item").forEach((node) => {
     const active = node.dataset.panel === "feedback-review";
     node.classList.toggle("active", active);
@@ -2364,6 +2588,7 @@ async function openDiagnosticFeedbackRecord(kind, recordId) {
   state.feedbackReview.kind = kind === "span" ? "span" : "style";
   state.feedbackReview.status = "all";
   state.feedbackReview.detailRecordId = recordId;
+  syncFeedbackReviewControls();
   document.querySelectorAll(".tab, .nav-item").forEach((node) => {
     const active = node.dataset.panel === "feedback-review";
     node.classList.toggle("active", active);
@@ -2435,7 +2660,14 @@ function renderLearningQualityPanel() {
   const actionClass = action.status === "error" ? " error" : action.status === "success" ? " ok" : "";
   const status = quality.overall_status || "unknown";
   const statusClass = learningStatusClass(status);
-  const allRecommendations = [...(payload.recommendations?.style || []), ...(payload.recommendations?.span || [])];
+  const actionSummary = latestAbEvalActionSummary();
+  const abRecommendations = [
+    actionSummary.harmful_candidate_count ? `存在 ${actionSummary.harmful_candidate_count} 条 A/B 负贡献样本，建议先移出 Prompt，再运行 summarize / build-gold / eval。` : "",
+    actionSummary.unsafe_candidate_count ? `存在 ${actionSummary.unsafe_candidate_count} 条 A/B 输出风险样本，建议退回待审，避免污染 Prompt。` : "",
+    actionSummary.span_weak_candidate_count ? `存在 ${actionSummary.span_weak_candidate_count} 条 Span 弱收益样本，建议检查 Span 标签和人工对齐质量。` : "",
+    actionSummary.helpful_candidate_count ? `A/B 有 ${actionSummary.helpful_candidate_count} 条正向样本，可转入 Eval 稳定验证学习收益。` : "",
+  ].filter(Boolean);
+  const allRecommendations = [...abRecommendations, ...(payload.recommendations?.style || []), ...(payload.recommendations?.span || [])];
   const guidelineExpanded = Boolean(state.learningGuidelinesExpanded);
   const reviewSuggestions = feedbackSuggestionCounts(state.feedbackReview.kind === "span" ? state.feedbackReview.records || [] : []);
   root.innerHTML = `
@@ -2647,6 +2879,14 @@ function renderLearningQualityPanel() {
   });
   root.querySelectorAll("[data-ab-eval-report]").forEach((button) => {
     button.addEventListener("click", () => loadLocalFeedbackAbEvalReport());
+  });
+  root.querySelectorAll("[data-ab-eval-apply]").forEach((button) => {
+    button.addEventListener("click", () => {
+      applyLocalFeedbackAbEvalAction(
+        button.getAttribute("data-ab-eval-apply") || "",
+        button.getAttribute("data-ab-eval-apply-scope") || "",
+      );
+    });
   });
   root.querySelectorAll("[data-ab-eval-record-id]").forEach((button) => {
     button.addEventListener("click", () => {

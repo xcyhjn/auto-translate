@@ -32,6 +32,8 @@ MAX_AB_REQUEST_COUNT = 30
 DEFAULT_AB_VARIANTS = ["baseline", "style_feedback", "style_span_feedback"]
 SUPPORTED_SAMPLE_KINDS = {"style", "span", "mixed"}
 SUPPORTED_VARIANTS = set(DEFAULT_AB_VARIANTS)
+AB_EVAL_POSITIVE_DELTA = 0.03
+AB_EVAL_NEGATIVE_DELTA = -0.03
 
 
 Translator = Callable[[list[Segment], dict], dict[int, str]]
@@ -321,6 +323,148 @@ def ab_eval_action_recommendation_codes(preview: dict, latest_report: dict | Non
     return result
 
 
+def metric_score(metrics: dict, variant: str) -> float:
+    try:
+        return float((metrics.get(variant) or {}).get("adjusted_score") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def metric_issue_flags(metrics: dict, variant: str) -> list[str]:
+    raw_flags = (metrics.get(variant) or {}).get("issue_flags") if isinstance(metrics.get(variant), dict) else []
+    return [str(flag) for flag in raw_flags] if isinstance(raw_flags, list) else []
+
+
+def classify_ab_eval_sample_outcome(sample: dict) -> dict:
+    metrics = sample.get("metrics") if isinstance(sample.get("metrics"), dict) else {}
+    errors = sample.get("errors") if isinstance(sample.get("errors"), dict) else {}
+    variants = list(metrics.keys())
+    feedback_variants = [variant for variant in variants if variant != "baseline"]
+    baseline_score = metric_score(metrics, "baseline")
+    best_feedback_variant = ""
+    best_feedback_score = -1.0
+    for variant in feedback_variants:
+        score = metric_score(metrics, variant)
+        if score > best_feedback_score:
+            best_feedback_variant = variant
+            best_feedback_score = score
+    if best_feedback_score < 0:
+        best_feedback_score = 0.0
+    feedback_delta = round(best_feedback_score - baseline_score, 4)
+    local_issue_flags: list[str] = []
+    for variant in feedback_variants:
+        local_issue_flags.extend(metric_issue_flags(metrics, variant))
+        if variant in errors:
+            local_issue_flags.append("translation_failed")
+    local_issue_flags = sorted(set(local_issue_flags))
+    sample_kind = str(sample.get("record_kind") or sample.get("kind") or "")
+    best_variant = str(sample.get("best_variant") or "")
+
+    if local_issue_flags:
+        return {
+            "outcome": "unsafe_output_candidate",
+            "recommended_action": "return_pending",
+            "reason": "本地反馈版本出现空输出、英文残留、格式异常或翻译失败，建议退回待审复核。",
+            "confidence": "high",
+            "best_feedback_variant": best_feedback_variant,
+            "feedback_delta_vs_baseline": feedback_delta,
+            "issue_flags": local_issue_flags,
+        }
+    if feedback_variants and feedback_delta <= AB_EVAL_NEGATIVE_DELTA and (best_variant == "baseline" or baseline_score > best_feedback_score):
+        return {
+            "outcome": "prompt_harmful_candidate",
+            "recommended_action": "clear_prompt",
+            "reason": "baseline 明显优于本地反馈版本，建议先移出 Prompt，避免负贡献继续注入。",
+            "confidence": "high",
+            "best_feedback_variant": best_feedback_variant,
+            "feedback_delta_vs_baseline": feedback_delta,
+            "issue_flags": [],
+        }
+    if sample_kind == "span" and "style_span_feedback" in metrics:
+        span_score = metric_score(metrics, "style_span_feedback")
+        style_score = metric_score(metrics, "style_feedback")
+        if span_score <= max(style_score, baseline_score) + 0.0001:
+            return {
+                "outcome": "span_feedback_weak",
+                "recommended_action": "accept_only",
+                "reason": "Span 反馈没有优于 ASS 风格反馈或 baseline，建议检查 Span 标签和人工对齐质量。",
+                "confidence": "medium",
+                "best_feedback_variant": best_feedback_variant,
+                "feedback_delta_vs_baseline": round(span_score - baseline_score, 4),
+                "issue_flags": [],
+            }
+    if best_feedback_variant and feedback_delta >= AB_EVAL_POSITIVE_DELTA:
+        return {
+            "outcome": "feedback_helpful_candidate",
+            "recommended_action": "use_for_eval",
+            "reason": "本地反馈版本明显更接近人工 ASS，可考虑转入 Eval 稳定验证。",
+            "confidence": "high",
+            "best_feedback_variant": best_feedback_variant,
+            "feedback_delta_vs_baseline": feedback_delta,
+            "issue_flags": [],
+        }
+    return {
+        "outcome": "needs_more_eval",
+        "recommended_action": "accept_only",
+        "reason": "当前差异不明显，建议扩大 A/B 样本后再判断。",
+        "confidence": "low",
+        "best_feedback_variant": best_feedback_variant,
+        "feedback_delta_vs_baseline": feedback_delta,
+        "issue_flags": [],
+    }
+
+
+def build_ab_eval_action_summary(report: dict) -> dict:
+    samples = report.get("samples") if isinstance(report.get("samples"), list) else []
+    counters: Counter[str] = Counter()
+    affected_records: list[dict] = []
+    for sample in samples:
+        if not isinstance(sample, dict):
+            continue
+        classification = classify_ab_eval_sample_outcome(sample)
+        outcome = str(classification.get("outcome") or "needs_more_eval")
+        counters.update([outcome])
+        record_id = str(sample.get("record_id") or "").strip()
+        record_kind = str(sample.get("record_kind") or sample.get("kind") or "style").strip() or "style"
+        if record_id and outcome != "needs_more_eval":
+            affected_records.append(
+                {
+                    "kind": "span" if record_kind == "span" else "style",
+                    "record_kind": "span" if record_kind == "span" else "style",
+                    "record_id": record_id,
+                    "sample_id": str(sample.get("sample_id") or record_id),
+                    "project_id": str(sample.get("project_id") or ""),
+                    "source": str(sample.get("source") or "")[:240],
+                    "manual_target": str(sample.get("manual_target") or "")[:240],
+                    "best_variant": str(sample.get("best_variant") or ""),
+                    "best_score_delta_vs_baseline": sample.get("best_score_delta_vs_baseline", 0),
+                    "outcome": outcome,
+                    "recommended_action": str(classification.get("recommended_action") or "accept_only"),
+                    "reason": str(classification.get("reason") or ""),
+                    "confidence": str(classification.get("confidence") or "low"),
+                    "issue_flags": classification.get("issue_flags") if isinstance(classification.get("issue_flags"), list) else [],
+                    "feedback_delta_vs_baseline": classification.get("feedback_delta_vs_baseline", 0),
+                    "best_feedback_variant": str(classification.get("best_feedback_variant") or ""),
+                }
+            )
+    return {
+        "helpful_candidate_count": int(counters.get("feedback_helpful_candidate", 0)),
+        "harmful_candidate_count": int(counters.get("prompt_harmful_candidate", 0)),
+        "unsafe_candidate_count": int(counters.get("unsafe_output_candidate", 0)),
+        "span_weak_candidate_count": int(counters.get("span_feedback_weak", 0)),
+        "needs_more_eval_count": int(counters.get("needs_more_eval", 0)),
+        "affected_records": affected_records,
+    }
+
+
+def normalize_ab_eval_report(report: dict) -> dict:
+    if not isinstance(report, dict):
+        return {}
+    normalized = dict(report)
+    normalized["action_summary"] = build_ab_eval_action_summary(normalized)
+    return normalized
+
+
 def contains_cjk(text: str) -> bool:
     return bool(re.search(r"[\u3400-\u9fff]", text or ""))
 
@@ -540,6 +684,7 @@ def run_translation_ab_eval(
             "This A/B eval is manual and does not run the full subtitle pipeline.",
         ],
     }
+    report = normalize_ab_eval_report(report)
     write_json(paths["latest_translation_ab_eval"], report)
     history = read_jsonl(paths["translation_ab_eval_history"])
     history.append(
@@ -551,6 +696,7 @@ def run_translation_ab_eval(
             "variants": variants,
             "model": model,
             "summary": report["summary"],
+            "action_summary": report.get("action_summary", {}),
         }
     )
     write_jsonl(paths["translation_ab_eval_history"], history[-100:])
@@ -571,6 +717,7 @@ def read_latest_ab_eval_report(dataset_dir: Path) -> dict:
         report.setdefault("available", False)
         report.setdefault("path", str(paths["latest_translation_ab_eval"]))
         return report
+    report = normalize_ab_eval_report(report)
     report["available"] = True
     report["path"] = str(paths["latest_translation_ab_eval"])
     return report

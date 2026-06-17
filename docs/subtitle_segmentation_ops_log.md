@@ -1359,3 +1359,44 @@ Verification:
 - `pytest test_ui_server_bilibili_api.py`
 - `pytest test_feedback_dataset.py test_span_translation_flow.py`
 - `pytest test_subtitle_output_modes.py`
+
+## 2026-06-18 00:00 +08:00 - A/B Eval Action Loop v1
+
+User direction:
+
+- Turn small-sample A/B eval into an actionable learning-quality loop.
+- Keep all actions explicit, local, and decoupled from model calls and the subtitle pipeline.
+
+What:
+
+- Added deterministic A/B sample outcome classification in `feedback_ab_eval.py`.
+- A/B reports now expose `action_summary` for:
+  - helpful feedback samples
+  - prompt-harmful candidates
+  - unsafe output candidates
+  - weak Span feedback samples
+- Added `POST /api/local-feedback-ab-eval-apply` for JSONL-only metadata actions:
+  - `clear_prompt`
+  - `return_pending`
+  - `use_for_eval`
+  - `accept_only`
+- Added an A/B action panel to the learning quality UI with Chinese explanations, per-record buttons, and batch actions.
+- Added A/B filters to the feedback review UI:
+  - A/B 负贡献
+  - A/B 输出风险
+  - A/B Span 弱收益
+  - A/B 正向样本
+
+Safety:
+
+- The apply API does not call the translation model.
+- The apply API does not start the subtitle pipeline.
+- The apply API does not rebuild gold sets.
+- `05_translated_segments.json` and `05a_span_translated_segments.json` remain machine baselines only.
+
+Verification:
+
+- `python -m py_compile ui_server.py feedback_ab_eval.py feedback_dataset.py pipeline_core.py span_translate.py`
+- `node --check web\app.js`
+- `pytest test_feedback_dataset.py test_ui_server_bilibili_api.py -q`
+- `pytest test_feedback_dataset.py test_ui_server_bilibili_api.py test_span_translation_flow.py test_subtitle_output_modes.py -q`
