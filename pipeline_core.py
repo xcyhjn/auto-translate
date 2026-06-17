@@ -87,6 +87,9 @@ VIDEO_ENCODER_FALLBACK = "libx264"
 VIDEO_PRESET = "p4"
 VIDEO_QUALITY = "25"
 TARGET_MAX_HEIGHT = 1080
+LOCAL_FEEDBACK_STYLE_GUIDELINES_PATH = Path(__file__).resolve().parent / "datasets" / "local_feedback" / "learned_style_guidelines.md"
+
+
 def write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -95,6 +98,26 @@ def write_json(path: Path, payload: object) -> None:
         encoding="utf-8",
     )
     temp_path.replace(path)
+
+
+def build_translation_style_prompt(
+    *,
+    translation_prompt: str = "",
+    project_style_prompt_path: str | Path | None = None,
+    enable_local_translation_feedback: bool = False,
+    local_feedback_style_path: str | Path = LOCAL_FEEDBACK_STYLE_GUIDELINES_PATH,
+) -> str:
+    project_style_prompt = load_style_prompt_text(project_style_prompt_path)
+    local_feedback_style_prompt = (
+        load_style_prompt_text(local_feedback_style_path)
+        if enable_local_translation_feedback
+        else ""
+    )
+    return "\n\n".join(
+        item
+        for item in [str(translation_prompt or "").strip(), project_style_prompt, local_feedback_style_prompt]
+        if item.strip()
+    )
 
 
 def build_stage_metadata(
@@ -517,6 +540,7 @@ def run_pipeline(
     english_residue_preserve_threshold: int = 85,
     english_residue_review_threshold: int = 70,
     enable_ai_display_rewrite: bool = False,
+    enable_local_translation_feedback: bool = False,
     display_rewrite_max_ai_segments: int = 12,
     bootstrap_entity_decisions: str | bool = "high_confidence_only",
     subtitle_mode: str = "bilingual_source_reference",
@@ -540,10 +564,10 @@ def run_pipeline(
     timed_json_path = output_dir / "03_timed_source_segments.json"
     zh_reading_groups_path = output_dir / "04b_zh_reading_groups.json"
     style_prompt_path = output_dir / "06d_style_rewrite_prompt.txt"
-    learned_style_prompt = load_style_prompt_text(style_prompt_path)
-    translation_prompt = str(translation_prompt or "").strip()
-    style_prompt_for_translation = "\n\n".join(
-        item for item in [translation_prompt, learned_style_prompt] if item.strip()
+    style_prompt_for_translation = build_translation_style_prompt(
+        translation_prompt=translation_prompt,
+        project_style_prompt_path=style_prompt_path,
+        enable_local_translation_feedback=enable_local_translation_feedback,
     )
     processing_video_path = input_path
     auto_glossary_path = ensure_project_glossary(output_dir)

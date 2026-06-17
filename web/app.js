@@ -110,6 +110,7 @@ const DEFAULT_UI_CONFIG = {
   english_residue_preserve_threshold: 85,
   english_residue_review_threshold: 70,
   enable_ai_display_rewrite: false,
+  enable_local_translation_feedback: false,
   display_rewrite_max_ai_segments: 12,
   bootstrap_entity_decisions: "high_confidence_only",
   download_backend: "auto",
@@ -732,6 +733,7 @@ function readFormConfig() {
     english_residue_preserve_threshold: Number(state.config?.english_residue_preserve_threshold ?? 85),
     english_residue_review_threshold: Number(state.config?.english_residue_review_threshold ?? 70),
     enable_ai_display_rewrite: el("enable_ai_display_rewrite").checked,
+    enable_local_translation_feedback: el("enable_local_translation_feedback")?.checked === true,
     display_rewrite_max_ai_segments: Number(el("display_rewrite_max_ai_segments").value || 12),
     bootstrap_entity_decisions: normalizeBootstrapMode(el("bootstrap_entity_decisions")?.value),
     download_backend: el("download_backend").value,
@@ -810,6 +812,7 @@ function fillForm(config) {
   if (el("semantic_zh_allocation_max_spans")) el("semantic_zh_allocation_max_spans").value = config.semantic_zh_allocation_max_spans ?? 16;
   if (el("short_complete_sentence_display_grouping")) el("short_complete_sentence_display_grouping").checked = config.short_complete_sentence_display_grouping !== false;
   el("enable_ai_display_rewrite").checked = Boolean(config.enable_ai_display_rewrite);
+  if (el("enable_local_translation_feedback")) el("enable_local_translation_feedback").checked = Boolean(config.enable_local_translation_feedback);
   el("display_rewrite_max_ai_segments").value = config.display_rewrite_max_ai_segments ?? 12;
   if (el("bootstrap_entity_decisions")) {
     el("bootstrap_entity_decisions").value = normalizeBootstrapMode(config.bootstrap_entity_decisions);

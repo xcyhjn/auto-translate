@@ -35,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-span-repair", action="store_true", help="只标记难句 span，不调用 AI 局部修复。")
     parser.add_argument("--span-repair-max-spans", type=int, default=12, help="最多调用 AI 修复的高风险 span 数。")
     parser.add_argument("--enable-ai-display-rewrite", action="store_true", help="启用高风险中文字幕 AI 风格重写。")
+    parser.add_argument("--enable-local-translation-feedback", action="store_true", help="Use learned local subtitle feedback guidelines in translation prompts.")
     parser.add_argument("--display-rewrite-max-ai-segments", type=int, default=12, help="最多调用 AI 风格重写的字幕段数。")
     parser.add_argument("--zh-font-size", type=int, default=64, help="中文字幕字号。")
     parser.add_argument("--zh-margin-l", type=int, default=90, help="中文字幕左边距。")
@@ -84,6 +85,7 @@ def main() -> None:
         repair_high_risk_spans=not args.no_span_repair,
         span_repair_max_spans=args.span_repair_max_spans,
         enable_ai_display_rewrite=args.enable_ai_display_rewrite,
+        enable_local_translation_feedback=args.enable_local_translation_feedback,
         display_rewrite_max_ai_segments=args.display_rewrite_max_ai_segments,
         bilingual_style=style,
     )

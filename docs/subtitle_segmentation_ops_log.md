@@ -906,3 +906,28 @@ Validation target:
 - Human must set `accepted=true` and exactly one of `use_for_style_prompt` or `use_for_eval`.
 - `build-gold` excludes high-risk/bad subtitle samples.
 - `eval-style` reports sample sufficiency, signal distribution, unsafe cases, and high-value cases.
+
+## 2026-06-17 18:20 +08:00 - Local Translation Feedback Prompt Hook
+
+User direction:
+
+- Continue from archived ASS feedback learning and wire the learned subtitle style back into the workflow.
+
+What:
+
+- Added `enable_local_translation_feedback`, default off.
+- When enabled, `run_pipeline` appends `datasets/local_feedback/learned_style_guidelines.md` to the translation style prompt.
+- The same combined prompt is reused by:
+  - main segment translation
+  - span pre-translation
+  - difficult span repair
+  - AI display rewrite style context
+- Added a UI checkbox labelled `本地翻译反馈`.
+- Added CLI flag `--enable-local-translation-feedback` to `pipeline_demo.py`.
+- Added `build_translation_style_prompt` as a small testable prompt assembly helper.
+
+Guardrails:
+
+- The local feedback prompt hook is opt-in.
+- JSONL examples are not injected directly yet; only the summarized learned guidelines are used.
+- Sample-level RAG/few-shot retrieval should be a later controlled enhancement.

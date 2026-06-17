@@ -234,6 +234,7 @@ def run_pipeline_from_config(
         english_residue_preserve_threshold=int(config.get("english_residue_preserve_threshold", 85) or 85),
         english_residue_review_threshold=int(config.get("english_residue_review_threshold", 70) or 70),
         enable_ai_display_rewrite=bool(config.get("enable_ai_display_rewrite", False)),
+        enable_local_translation_feedback=bool(config.get("enable_local_translation_feedback", False)),
         display_rewrite_max_ai_segments=int(config.get("display_rewrite_max_ai_segments", 12) or 12),
         bootstrap_entity_decisions=config.get("bootstrap_entity_decisions", "high_confidence_only"),
         subtitle_mode=config.get("subtitle_mode", "bilingual_source_reference"),
