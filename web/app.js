@@ -374,9 +374,8 @@ function decorateStaticButtons() {
     ["rebuildPaddedCoverBtn", "refresh"],
     ["copyErrorBtn", "copy"],
     ["applyRussianWorkflowBtn", "spark"],
-    ["collectVideoAssFeedbackBtn", "spark"],
-    ["collectVideoSpanFeedbackBtn", "spark"],
     ["collectStyleFeedbackBtn", "spark"],
+    ["collectSpanFeedbackBtn", "spark"],
     ["learnStyleBtn", "spark"],
     ["reburnFromInputBtn", "refresh"],
     ["reburnFromAssBtn", "refresh"],
@@ -491,16 +490,11 @@ function findProjectForSelectedVideo() {
 function renderInputAssStatus() {
   const statusNode = el("inputAssStatus");
   const buttonNode = el("reburnFromInputBtn");
-  const assLearningButton = el("collectVideoAssFeedbackBtn");
-  const spanLearningButton = el("collectVideoSpanFeedbackBtn");
   if (!statusNode || !buttonNode) return;
 
   const project = state.selectedVideoProject;
   const busy = taskIsBusy(state.runtime);
   buttonNode.disabled = busy || !project?.ass_path;
-  const learningDisabled = busy || !state.selectedVideo || !project?.ass_path;
-  if (assLearningButton) assLearningButton.disabled = learningDisabled;
-  if (spanLearningButton) spanLearningButton.disabled = learningDisabled;
 
   if (!state.selectedVideo) {
     statusNode.textContent = "请先选择一个 input 视频";
@@ -543,6 +537,10 @@ function updateFileActionButtons() {
   const collectStyleFeedbackBtn = el("collectStyleFeedbackBtn");
   if (collectStyleFeedbackBtn) {
     collectStyleFeedbackBtn.disabled = !isAss;
+  }
+  const collectSpanFeedbackBtn = el("collectSpanFeedbackBtn");
+  if (collectSpanFeedbackBtn) {
+    collectSpanFeedbackBtn.disabled = !isAss;
   }
   el("learnStyleBtn").disabled = !isAss;
   renderInputAssStatus();
@@ -1217,6 +1215,7 @@ function renderLocalFeedbackSummary(payload) {
   const available = payload.available || {};
   const statusChip = config.enable_local_translation_feedback ? "已接入 Prompt" : "未注入 Prompt";
   const selectedProjectPath = currentFeedbackProjectPath() || "";
+  const selectedAssFile = /\.ass$/i.test(state.selectedFilePath || "");
   const selectedProject =
     (state.projects || []).find((project) => project.path === selectedProjectPath) ||
     (state.selectedProject?.path === selectedProjectPath ? state.selectedProject : null);
@@ -1232,9 +1231,7 @@ function renderLocalFeedbackSummary(payload) {
         ? action.message
         : selectedProjectName
           ? `学习目标：${projectSourceLabel} -> ${selectedProjectName}`
-          : state.selectedVideo
-            ? "当前选中视频还没有匹配到输出项目或 ASS"
-            : "请先在工作区选择一个 input 视频";
+          : "请先在项目产物中选择对应 ASS 文件";
   const actionClass = action.status === "error" ? " error" : action.status === "success" ? " ok" : "";
   root.innerHTML = `
     <div class="local-feedback-head">
@@ -1265,8 +1262,8 @@ function renderLocalFeedbackSummary(payload) {
     "beforeend",
     `
     <div class="local-feedback-actions">
-      <button id="collectCurrentAssFeedbackBtn" class="mini-btn" type="button" ${!selectedProjectPath || actionBusy ? "disabled" : ""}>学习本次 ASS</button>
-      <button id="collectCurrentSpanFeedbackBtn" class="mini-btn" type="button" ${!selectedProjectPath || actionBusy ? "disabled" : ""}>学习本次 Span</button>
+      <button id="collectCurrentAssFeedbackBtn" class="mini-btn" type="button" ${!selectedProjectPath || !selectedAssFile || actionBusy ? "disabled" : ""}>学习本次 ASS</button>
+      <button id="collectCurrentSpanFeedbackBtn" class="mini-btn" type="button" ${!selectedProjectPath || !selectedAssFile || actionBusy ? "disabled" : ""}>学习本次 Span</button>
       <span class="local-feedback-action-status${actionClass}">${escapeHtml(actionBusy ? "正在采集学习样本..." : actionText || "")}</span>
     </div>
     <p class="local-feedback-note">学习来源只取最终人工 ASS；05/05a 只作为机器基线用于差异对齐，不作为学习目标。</p>
@@ -1307,15 +1304,11 @@ function renderLocalFeedbackSummary(payload) {
 }
 
 function currentFeedbackProjectPath() {
-  if (state.selectedVideo) {
-    return state.selectedVideoProjectPath || null;
-  }
   return state.selectedFileProjectPath || state.selectedProject?.path || null;
 }
 
 function currentFeedbackProjectSourceLabel() {
-  if (state.selectedVideo) return "当前选中视频";
-  if (state.selectedFileProjectPath) return "当前预览文件";
+  if (state.selectedFileProjectPath) return "当前 ASS 文件";
   if (state.selectedProject?.path) return "当前产物项目";
   return "未选择";
 }
@@ -1336,7 +1329,11 @@ function localFeedbackResultMessage(kind, payload) {
 async function collectLocalFeedback(kind) {
   const projectPath = currentFeedbackProjectPath();
   if (!projectPath) {
-    showToast("请先在工作区选择一个已有输出项目的 input 视频", "warn");
+    showToast("请先在项目产物中选择对应 ASS 文件", "warn");
+    return;
+  }
+  if (!/\.ass$/i.test(state.selectedFilePath || "")) {
+    showToast("请先选择要学习的 ASS 产物文件", "warn");
     return;
   }
   const endpoint = kind === "span" ? "/api/collect-span-feedback" : "/api/collect-style-feedback";
@@ -3630,10 +3627,7 @@ function bindActions() {
   el("collectStyleFeedbackBtn")?.addEventListener("click", () => {
     collectLocalFeedback("ass");
   });
-  el("collectVideoAssFeedbackBtn")?.addEventListener("click", () => {
-    collectLocalFeedback("ass");
-  });
-  el("collectVideoSpanFeedbackBtn")?.addEventListener("click", () => {
+  el("collectSpanFeedbackBtn")?.addEventListener("click", () => {
     collectLocalFeedback("span");
   });
   el("reburnFromInputBtn").addEventListener("click", () => {

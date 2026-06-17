@@ -1436,9 +1436,6 @@
   }
 
   .input-ass-tools {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
     align-items: center;
     justify-content: space-between;
     margin: var(--space-4) 0;
@@ -1447,7 +1444,6 @@
   .input-ass-status {
     display: inline-flex;
     align-items: center;
-    flex: 1 1 260px;
     min-height: 44px;
     max-width: 100%;
     padding: 0.62rem 0.9rem;

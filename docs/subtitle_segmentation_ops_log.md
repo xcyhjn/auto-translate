@@ -1148,3 +1148,28 @@ Verification:
 - `node --check web\app.js`
 - `python -m py_compile ui_server.py feedback_dataset.py`
 - `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`
+
+Correction:
+
+- This input-video entry point was removed in the follow-up change below because the intended workflow is to choose an existing ASS artifact first, then learn.
+
+## 2026-06-17 22:55 +08:00 - Require Selected ASS Artifact For Feedback Learning
+
+User clarification:
+
+- Learning should happen after ASS artifacts exist.
+- The user should choose the corresponding ASS file and then choose learning.
+- This should not be tied to scanning or selecting input videos.
+
+What:
+
+- Removed the `学习本次 ASS` / `学习本次 Span` buttons from the input-video card.
+- Added `学习本次 Span` next to `学习本次 ASS` in the project artifact preview toolbar.
+- Both toolbar buttons are enabled only when the selected preview file is `.ass`.
+- The feedback-learning summary card now also disables its learn buttons unless a `.ass` artifact is selected.
+- The learning target is again the selected ASS artifact's project folder; `05` / `05a` remain machine baselines only.
+
+Verification:
+
+- `node --check web\app.js`
+- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`
