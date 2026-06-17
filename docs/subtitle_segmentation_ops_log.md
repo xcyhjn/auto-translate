@@ -1201,3 +1201,22 @@ Verification:
 - `python -m py_compile workflow_profiles.py pipeline_core.py ui_server.py feedback_dataset.py cli.py style_learning_cli.py fix_ru_xiu_xiu_title.py`
 - `node --check web\app.js`
 - `pytest test_subtitle_output_modes.py test_feedback_dataset.py test_ui_server_bilibili_api.py test_span_translation_flow.py`
+
+## 2026-06-17 23:25 +08:00 - Pipeline ASS Manifest Cleanup
+
+User question:
+
+- Check whether the pipeline layer also needs optimization after ASS artifact renaming.
+
+What:
+
+- Confirmed the main pipeline ASS write path already uses `plan.ass_name`, so new runs write `00_ASS_*` as the primary final ASS.
+- Extracted pipeline manifest file listing into `build_manifest_file_list`.
+- Pinned final ASS artifacts to the start of manifest `files` for both skip-burn and normal burn paths.
+- Removed the temporary safe burn ASS from manifest `files` because it is created in the temp directory, not the project output folder.
+- Renamed the temporary burn copy from `08_bilingual_safe.ass` to `00_ASS_safe_for_burn.ass` to avoid resembling a legacy final ASS.
+
+Verification:
+
+- `python -m py_compile pipeline_core.py workflow_profiles.py ui_server.py feedback_dataset.py`
+- `pytest test_subtitle_output_modes.py test_feedback_dataset.py test_ui_server_bilibili_api.py test_span_translation_flow.py`

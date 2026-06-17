@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from autosub_zh.models import BilingualSubtitleStyle, Segment
+from autosub_zh.pipeline_core import build_manifest_file_list
 from autosub_zh.subtitle_io import write_bilingual_ass, write_source_ass, write_zh_ass
 from autosub_zh.workflow_profiles import build_subtitle_output_plan
 
@@ -33,6 +34,26 @@ def test_subtitle_output_plan_names_bilingual_with_language_labels() -> None:
     assert plan.ass_name == "00_ASS_bilingual_zh_ru.ass"
     assert plan.legacy_ass_name == "08_bilingual_zh_ru.ass"
     assert plan.output_video_name == "09_burned_bilingual_zh_ru_video.mp4"
+
+
+def test_manifest_file_list_pins_ass_artifacts_first(tmp_path: Path) -> None:
+    plan = build_subtitle_output_plan(
+        src_lang="en",
+        dst_lang="zh-Hans",
+        subtitle_mode="bilingual_source_reference",
+        preview_seconds=None,
+    )
+
+    files = build_manifest_file_list(
+        tmp_path,
+        plan,
+        audio_override_path=None,
+        output_video_name="09_burned_bilingual_zh_en_video.mp4",
+    )
+
+    assert files[:2] == ["00_ASS_bilingual_zh_en.ass", "08_bilingual_zh_en.ass"]
+    assert "00_ASS_safe_for_burn.ass" not in files
+    assert "08_bilingual_safe.ass" not in files
 
 
 def test_target_only_ass_omits_source_reference_lines(tmp_path: Path) -> None:
