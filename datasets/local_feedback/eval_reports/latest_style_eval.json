@@ -1,58 +1,62 @@
 {
   "schema_version": 1,
-  "created_at": "2026-06-17T10:00:21.365774+00:00",
-  "sample_count": 43,
+  "created_at": "2026-06-17T10:59:08.242786+00:00",
+  "sample_count": 78,
   "sample_insufficient": false,
   "sample_note": "Gold set is large enough for a first subtitle feedback trend check.",
   "metrics": {
-    "avg_machine_manual_similarity": 0.421,
-    "avg_abs_char_delta": 12.42,
-    "surface_edit_rate": 0.0,
+    "avg_machine_manual_similarity": 0.5232,
+    "avg_abs_char_delta": 9.67,
+    "surface_edit_rate": 0.0256,
     "semantic_or_style_signal_rate": 1.0,
     "unsafe_sample_rate": 0.0
   },
   "feedback_type_counts": [
     {
       "value": "style_edit",
-      "count": 42
+      "count": 77
     },
     {
       "value": "semantic_fix",
-      "count": 36
+      "count": 51
     },
     {
       "value": "term_fix",
-      "count": 13
+      "count": 19
+    },
+    {
+      "value": "surface_edit",
+      "count": 2
     }
   ],
   "learning_risk_counts": [
     {
       "value": "low",
-      "count": 43
+      "count": 78
     }
   ],
   "learning_recommendation_counts": [
     {
       "value": "style_prompt_candidate",
-      "count": 43
+      "count": 78
     }
   ],
   "edit_tag_counts": [
     {
       "value": "punctuation_tuned",
-      "count": 40
+      "count": 72
     },
     {
       "value": "expanded",
       "count": 35
     },
     {
-      "value": "preserve_english",
-      "count": 12
+      "value": "compressed",
+      "count": 24
     },
     {
-      "value": "compressed",
-      "count": 2
+      "value": "preserve_english",
+      "count": 18
     },
     {
       "value": "mixed_naming",
@@ -65,22 +69,30 @@
       "count": 35
     },
     {
-      "value": "preserve_term",
-      "count": 12
+      "value": "compress",
+      "count": 24
     },
     {
-      "value": "compress",
-      "count": 2
+      "value": "preserve_term",
+      "count": 18
     },
     {
       "value": "reduce_clause_count",
-      "count": 2
+      "count": 3
+    },
+    {
+      "value": "trim_lead",
+      "count": 1
     }
   ],
   "quality_flag_counts": [
     {
       "value": "needs_human_acceptance",
-      "count": 43
+      "count": 78
+    },
+    {
+      "value": "surface_only_edit",
+      "count": 2
     }
   ],
   "high_value_cases": [

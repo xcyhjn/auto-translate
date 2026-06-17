@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import time
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -80,6 +83,30 @@ def append_jsonl(path: Path, records: list[dict]) -> None:
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         for record in records:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+@contextmanager
+def jsonl_file_lock(path: Path, timeout_seconds: float = 30.0):
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout_seconds
+    fd: int | None = None
+    while fd is None:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            os.write(fd, f"{os.getpid()} {utc_now()}\n".encode("utf-8"))
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for JSONL lock: {lock_path}")
+            time.sleep(0.1)
+    try:
+        yield
+    finally:
+        os.close(fd)
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def dataset_paths(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict[str, Path]:
@@ -238,18 +265,19 @@ def style_record_key(record: dict) -> str:
 
 
 def append_new_records(path: Path, records: list[dict], key_func: Callable[[dict], str]) -> dict:
-    existing = read_jsonl(path)
-    existing_keys = {key_func(record) for record in existing}
-    to_add: list[dict] = []
-    skipped = 0
-    for record in records:
-        key = key_func(record)
-        if key in existing_keys:
-            skipped += 1
-            continue
-        existing_keys.add(key)
-        to_add.append(record)
-    append_jsonl(path, to_add)
+    with jsonl_file_lock(path):
+        existing = read_jsonl(path)
+        existing_keys = {key_func(record) for record in existing}
+        to_add: list[dict] = []
+        skipped = 0
+        for record in records:
+            key = key_func(record)
+            if key in existing_keys:
+                skipped += 1
+                continue
+            existing_keys.add(key)
+            to_add.append(record)
+        append_jsonl(path, to_add)
     return {"added": len(to_add), "skipped_existing": skipped, "path": str(path)}
 
 
@@ -317,17 +345,18 @@ def build_bilibili_feedback_record(
 
 
 def upsert_record(path: Path, record: dict, key_func: Callable[[dict], str]) -> dict:
-    records = read_jsonl(path)
-    key = key_func(record)
-    updated = False
-    for index, existing in enumerate(records):
-        if key_func(existing) == key:
-            records[index] = record
-            updated = True
-            break
-    if not updated:
-        records.append(record)
-    write_jsonl(path, records)
+    with jsonl_file_lock(path):
+        records = read_jsonl(path)
+        key = key_func(record)
+        updated = False
+        for index, existing in enumerate(records):
+            if key_func(existing) == key:
+                records[index] = record
+                updated = True
+                break
+        if not updated:
+            records.append(record)
+        write_jsonl(path, records)
     return {"path": str(path), "updated": updated, "added": not updated, "key": key}
 
 
@@ -354,13 +383,20 @@ def save_bilibili_feedback_label(
 
 
 def find_manual_ass_path(project: Path) -> Path:
+    def usable_ass(path: Path) -> bool:
+        if not path.exists() or path.stat().st_size < 128:
+            return False
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        return "[Events]" in text and "Dialogue:" in text
+
     preferred = project / "08_bilingual_zh_en.ass"
-    if preferred.exists():
+    if usable_ass(preferred):
         return preferred
     for pattern in ("08_bilingual_*.ass", "08_subtitle_*.ass"):
         matches = sorted(project.glob(pattern))
-        if matches:
-            return matches[0]
+        for match in matches:
+            if usable_ass(match):
+                return match
     raise FileNotFoundError(f"Manual ASS file not found in {project}")
 
 

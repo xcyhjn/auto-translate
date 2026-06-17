@@ -970,3 +970,43 @@ Follow-up:
 
 - When the learning review UI is ready, promote feedback learning from a summary card into a dedicated review workspace.
 - Consider adding a lightweight frontend regression test for tab/panel mapping if this UI keeps expanding.
+
+## 2026-06-17 19:05 +08:00 - Archive ASS Feedback Learning Batch
+
+User direction:
+
+- Learn subtitle translation style from three archived bilingual ASS files:
+  - `A-Man-In-A-Gas-Mask-Terrorized-A-Swiss-Village-For-10-Years-The-Hunt-For-Le-Loyon`
+  - `Only-One-Hitchcock-Film-Is-Lost.-This-Redditor-Might-Have-A-Copy`
+  - `Porter-and-Stout-What-s-the-difference-The-Craft-Beer-Channel`
+
+What:
+
+- Fixed ASS selection so `collect-style` skips unusable preferred ASS files and falls back to the first usable `08_bilingual_*.ass` / `08_subtitle_*.ass`.
+- Le Loyon's `08_bilingual_zh_en.ass` was 3 bytes, so feedback learning used:
+  - `08_bilingual_zh_en.recovered_from_vscode_qKNS_20260606_021032.ass`
+- Repaired one malformed JSONL line caused by a previous parallel append attempt, then reran collection serially.
+- Added a small JSONL lock around feedback append/upsert operations to prevent concurrent collection from interleaving writes.
+- Collected and accepted low-risk style feedback from the three requested projects:
+  - Le Loyon: 221 eligible samples, 203 style-learning, 18 eval
+  - Hitchcock lost film: 151 eligible samples, 139 style-learning, 12 eval
+  - Porter/Stout: 62 eligible samples, 57 style-learning, 5 eval
+
+Dataset state after rebuild:
+
+- Translation edit records: 981
+- Translation style-learning records: 898
+- Translation eval-marked records: 78
+- Style gold records: 78
+- Latest style eval unsafe sample rate: 0.0
+
+Verification:
+
+- `python -m py_compile feedback_dataset.py ui_server.py`
+- `node --check web\app.js`
+- `pytest test_feedback_dataset.py`
+- `py -m autosub_zh.feedback_dataset dedupe`
+- `py -m autosub_zh.feedback_dataset validate`
+- `py -m autosub_zh.feedback_dataset build-gold`
+- `py -m autosub_zh.feedback_dataset eval-style`
+- `py -m autosub_zh.feedback_dataset summarize`

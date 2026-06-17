@@ -137,6 +137,47 @@ def test_collect_style_defaults_to_review_only_samples(tmp_path: Path) -> None:
     assert summary["style_learning_count"] == 0
 
 
+def test_collect_style_skips_empty_preferred_ass_and_uses_recovered_file(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    project = tmp_path / "style_project"
+    project.mkdir()
+    segments = {
+        "segments": [
+            {
+                "id": 1,
+                "start": 1.0,
+                "end": 3.0,
+                "source_text": "This is a long literal sentence.",
+                "target_text": "这是一句很长很直译的话语。",
+                "reference_text": "",
+                "confidence": None,
+                "source": "asr",
+                "words": [],
+            }
+        ]
+    }
+    (project / "05_translated_segments.json").write_text(json.dumps(segments, ensure_ascii=False), encoding="utf-8")
+    (project / "08_bilingual_zh_en.ass").write_text("\n", encoding="utf-8-sig")
+    recovered = project / "08_bilingual_zh_en.recovered_from_vscode.ass"
+    recovered.write_text(
+        "\n".join(
+            [
+                "[Script Info]",
+                "ScriptType: v4.00+",
+                "[Events]",
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+                "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,这句更自然。",
+            ]
+        ),
+        encoding="utf-8-sig",
+    )
+
+    result = collect_style_project(project, dataset_dir)
+
+    assert result["added"] == 1
+    assert result["ass_path"] == str(recovered.resolve())
+
+
 def test_style_gold_eval_reports_feedback_health(tmp_path: Path) -> None:
     dataset_dir = tmp_path / "dataset"
     project = tmp_path / "style_project"
