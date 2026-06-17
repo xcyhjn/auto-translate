@@ -33,6 +33,8 @@ from .feedback_dataset import (
     dataset_paths,
     eval_span_style,
     eval_style,
+    is_unsafe_span_learning_record,
+    is_unsafe_style_learning_record,
     jsonl_file_lock,
     read_jsonl,
     save_bilibili_feedback_label,
@@ -68,6 +70,7 @@ from .workflow_profiles import (
     summarize_dataset_profile,
 )
 from .youtube_meta import ensure_cover, ensure_padded_cover, fetch_youtube_info, fetch_youtube_meta, safe_project_slug, save_youtube_meta
+from .span_translate import read_span_examples, summarize_span_examples_for_hash, _stable_hash as stable_span_hash, DEFAULT_SPAN_EXAMPLE_TOP_K
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -2904,6 +2907,83 @@ def feedback_record_preview(kind: str, record: dict) -> dict:
     }
 
 
+SPAN_PROMPT_SIGNAL_TAGS = {"semantic_reallocation", "close_open_clause", "fragment_completion", "preserve_term"}
+
+
+def feedback_record_tags(record: dict) -> set[str]:
+    tags: set[str] = set()
+    for field in ("edit_tags", "feedback_types"):
+        values = record.get(field)
+        if isinstance(values, list):
+            tags.update(str(item) for item in values if item)
+    return tags
+
+
+def is_unsafe_feedback_record(kind: str, record: dict) -> bool:
+    if kind == "span":
+        return is_unsafe_span_learning_record(record)
+    return is_unsafe_style_learning_record(record)
+
+
+def feedback_review_suggestion(kind: str, record: dict) -> dict:
+    tags = feedback_record_tags(record)
+    risk = str(record.get("learning_risk") or "low")
+    recommendation = str(record.get("learning_recommendation") or "")
+    if is_unsafe_feedback_record(kind, record):
+        return {
+            "suggested_action": "review_only",
+            "suggestion_reason": "高风险或坏样本需要人工复核，不会批量进入 Prompt/Eval。",
+            "suggestion_confidence": "high",
+        }
+    if recommendation == "eval_candidate":
+        return {
+            "suggested_action": "use_for_eval",
+            "suggestion_reason": "低风险且已标记为 Eval 候选，适合保留做离线评估。",
+            "suggestion_confidence": "high" if risk == "low" else "medium",
+        }
+    if kind == "span":
+        matched_tags = sorted(tags & SPAN_PROMPT_SIGNAL_TAGS)
+        if recommendation == "span_prompt_candidate" and matched_tags:
+            return {
+                "suggested_action": "use_for_prompt",
+                "suggestion_reason": f"低风险，包含 {', '.join(matched_tags)}，可作为 Span Prompt 示例。",
+                "suggestion_confidence": "high" if risk == "low" else "medium",
+            }
+        if recommendation == "span_prompt_candidate":
+            return {
+                "suggested_action": "accept_only",
+                "suggestion_reason": "安全但 Span 信号较弱，建议先接受，暂不注入 Prompt/Eval。",
+                "suggestion_confidence": "medium",
+            }
+    else:
+        if recommendation == "style_prompt_candidate":
+            return {
+                "suggested_action": "use_for_prompt",
+                "suggestion_reason": "低风险 ASS 风格样本，可作为 Prompt 示例。",
+                "suggestion_confidence": "high" if risk == "low" else "medium",
+            }
+    if risk == "low":
+        return {
+            "suggested_action": "accept_only",
+            "suggestion_reason": "低风险但学习信号不强，适合先接受为 review-only。",
+            "suggestion_confidence": "low",
+        }
+    return {
+        "suggested_action": "review_only",
+        "suggestion_reason": "中风险或信号不明确，建议人工复核后再决定用途。",
+        "suggestion_confidence": "medium",
+    }
+
+
+def attach_feedback_review_metadata(kind: str, record: dict, index: int, spec: dict) -> dict:
+    row = feedback_record_preview(kind, record)
+    row["record_id"] = spec["key_func"](record)
+    row["index"] = index
+    row["kind"] = spec["kind"]
+    row.update(feedback_review_suggestion(kind, record))
+    return row
+
+
 def list_local_feedback_records(kind: str = "style", status_filter: str = "pending", limit: int = 80, dataset_dir: Path | None = None) -> dict:
     spec = feedback_kind_spec(kind, dataset_dir)
     records = read_jsonl(spec["path"])
@@ -2924,11 +3004,7 @@ def list_local_feedback_records(kind: str = "style", status_filter: str = "pendi
             continue
         if normalized_filter == "risk" and str(record.get("learning_risk") or "") not in {"high", "medium"}:
             continue
-        row = feedback_record_preview(str(spec["kind"]), record)
-        row["record_id"] = spec["key_func"](record)
-        row["index"] = index
-        row["kind"] = spec["kind"]
-        rows.append(row)
+        rows.append(attach_feedback_review_metadata(str(spec["kind"]), record, index, spec))
     rows.sort(key=lambda item: (item.get("accepted") is True, str(item.get("created_at") or "")), reverse=False)
     safe_limit = max(1, min(500, int(limit or 80)))
     return {
@@ -2991,6 +3067,117 @@ def update_local_feedback_record(payload: dict, dataset_dir: Path | None = None)
             "kind": spec["kind"],
         },
         "summary": build_local_feedback_summary(dataset_dir),
+    }
+
+
+def feedback_bulk_filter_match(record: dict, filters: dict, prompt_flag: str) -> bool:
+    if not filters:
+        return True
+    status = str(filters.get("status") or "").strip().lower()
+    accepted = bool(record.get("accepted"))
+    use_for_prompt = bool(record.get(prompt_flag))
+    use_for_eval = bool(record.get("use_for_eval"))
+    if status == "pending" and accepted:
+        return False
+    if status == "accepted" and not accepted:
+        return False
+    if status == "prompt" and not use_for_prompt:
+        return False
+    if status == "eval" and not use_for_eval:
+        return False
+    risks = filters.get("learning_risk")
+    if isinstance(risks, list) and risks and str(record.get("learning_risk") or "") not in {str(item) for item in risks}:
+        return False
+    recommendations = filters.get("recommendations")
+    if isinstance(recommendations, list) and recommendations and str(record.get("learning_recommendation") or "") not in {str(item) for item in recommendations}:
+        return False
+    exclude_tags = set(str(item) for item in filters.get("exclude_tags") or [] if item)
+    if exclude_tags and feedback_record_tags(record) & exclude_tags:
+        return False
+    suggested_actions = filters.get("suggested_actions")
+    if isinstance(suggested_actions, list) and suggested_actions:
+        suggestion = feedback_review_suggestion("span" if prompt_flag == "use_for_span_prompt" else "style", record)
+        if suggestion["suggested_action"] not in {str(item) for item in suggested_actions}:
+            return False
+    return True
+
+
+def feedback_updates_for_bulk_action(action: str, prompt_flag: str) -> dict:
+    if action == "accept":
+        return {"accepted": True}
+    if action == "use_for_prompt":
+        return {"accepted": True, prompt_flag: True, "use_for_eval": False}
+    if action == "use_for_eval":
+        return {"accepted": True, prompt_flag: False, "use_for_eval": True}
+    if action == "clear_usage":
+        return {prompt_flag: False, "use_for_eval": False}
+    if action == "return_pending":
+        return {"accepted": False, prompt_flag: False, "use_for_eval": False}
+    raise ValueError(f"Unsupported local feedback bulk action: {action}")
+
+
+def bulk_update_local_feedback_records(payload: dict, dataset_dir: Path | None = None) -> dict:
+    kind = str(payload.get("kind") or "style")
+    action = str(payload.get("action") or "").strip().lower().replace("-", "_")
+    spec = feedback_kind_spec(kind, dataset_dir)
+    prompt_flag = str(spec["prompt_flag"])
+    filters = payload.get("filter") if isinstance(payload.get("filter"), dict) else {}
+    record_ids = [str(item) for item in payload.get("record_ids") or [] if str(item).strip()]
+    record_id_set = set(record_ids)
+    limit = max(1, min(500, int(payload.get("limit") or 50)))
+    updates = feedback_updates_for_bulk_action(action, prompt_flag)
+    updated_rows: list[dict] = []
+    skipped: list[dict] = []
+    updated_count = 0
+
+    with jsonl_file_lock(spec["path"]):
+        records = read_jsonl(spec["path"])
+        next_records = list(records)
+        for index, record in enumerate(records):
+            record_id = spec["key_func"](record)
+            if record_id_set:
+                if record_id not in record_id_set:
+                    continue
+            elif not feedback_bulk_filter_match(record, filters, prompt_flag):
+                continue
+            if updated_count >= limit:
+                break
+            if action in {"use_for_prompt", "use_for_eval"} and is_unsafe_feedback_record(str(spec["kind"]), record):
+                skipped.append(
+                    {
+                        "record_id": record_id,
+                        "reason": "高风险、bad-example 或 bad_alignment 样本不能批量进入 Prompt/Eval。",
+                    }
+                )
+                continue
+            next_record = dict(record)
+            next_record.update(updates)
+            validation_errors: list[str] = []
+            spec["validator"](next_record, f"{spec['path']}:{index + 1}", validation_errors)
+            if validation_errors:
+                skipped.append({"record_id": record_id, "reason": "; ".join(validation_errors[:2])})
+                continue
+            next_records[index] = next_record
+            updated_count += 1
+            updated_rows.append(attach_feedback_review_metadata(str(spec["kind"]), next_record, index, spec))
+        if updated_count:
+            write_jsonl(spec["path"], next_records)
+
+    return {
+        "ok": True,
+        "kind": spec["kind"],
+        "action": action,
+        "updated_count": updated_count,
+        "skipped_count": len(skipped),
+        "skipped_reasons": skipped[:20],
+        "records": updated_rows,
+        "review": list_local_feedback_records(
+            kind=str(spec["kind"]),
+            status_filter=str(filters.get("status") or payload.get("status") or "pending"),
+            limit=100,
+            dataset_dir=dataset_dir,
+        ),
+        "summary": build_learning_quality_summary(dataset_dir),
     }
 
 
@@ -3249,6 +3436,61 @@ def build_learning_quality_summary(dataset_dir: Path | None = None) -> dict:
         )
     )
     return result
+
+
+def build_local_feedback_impact_preview(dataset_dir: Path | None = None) -> dict:
+    dataset_dir = Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR)
+    paths = dataset_paths(dataset_dir)
+    config = normalize_config(read_config())
+    style_records = read_jsonl(paths["translation_edits"])
+    span_records = read_jsonl(paths["span_translation_examples"])
+    span_prompt_examples = read_span_examples(paths["span_translation_examples"])
+    span_hash = stable_span_hash(summarize_span_examples_for_hash(span_prompt_examples))
+    style_prompt_count = sum(
+        1
+        for record in style_records
+        if record.get("accepted") is True
+        and record.get("use_for_style_prompt") is True
+        and record.get("use_for_eval") is not True
+    )
+    style_eval_count = sum(
+        1
+        for record in style_records
+        if record.get("accepted") is True
+        and record.get("use_for_eval") is True
+        and record.get("use_for_style_prompt") is not True
+    )
+    span_eval_count = sum(
+        1
+        for record in span_records
+        if record.get("accepted") is True
+        and record.get("use_for_eval") is True
+        and record.get("use_for_span_prompt") is not True
+    )
+    notes: list[str] = []
+    local_feedback_enabled = bool(config.get("enable_local_translation_feedback"))
+    if not local_feedback_enabled:
+        notes.append("本地翻译反馈当前关闭；Prompt 与 Span 示例不会注入下一次翻译。")
+    if not span_prompt_examples:
+        notes.append("当前没有可注入 Prompt 的 Span 示例。")
+    else:
+        notes.append("Span 示例库变化后，下一次 Span 预翻译会刷新相关 05a 缓存。")
+    return {
+        "ok": True,
+        "dataset_dir": str(dataset_dir),
+        "enable_local_translation_feedback": local_feedback_enabled,
+        "style_prompt_count": style_prompt_count,
+        "span_prompt_count": len(span_prompt_examples),
+        "style_eval_count": style_eval_count,
+        "span_eval_count": span_eval_count,
+        "style_guidelines_available": paths["learned_style_guidelines"].exists(),
+        "span_guidelines_available": paths["learned_span_guidelines"].exists(),
+        "span_examples_hash": span_hash,
+        "would_inject_span_examples": local_feedback_enabled and bool(span_prompt_examples),
+        "max_span_examples_per_request": DEFAULT_SPAN_EXAMPLE_TOP_K,
+        "would_refresh_span_cache": bool(span_prompt_examples),
+        "notes": notes,
+    }
 
 
 def run_local_feedback_action(payload: dict, dataset_dir: Path | None = None) -> dict:
@@ -3657,6 +3899,10 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 self._json_response(build_learning_quality_summary())
                 return
 
+            if parsed.path == "/api/local-feedback-impact-preview":
+                self._json_response(build_local_feedback_impact_preview())
+                return
+
             if parsed.path == "/api/file":
                 qs = parse_qs(parsed.query)
                 path = qs.get("path", [""])[0]
@@ -3895,6 +4141,25 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                             **build_error_payload(
                                 exc,
                                 operation="local_feedback_record_update",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                self._json_response(result)
+                return
+
+            if parsed.path == "/api/local-feedback-bulk-update":
+                try:
+                    result = bulk_update_local_feedback_records(payload)
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                operation="local_feedback_bulk_update",
                             ),
                         },
                         status=400,

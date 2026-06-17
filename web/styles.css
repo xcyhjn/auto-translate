@@ -941,6 +941,7 @@
 
   .feedback-review-explain,
   .feedback-record,
+  .feedback-bulk-panel,
   .organize-preview {
     min-width: 0;
     padding: var(--space-4);
@@ -963,6 +964,7 @@
   .feedback-record-head,
   .feedback-record-actions,
   .feedback-status-row,
+  .feedback-bulk-summary,
   .learning-guideline-row {
     display: flex;
     flex-wrap: wrap;
@@ -983,6 +985,27 @@
   .feedback-record-head p {
     color: var(--muted);
     font-size: var(--font-xs);
+  }
+
+  .feedback-record-select {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    min-width: min(100%, 280px);
+    color: var(--text);
+  }
+
+  .feedback-record-select span {
+    min-width: 0;
+  }
+
+  .feedback-bulk-panel {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .feedback-bulk-summary {
+    align-items: center;
   }
 
   .feedback-comparison {

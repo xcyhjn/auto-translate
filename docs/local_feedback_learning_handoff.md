@@ -189,3 +189,12 @@ If there are fewer than three positive sources, the report is marked `sample_ins
 - Add QA repair examples from final ASS QA and editor review TSVs.
 - Add a feature flag such as `enable_local_translation_feedback` before consuming `learned_style_guidelines.md` in translation prompts.
 - After at least 50 accepted subtitle examples and 20 frozen eval examples, run ablation tests before considering LoRA/fine-tuning.
+
+## 2026-06-17 Span Review Loop v1
+
+- Added review suggestions for ASS/Span feedback records: `use_for_prompt`, `use_for_eval`, `accept_only`, and `review_only`.
+- Added `POST /api/local-feedback-bulk-update` for local JSONL-only batch review actions. It skips high-risk, `bad_example`, and `bad_alignment` samples when targeting Prompt/Eval.
+- Added `GET /api/local-feedback-impact-preview` to show whether local feedback is enabled, how many ASS/Span samples can enter Prompt/Eval, and the current Span example hash that affects `05a` cache reuse.
+- Updated the feedback review UI with selection, low-risk filtering, batch actions, recommendation chips, and one-click recommended Prompt/Eval actions.
+- Updated the learning quality UI with a Span shortfall action card and a read-only learning impact preview card.
+- These actions do not start subtitle translation and do not add model requests. `05/05a` remain machine baselines only.

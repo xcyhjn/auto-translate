@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   config: null,
   workflowProfiles: [],
   activePromptProfile: "",
@@ -29,6 +29,8 @@ const state = {
     loading: false,
     records: [],
     selectedRecordId: "",
+    selectedRecordIds: [],
+    bulkBusy: false,
     message: "",
   },
   learningQualityAction: {
@@ -36,6 +38,7 @@ const state = {
     action: "",
     message: "",
   },
+  localFeedbackImpact: null,
   learningGuidelinesExpanded: false,
   organizePreview: null,
   learningQuality: null,
@@ -1419,6 +1422,54 @@ function feedbackPromptField(kind = state.feedbackReview.kind) {
   return kind === "span" ? "use_for_span_prompt" : "use_for_style_prompt";
 }
 
+function feedbackSuggestedActionLabel(action) {
+  const labels = {
+    use_for_prompt: "推荐 Prompt",
+    use_for_eval: "推荐 Eval",
+    accept_only: "建议接受",
+    review_only: "人工复核",
+  };
+  return labels[action] || "人工复核";
+}
+
+function feedbackSuggestedActionClass(action) {
+  if (action === "use_for_prompt" || action === "use_for_eval") return "ok";
+  if (action === "accept_only") return "warn";
+  return "muted";
+}
+
+function feedbackBulkActionLabel(action) {
+  const labels = {
+    accept: "批量接受",
+    use_for_prompt: "批量用于 Prompt",
+    use_for_eval: "批量用于 Eval",
+    clear_usage: "清除用途",
+    return_pending: "退回待审",
+  };
+  return labels[action] || "批量处理";
+}
+
+function selectedFeedbackRecordIds() {
+  const visibleIds = new Set((state.feedbackReview.records || []).map((record) => record.record_id));
+  return (state.feedbackReview.selectedRecordIds || []).filter((recordId) => visibleIds.has(recordId));
+}
+
+function setFeedbackSelection(recordIds) {
+  state.feedbackReview.selectedRecordIds = Array.from(new Set(recordIds.filter(Boolean)));
+  renderFeedbackReviewPanel();
+}
+
+function feedbackSuggestionCounts(records) {
+  return (records || []).reduce(
+    (acc, record) => {
+      const action = record.suggested_action || "review_only";
+      acc[action] = (acc[action] || 0) + 1;
+      return acc;
+    },
+    { use_for_prompt: 0, use_for_eval: 0, accept_only: 0, review_only: 0 },
+  );
+}
+
 function syncFeedbackReviewControls() {
   const kindNode = el("feedbackReviewKind");
   const statusNode = el("feedbackReviewStatus");
@@ -1451,6 +1502,15 @@ function renderFeedbackReviewPanel() {
     return;
   }
   const records = Array.isArray(review.records) ? review.records : [];
+  const selectedIds = selectedFeedbackRecordIds();
+  const selectedSet = new Set(selectedIds);
+  const suggestionCounts = feedbackSuggestionCounts(records);
+  const lowRiskIds = records
+    .filter((record) => {
+      const tags = [...(record.edit_tags || []), ...(record.feedback_types || [])];
+      return record.learning_risk !== "high" && !tags.includes("bad_alignment") && !tags.includes("bad_example");
+    })
+    .map((record) => record.record_id);
   if (!records.length) {
     root.innerHTML = `
       <div class="entity-panel">
@@ -1467,9 +1527,31 @@ function renderFeedbackReviewPanel() {
   }
   root.innerHTML = `
     <div class="feedback-review-explain">
-      <strong>简单说明</strong>
-      <p>“用于 Prompt”会被后续翻译检索注入；“Eval 样本”只用于离线评估，两者互斥。中高风险样本建议先人工确认，再决定是否接受。</p>
+      <strong>审核规则</strong>
+      <p>用于 Prompt 的样本会被后续翻译检索注入；Eval 样本只用于离线评估，二者互斥。批量操作只修改本地 JSONL 元数据，不会启动字幕翻译，也不会增加模型请求量。</p>
+      ${review.kind === "span" ? `<p>05/05a 仅作为机器基线；high-risk、bad_alignment 或 bad-example 不会批量进入 Prompt/Eval。</p>` : ""}
       ${review.message ? `<p>${escapeHtml(review.message)}</p>` : ""}
+    </div>
+    <div class="feedback-bulk-panel">
+      <div class="feedback-bulk-summary">
+        <span class="entity-chip ok">推荐 Prompt ${escapeHtml(suggestionCounts.use_for_prompt || 0)}</span>
+        <span class="entity-chip ok">推荐 Eval ${escapeHtml(suggestionCounts.use_for_eval || 0)}</span>
+        <span class="entity-chip warn">建议接受 ${escapeHtml(suggestionCounts.accept_only || 0)}</span>
+        <span class="entity-chip muted">需人工复核 ${escapeHtml(suggestionCounts.review_only || 0)}</span>
+        <span class="entity-chip">已选择 ${escapeHtml(selectedIds.length)}</span>
+      </div>
+      <div class="feedback-record-actions">
+        <button class="mini-btn" type="button" data-feedback-select="page" ${review.bulkBusy ? "disabled" : ""}>选择本页</button>
+        <button class="mini-btn" type="button" data-feedback-select="low-risk" ${review.bulkBusy ? "disabled" : ""}>仅选低风险</button>
+        <button class="mini-btn" type="button" data-feedback-select="clear" ${review.bulkBusy ? "disabled" : ""}>清空选择</button>
+        <button class="mini-btn" type="button" data-feedback-bulk-action="accept" ${review.bulkBusy || !selectedIds.length ? "disabled" : ""}>批量接受</button>
+        <button class="mini-btn" type="button" data-feedback-bulk-action="use_for_prompt" ${review.bulkBusy || !selectedIds.length ? "disabled" : ""}>批量用于 Prompt</button>
+        <button class="mini-btn" type="button" data-feedback-bulk-action="use_for_eval" ${review.bulkBusy || !selectedIds.length ? "disabled" : ""}>批量用于 Eval</button>
+        <button class="mini-btn" type="button" data-feedback-bulk-action="clear_usage" ${review.bulkBusy || !selectedIds.length ? "disabled" : ""}>清除用途</button>
+        <button class="mini-btn" type="button" data-feedback-bulk-action="return_pending" ${review.bulkBusy || !selectedIds.length ? "disabled" : ""}>退回待审</button>
+        <button class="mini-btn" type="button" data-feedback-bulk-suggested="use_for_prompt" ${review.bulkBusy || !suggestionCounts.use_for_prompt ? "disabled" : ""}>按推荐加入 Prompt</button>
+        <button class="mini-btn" type="button" data-feedback-bulk-suggested="use_for_eval" ${review.bulkBusy || !suggestionCounts.use_for_eval ? "disabled" : ""}>按推荐加入 Eval</button>
+      </div>
     </div>
     <div class="feedback-record-list">
       ${records
@@ -1480,12 +1562,20 @@ function renderFeedbackReviewPanel() {
               ? `Span ${record.span_id || record.index || ""} · ${Array.isArray(record.segment_ids) ? record.segment_ids.join(", ") : ""}`
               : `分段 ${record.segment_id ?? record.index ?? ""}`;
           const riskClass = record.learning_risk === "high" ? "danger" : record.learning_risk === "medium" ? "warn" : "ok";
+          const suggestionClass = feedbackSuggestedActionClass(record.suggested_action);
           return `
             <article class="feedback-record">
               <div class="feedback-record-head">
+                <label class="feedback-record-select">
+                  <input type="checkbox" data-feedback-select-record="${escapeHtml(record.record_id)}" ${selectedSet.has(record.record_id) ? "checked" : ""} ${review.bulkBusy ? "disabled" : ""}>
+                  <span>
+                    <h4>${escapeHtml(title)}</h4>
+                    <p>${escapeHtml(record.project_id || "unknown project")}</p>
+                  </span>
+                </label>
                 <div>
-                  <h4>${escapeHtml(title)}</h4>
-                  <p>${escapeHtml(record.project_id || "unknown project")}</p>
+                  <span class="entity-chip ${suggestionClass}">${escapeHtml(feedbackSuggestedActionLabel(record.suggested_action))}</span>
+                  <p>${escapeHtml(record.suggestion_reason || record.learning_recommendation || "人工复核")}</p>
                 </div>
                 <div class="feedback-status-row">
                   <span class="entity-chip ${record.accepted ? "" : "muted"}">${record.accepted ? "已接受" : "待审核"}</span>
@@ -1514,6 +1604,41 @@ function renderFeedbackReviewPanel() {
         .join("")}
     </div>
   `;
+  root.querySelectorAll("[data-feedback-select]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const mode = button.getAttribute("data-feedback-select") || "";
+      if (mode === "page") setFeedbackSelection(records.map((record) => record.record_id));
+      if (mode === "low-risk") setFeedbackSelection(lowRiskIds);
+      if (mode === "clear") setFeedbackSelection([]);
+    });
+  });
+  root.querySelectorAll("[data-feedback-select-record]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const recordId = checkbox.getAttribute("data-feedback-select-record") || "";
+      const next = new Set(selectedFeedbackRecordIds());
+      if (checkbox.checked) next.add(recordId);
+      else next.delete(recordId);
+      setFeedbackSelection([...next]);
+    });
+  });
+  root.querySelectorAll("[data-feedback-bulk-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.getAttribute("data-feedback-bulk-action") || "";
+      updateFeedbackReviewBulk(action, { record_ids: selectedFeedbackRecordIds() });
+    });
+  });
+  root.querySelectorAll("[data-feedback-bulk-suggested]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const suggestedAction = button.getAttribute("data-feedback-bulk-suggested") || "";
+      updateFeedbackReviewBulk(suggestedAction, {
+        filter: {
+          status: state.feedbackReview.status,
+          suggested_actions: [suggestedAction],
+          exclude_tags: ["bad_alignment", "bad_example"],
+        },
+      });
+    });
+  });
   root.querySelectorAll("[data-feedback-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const recordId = button.getAttribute("data-feedback-record-id") || "";
@@ -1545,13 +1670,55 @@ async function refreshFeedbackReview() {
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload?.ok) throw new Error(payload?.error || "读取审核样本失败");
     state.feedbackReview.records = Array.isArray(payload.records) ? payload.records : [];
+    state.feedbackReview.selectedRecordIds = selectedFeedbackRecordIds();
     state.feedbackReview.message = `${payload.source_label || "学习样本"}：显示 ${payload.records?.length || 0} / ${payload.filtered_count || 0} 条，数据集总计 ${payload.total || 0} 条`;
   } catch (error) {
     state.feedbackReview.records = [];
+    state.feedbackReview.selectedRecordIds = [];
     state.feedbackReview.message = `读取审核样本失败：${error.message || error}`;
     showToast(state.feedbackReview.message, "error");
   } finally {
     state.feedbackReview.loading = false;
+    renderFeedbackReviewPanel();
+  }
+}
+
+async function updateFeedbackReviewBulk(action, options = {}) {
+  const kind = state.feedbackReview.kind;
+  const recordIds = Array.isArray(options.record_ids) ? options.record_ids : [];
+  if (!recordIds.length && !options.filter) return;
+  state.feedbackReview.bulkBusy = true;
+  state.feedbackReview.message = `${feedbackBulkActionLabel(action)}中...`;
+  renderFeedbackReviewPanel();
+  try {
+    const response = await fetch("/api/local-feedback-bulk-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind,
+        action,
+        record_ids: recordIds,
+        filter: options.filter || undefined,
+        limit: options.limit || 50,
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || `${feedbackBulkActionLabel(action)}失败`);
+    if (payload.summary) state.learningQuality = payload.summary;
+    if (payload.summary) state.localFeedbackSummary = payload.summary;
+    const skipped = Number(payload.skipped_count || 0);
+    state.feedbackReview.message = `${feedbackBulkActionLabel(action)}完成：更新 ${payload.updated_count || 0} 条${skipped ? `，跳过 ${skipped} 条` : ""}`;
+    state.feedbackReview.selectedRecordIds = [];
+    renderLocalFeedbackSummary(state.localFeedbackSummary);
+    await refreshFeedbackReview();
+    refreshLearningQualitySummary();
+    refreshLocalFeedbackImpactPreview();
+  } catch (error) {
+    state.feedbackReview.message = `${feedbackBulkActionLabel(action)}失败：${error.message || error}`;
+    showToast(state.feedbackReview.message, "error");
+    renderFeedbackReviewPanel();
+  } finally {
+    state.feedbackReview.bulkBusy = false;
     renderFeedbackReviewPanel();
   }
 }
@@ -1658,6 +1825,65 @@ function renderLearningHistory(rows) {
   `;
 }
 
+function renderLocalFeedbackImpactPreviewCard() {
+  const impact = state.localFeedbackImpact;
+  if (!impact) {
+    return `
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>学习影响预览</h5><span>Prompt / Cache</span></div>
+        <div class="entity-empty">还没有读取影响预览。</div>
+        <div class="learning-action-buttons">
+          <button class="mini-btn" type="button" data-learning-impact-refresh>刷新预览</button>
+        </div>
+      </section>
+    `;
+  }
+  if (impact.ok === false) {
+    return `
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>学习影响预览</h5><span>读取失败</span></div>
+        <div class="entity-alert">${escapeHtml(impact.error || "unknown error")}</div>
+        <div class="learning-action-buttons">
+          <button class="mini-btn" type="button" data-learning-impact-refresh>重新读取</button>
+        </div>
+      </section>
+    `;
+  }
+  return `
+    <section class="entity-section">
+      <div class="entity-section-head"><h5>学习影响预览</h5><span>Prompt / Cache</span></div>
+      <div class="learning-ratio-list">
+        <div><span>本地反馈</span><strong>${impact.enable_local_translation_feedback ? "已开启" : "未开启"}</strong></div>
+        <div><span>ASS Prompt</span><strong>${escapeHtml(impact.style_prompt_count ?? 0)}</strong></div>
+        <div><span>ASS Eval</span><strong>${escapeHtml(impact.style_eval_count ?? 0)}</strong></div>
+        <div><span>Span Prompt</span><strong>${escapeHtml(impact.span_prompt_count ?? 0)}</strong></div>
+        <div><span>Span Eval</span><strong>${escapeHtml(impact.span_eval_count ?? 0)}</strong></div>
+        <div><span>注入 Span 示例</span><strong>${impact.would_inject_span_examples ? "会" : "不会"}</strong></div>
+        <div><span>05a 缓存</span><strong>${impact.would_refresh_span_cache ? "样本变化会刷新" : "暂无 Span 示例影响"}</strong></div>
+        <div><span>每次最多示例</span><strong>${escapeHtml(impact.max_span_examples_per_request ?? 3)}</strong></div>
+        <div><span>Span hash</span><strong>${escapeHtml((impact.span_examples_hash || "").slice(0, 16))}</strong></div>
+      </div>
+      ${(impact.notes || []).length ? `<div class="learning-quality-reasons">${impact.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : ""}
+      <p class="local-feedback-note">这些操作只修改本地学习数据，不会启动字幕翻译，也不会增加翻译请求量。</p>
+      <div class="learning-action-buttons">
+        <button class="mini-btn" type="button" data-learning-impact-refresh>刷新预览</button>
+      </div>
+    </section>
+  `;
+}
+
+async function refreshLocalFeedbackImpactPreview() {
+  try {
+    const response = await fetch("/api/local-feedback-impact-preview");
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload) throw new Error(payload?.error || "学习影响预览读取失败");
+    state.localFeedbackImpact = payload;
+  } catch (error) {
+    state.localFeedbackImpact = { ok: false, error: error.message || String(error) };
+  }
+  renderLearningQualityPanel();
+}
+
 function jumpToFeedbackReview(kind) {
   state.feedbackReview.kind = kind === "span" ? "span" : "style";
   state.feedbackReview.status = "pending";
@@ -1733,6 +1959,7 @@ function renderLearningQualityPanel() {
   const statusClass = learningStatusClass(status);
   const allRecommendations = [...(payload.recommendations?.style || []), ...(payload.recommendations?.span || [])];
   const guidelineExpanded = Boolean(state.learningGuidelinesExpanded);
+  const reviewSuggestions = feedbackSuggestionCounts(state.feedbackReview.kind === "span" ? state.feedbackReview.records || [] : []);
   root.innerHTML = `
     <section class="learning-quality-hero ${statusClass}">
       <div>
@@ -1774,6 +2001,25 @@ function renderLearningQualityPanel() {
     </div>
 
     <div class="learning-quality-sections">
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>Span 短板行动</h5><span>审核 / Prompt / Eval</span></div>
+        <div class="learning-ratio-list">
+          <div><span>待审 Span</span><strong>${escapeHtml(pending.span ?? 0)}</strong></div>
+          <div><span>Span Prompt</span><strong>${escapeHtml(counts.span_style_learning_count ?? 0)}</strong></div>
+          <div><span>Span Eval</span><strong>${escapeHtml(counts.span_eval_count ?? 0)}</strong></div>
+          <div><span>推荐 Prompt</span><strong>${escapeHtml(reviewSuggestions.use_for_prompt || 0)}</strong></div>
+          <div><span>推荐 Eval</span><strong>${escapeHtml(reviewSuggestions.use_for_eval || 0)}</strong></div>
+          <div><span>高风险 / bad-alignment</span><strong>${escapeHtml((risk.span_high_risk_count ?? 0) + (risk.bad_alignment_count ?? 0))}</strong></div>
+        </div>
+        <p class="local-feedback-note">如果推荐数量为 0，先点击“去审核待审 Span”刷新审核列表。批量推荐会跳过 high-risk 和 bad_alignment。</p>
+        <div class="learning-action-buttons">
+          <button class="mini-btn" type="button" data-learning-jump="span">去审核待审 Span</button>
+          <button class="mini-btn" type="button" data-learning-suggested-span="use_for_prompt">按推荐加入 Prompt</button>
+          <button class="mini-btn" type="button" data-learning-suggested-span="use_for_eval">按推荐加入 Eval</button>
+          <button class="mini-btn" type="button" data-learning-action="eval_span_style">运行 Span Eval</button>
+        </div>
+      </section>
+      ${renderLocalFeedbackImpactPreviewCard()}
       <section class="entity-section">
         <div class="entity-section-head"><h5>样本覆盖</h5><span>Prompt / Eval / Pending</span></div>
         <div class="learning-ratio-list">
@@ -1881,6 +2127,23 @@ function renderLearningQualityPanel() {
   });
   root.querySelectorAll("[data-learning-action]").forEach((button) => {
     button.addEventListener("click", () => runLocalFeedbackAction(button.getAttribute("data-learning-action") || ""));
+  });
+  root.querySelectorAll("[data-learning-suggested-span]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const suggestedAction = button.getAttribute("data-learning-suggested-span") || "";
+      state.feedbackReview.kind = "span";
+      state.feedbackReview.status = "pending";
+      updateFeedbackReviewBulk(suggestedAction, {
+        filter: {
+          status: "pending",
+          suggested_actions: [suggestedAction],
+          exclude_tags: ["bad_alignment", "bad_example"],
+        },
+      });
+    });
+  });
+  root.querySelectorAll("[data-learning-impact-refresh]").forEach((button) => {
+    button.addEventListener("click", () => refreshLocalFeedbackImpactPreview());
   });
   el("toggleLearningGuidelinesBtn")?.addEventListener("click", () => {
     state.learningGuidelinesExpanded = !state.learningGuidelinesExpanded;

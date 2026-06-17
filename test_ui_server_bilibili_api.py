@@ -628,6 +628,134 @@ def _span_feedback_record(index: int, *, accepted: bool = True, prompt: bool = T
     }
 
 
+def test_feedback_review_api_adds_span_suggestions(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    dataset.mkdir(parents=True)
+    prompt_record = _span_feedback_record(1, accepted=False, prompt=False)
+    prompt_record["learning_recommendation"] = "span_prompt_candidate"
+    prompt_record["edit_tags"] = ["semantic_reallocation"]
+    unsafe_record = _span_feedback_record(3, accepted=False, prompt=False, risk="high")
+    unsafe_record["edit_tags"] = ["bad_alignment"]
+    (dataset / "span_translation_examples.jsonl").write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in [prompt_record, unsafe_record]) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _get_json(server, "/api/local-feedback-records?kind=span&status=pending")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    suggestions = {record["span_id"]: record["suggested_action"] for record in payload["records"]}
+    assert suggestions["span-1"] == "use_for_prompt"
+    assert suggestions["span-3"] == "review_only"
+    assert payload["records"][0]["suggestion_reason"]
+
+
+def test_local_feedback_bulk_update_span_prompt_skips_unsafe(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    dataset.mkdir(parents=True)
+    safe_record = _span_feedback_record(1, accepted=False, prompt=False)
+    unsafe_record = _span_feedback_record(3, accepted=False, prompt=False, risk="high")
+    unsafe_record["edit_tags"] = ["bad_alignment"]
+    (dataset / "span_translation_examples.jsonl").write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in [safe_record, unsafe_record]) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _post_json(
+            server,
+            "/api/local-feedback-bulk-update",
+            {
+                "kind": "span",
+                "action": "use_for_prompt",
+                "filter": {"status": "pending"},
+                "limit": 50,
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["updated_count"] == 1
+    assert payload["skipped_count"] == 1
+    saved = [json.loads(line) for line in (dataset / "span_translation_examples.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert saved[0]["accepted"] is True
+    assert saved[0]["use_for_span_prompt"] is True
+    assert saved[0]["use_for_eval"] is False
+    assert saved[1]["accepted"] is False
+    assert saved[1]["use_for_span_prompt"] is False
+
+
+def test_local_feedback_bulk_update_eval_keeps_prompt_eval_mutually_exclusive(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    dataset.mkdir(parents=True)
+    record = _span_feedback_record(1, accepted=True, prompt=True, eval_sample=False)
+    (dataset / "span_translation_examples.jsonl").write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+    record_id = ui_server.span_record_key(record)
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _post_json(
+            server,
+            "/api/local-feedback-bulk-update",
+            {
+                "kind": "span",
+                "record_ids": [record_id],
+                "action": "use_for_eval",
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["updated_count"] == 1
+    saved = json.loads((dataset / "span_translation_examples.jsonl").read_text(encoding="utf-8"))
+    assert saved["accepted"] is True
+    assert saved["use_for_span_prompt"] is False
+    assert saved["use_for_eval"] is True
+
+
+def test_local_feedback_impact_preview_counts_and_hash(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    dataset.mkdir(parents=True)
+    (dataset / "eval_reports").mkdir(parents=True)
+    (dataset / "learned_style_guidelines.md").write_text("- Rule\n", encoding="utf-8")
+    (dataset / "learned_span_guidelines.md").write_text("- Span rule\n", encoding="utf-8")
+    style_record = _style_feedback_record(1, accepted=True, prompt=True, eval_sample=False)
+    span_record = _span_feedback_record(1, accepted=True, prompt=True, eval_sample=False)
+    (dataset / "translation_edit_examples.jsonl").write_text(json.dumps(style_record, ensure_ascii=False) + "\n", encoding="utf-8")
+    (dataset / "span_translation_examples.jsonl").write_text(json.dumps(span_record, ensure_ascii=False) + "\n", encoding="utf-8")
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    monkeypatch.setattr(ui_server, "read_config", lambda: {"enable_local_translation_feedback": True})
+    status, payload = 0, {}
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _get_json(server, "/api/local-feedback-impact-preview")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["enable_local_translation_feedback"] is True
+    assert payload["style_prompt_count"] == 1
+    assert payload["span_prompt_count"] == 1
+    assert payload["would_inject_span_examples"] is True
+    assert payload["style_guidelines_available"] is True
+    assert payload["span_guidelines_available"] is True
+    assert len(payload["span_examples_hash"]) == 64
+
+
 def test_learning_quality_summary_returns_diagnostics_and_history(monkeypatch, tmp_path: Path) -> None:
     dataset = tmp_path / "local_feedback"
     (dataset / "eval_sets").mkdir(parents=True)
