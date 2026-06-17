@@ -577,3 +577,157 @@ def test_local_feedback_summary_api_tolerates_invalid_eval_report(monkeypatch, t
     assert payload["ok"] is True
     assert payload["eval"]["sample_count"] == 0
     assert payload["eval"]["metrics"] == {}
+
+
+def _style_feedback_record(index: int, *, accepted: bool = True, prompt: bool = True, eval_sample: bool = False, risk: str = "low") -> dict:
+    return {
+        "schema_version": 1,
+        "created_at": "2026-06-17T00:00:00+00:00",
+        "project_id": "quality-project",
+        "segment_id": index,
+        "start": float(index),
+        "end": float(index + 1),
+        "source_text": f"Source {index}",
+        "machine_target_text": f"机器译文 {index}",
+        "manual_target_text": f"人工译文 {index}",
+        "edit_tags": ["style_edit"],
+        "features": {},
+        "operation_summary": {"strategies": ["naturalize"]},
+        "quality_flags": [],
+        "feedback_types": ["style_edit"],
+        "learning_risk": risk,
+        "learning_recommendation": "style_prompt_candidate",
+        "classification_reasons": ["style signal"],
+        "accepted": accepted,
+        "use_for_style_prompt": prompt,
+        "use_for_eval": eval_sample,
+    }
+
+
+def _span_feedback_record(index: int, *, accepted: bool = True, prompt: bool = True, eval_sample: bool = False, risk: str = "low") -> dict:
+    return {
+        "schema_version": 1,
+        "created_at": "2026-06-17T00:00:00+00:00",
+        "project_id": "quality-project",
+        "span_id": f"span-{index}",
+        "segment_ids": [index, index + 1],
+        "source_joined": f"Span source {index}",
+        "risk_reasons": {"open_clause": 1},
+        "translation_strategy": "span_first",
+        "context_before": [],
+        "context_after": [],
+        "machine_target_by_id": {str(index): "机器"},
+        "manual_target_by_id": {str(index): "人工"},
+        "edit_tags": ["semantic_reallocation"],
+        "learning_risk": risk,
+        "learning_recommendation": "span_prompt_candidate",
+        "classification_reasons": ["span signal"],
+        "accepted": accepted,
+        "use_for_span_prompt": prompt,
+        "use_for_eval": eval_sample,
+    }
+
+
+def test_learning_quality_summary_returns_diagnostics_and_history(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    (dataset / "eval_sets").mkdir(parents=True)
+    (dataset / "eval_reports").mkdir(parents=True)
+    style_records = [_style_feedback_record(index) for index in range(100)]
+    style_records.extend(_style_feedback_record(100 + index, prompt=False, eval_sample=True) for index in range(30))
+    span_records = [_span_feedback_record(index, accepted=False, prompt=False) for index in range(2)]
+    (dataset / "translation_edit_examples.jsonl").write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in style_records) + "\n",
+        encoding="utf-8",
+    )
+    (dataset / "span_translation_examples.jsonl").write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in span_records) + "\n",
+        encoding="utf-8",
+    )
+    (dataset / "eval_sets" / "translation_style_gold.jsonl").write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in style_records[-30:]) + "\n",
+        encoding="utf-8",
+    )
+    (dataset / "eval_reports" / "latest_style_eval.json").write_text(
+        json.dumps(
+            {
+                "sample_count": 30,
+                "sample_insufficient": False,
+                "metrics": {"unsafe_sample_rate": 0.0, "semantic_or_style_signal_rate": 1.0},
+                "created_at": "2026-06-17T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (dataset / "eval_reports" / "latest_span_translation_eval.json").write_text(
+        json.dumps(
+            {
+                "sample_count": 0,
+                "sample_insufficient": True,
+                "metrics": {"unsafe_sample_rate": 0.0, "semantic_reallocation_rate": 0.0, "fragment_completion_rate": 0.0},
+                "created_at": "2026-06-17T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (dataset / "eval_reports" / "learning_quality_snapshots.jsonl").write_text(
+        json.dumps({"created_at": "2026-06-17T00:00:00+00:00", "score": 55, "style_prompt_count": 100}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _get_json(server, "/api/learning-quality-summary")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["quality"]["overall_status"] == "eval_insufficient"
+    assert payload["quality"]["score"] >= 55
+    assert payload["coverage"]["style_prompt_ratio"] > 0
+    assert payload["coverage"]["span_prompt_ratio"] == 0
+    assert payload["risk"]["style_high_risk_count"] == 0
+    assert payload["distributions"]["style_recommendation"]
+    assert payload["recommendations"]["span"]
+    assert payload["history"][0]["score"] == 55
+
+
+def test_learning_quality_summary_prioritizes_unsafe(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    (dataset / "eval_reports").mkdir(parents=True)
+    record = _style_feedback_record(1, risk="high")
+    record["edit_tags"] = ["bad_example"]
+    (dataset / "translation_edit_examples.jsonl").write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+    (dataset / "eval_reports" / "latest_style_eval.json").write_text(
+        json.dumps({"sample_count": 1, "sample_insufficient": True, "metrics": {"unsafe_sample_rate": 0.2}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+
+    payload = ui_server.build_learning_quality_summary()
+
+    assert payload["quality"]["overall_status"] == "unsafe"
+    assert payload["risk"]["bad_example_count"] == 1
+    assert payload["risk"]["style_high_risk_count"] == 1
+
+
+def test_local_feedback_action_runs_and_writes_snapshot(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    (dataset / "eval_sets").mkdir(parents=True)
+    style_record = _style_feedback_record(1, prompt=False, eval_sample=True)
+    (dataset / "translation_edit_examples.jsonl").write_text(json.dumps(style_record, ensure_ascii=False) + "\n", encoding="utf-8")
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _post_json(server, "/api/local-feedback-action", {"action": "build_gold"})
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["action"] == "build_gold"
+    assert payload["summary"]["history"]
+    snapshot_path = dataset / "eval_reports" / "learning_quality_snapshots.jsonl"
+    assert snapshot_path.exists()

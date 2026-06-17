@@ -1299,3 +1299,63 @@ Verification:
 - `pytest test_feedback_dataset.py test_span_translation_flow.py`
 - `pytest test_subtitle_output_modes.py`
 - Direct data check showed current local dataset has 5 pending ASS records, 7 pending Span records, 1101 ASS edit records, and 7 Span examples.
+
+## 2026-06-17 23:18 +08:00 - Learning Quality Diagnostics and Actions
+
+User direction:
+
+- Upgrade the learning quality panel from static counts to a diagnostic and action-oriented panel.
+- Keep it Chinese, decoupled from translation, and backed by lightweight history snapshots.
+
+What:
+
+- Extended `GET /api/learning-quality-summary` with compatible additive fields:
+  - `quality`
+  - `coverage`
+  - `risk`
+  - `distributions`
+  - `recommendations`
+  - `history`
+- Added the local-only action API `POST /api/local-feedback-action`:
+  - `summarize`
+  - `build_gold`
+  - `eval_style`
+  - `eval_span_style`
+- Added lightweight quality snapshots at `datasets/local_feedback/eval_reports/learning_quality_snapshots.jsonl`.
+- Implemented a 100-point, explainable learning quality score:
+  - ASS Prompt coverage
+  - ASS Eval coverage
+  - Span Prompt coverage
+  - Span Eval coverage
+  - unsafe rate
+  - pending review volume
+  - recent summary/eval freshness
+- Upgraded the frontend `学习质量` panel to show:
+  - overall diagnosis
+  - score and reasons
+  - coverage ratios
+  - risk counts
+  - project/tag/recommendation/risk distributions
+  - recent quality snapshots
+  - action buttons for review, summarize, build-gold, eval-style, and eval-span-style
+- The action panel explicitly notes that these operations do not start subtitle translation or increase translation requests.
+
+Current real-data diagnosis:
+
+- Overall status: `eval_insufficient`
+- Score: 70 / 100
+- ASS Prompt samples: 1009
+- ASS Eval samples: 87
+- Span Prompt samples: 0
+- Span Eval samples: 0
+- Pending ASS records: 5
+- Pending Span records: 7
+
+Verification:
+
+- `python -m py_compile ui_server.py feedback_dataset.py`
+- `node --check web\app.js`
+- `git diff --check -- ui_server.py web\app.js web\styles.css test_ui_server_bilibili_api.py`
+- `pytest test_ui_server_bilibili_api.py`
+- `pytest test_feedback_dataset.py test_span_translation_flow.py`
+- `pytest test_subtitle_output_modes.py`

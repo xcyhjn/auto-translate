@@ -27,14 +27,18 @@ from .bilibili_search import build_bilibili_duplicate_report, write_bilibili_dup
 from .feedback_dataset import (
     BILIBILI_LABELS,
     DEFAULT_DATASET_DIR,
+    build_gold_sets,
     collect_span_style_project,
     collect_style_project,
     dataset_paths,
+    eval_span_style,
+    eval_style,
     jsonl_file_lock,
     read_jsonl,
     save_bilibili_feedback_label,
     span_record_key,
     style_record_key,
+    summarize_learning,
     validate_span_record,
     validate_style_record,
     write_jsonl,
@@ -77,6 +81,15 @@ STATE_SNAPSHOT_PATH = BASE_DIR / "ui_server_state.json"
 LOCAL_FEEDBACK_DATASET_DIR = DEFAULT_DATASET_DIR
 SERVER_VERSION = "20260519-stability1"
 SERVER_PORT = int(os.environ.get("AUTOSUB_UI_PORT", "8777"))
+LEARNING_QUALITY_SNAPSHOT_NAME = "learning_quality_snapshots.jsonl"
+LEARNING_QUALITY_THRESHOLDS = {
+    "style_prompt_min": 100,
+    "style_eval_min": 30,
+    "span_prompt_min": 20,
+    "span_eval_min": 10,
+    "unsafe_rate_warn": 0.05,
+    "pending_warn": 50,
+}
 DEFAULT_HTTP_PROXY = "http://127.0.0.1:7890"
 JOB_STORE = JobStore()
 STATE_SNAPSHOT_VERSION = 1
@@ -2981,6 +2994,205 @@ def update_local_feedback_record(payload: dict, dataset_dir: Path | None = None)
     }
 
 
+def local_feedback_snapshot_path(dataset_dir: Path) -> Path:
+    return dataset_dir / "eval_reports" / LEARNING_QUALITY_SNAPSHOT_NAME
+
+
+def safe_number(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_ratio(numerator: int, denominator: int) -> float:
+    return round(numerator / denominator, 4) if denominator else 0.0
+
+
+def count_by_field(records: list[dict], field: str) -> list[dict]:
+    counts: dict[str, int] = {}
+    for record in records:
+        key = str(record.get(field) or "unknown")
+        counts[key] = counts.get(key, 0) + 1
+    return [{"value": key, "count": value} for key, value in sorted(counts.items(), key=lambda item: item[1], reverse=True)]
+
+
+def read_learning_quality_snapshots(dataset_dir: Path, limit: int = 10) -> list[dict]:
+    path = local_feedback_snapshot_path(dataset_dir)
+    try:
+        rows = read_jsonl(path)
+    except Exception:
+        return []
+    return rows[-max(1, limit) :][::-1]
+
+
+def append_learning_quality_snapshot(payload: dict, dataset_dir: Path) -> dict:
+    path = local_feedback_snapshot_path(dataset_dir)
+    quality = payload.get("quality") or {}
+    counts = payload.get("counts") or {}
+    eval_info = payload.get("eval") or {}
+    span_eval_info = payload.get("span_eval") or {}
+    metrics = eval_info.get("metrics") if isinstance(eval_info.get("metrics"), dict) else {}
+    span_metrics = span_eval_info.get("metrics") if isinstance(span_eval_info.get("metrics"), dict) else {}
+    record = {
+        "schema_version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "score": int(quality.get("score") or 0),
+        "overall_status": str(quality.get("overall_status") or "unknown"),
+        "style_prompt_count": int(counts.get("style_learning_count") or 0),
+        "style_eval_count": int(counts.get("style_gold_count") or 0),
+        "span_prompt_count": int(counts.get("span_style_learning_count") or 0),
+        "span_eval_count": int(counts.get("span_eval_count") or 0),
+        "style_unsafe_rate": safe_number(metrics.get("unsafe_sample_rate"), 0.0),
+        "style_signal_rate": safe_number(metrics.get("semantic_or_style_signal_rate"), 0.0),
+        "span_unsafe_rate": safe_number(span_metrics.get("unsafe_sample_rate"), 0.0),
+        "span_signal_rate": max(
+            safe_number(span_metrics.get("semantic_reallocation_rate"), 0.0),
+            safe_number(span_metrics.get("fragment_completion_rate"), 0.0),
+        ),
+    }
+    with jsonl_file_lock(path):
+        rows = read_jsonl(path)
+        rows.append(record)
+        write_jsonl(path, rows[-200:])
+    return record
+
+
+def build_learning_quality_details(
+    *,
+    summary: dict,
+    style_records: list[dict],
+    span_records: list[dict],
+    dataset_dir: Path,
+) -> dict:
+    counts = summary.get("counts", {}) if isinstance(summary.get("counts"), dict) else {}
+    eval_info = summary.get("eval", {}) if isinstance(summary.get("eval"), dict) else {}
+    span_eval_info = summary.get("span_eval", {}) if isinstance(summary.get("span_eval"), dict) else {}
+    eval_metrics = eval_info.get("metrics") if isinstance(eval_info.get("metrics"), dict) else {}
+    span_metrics = span_eval_info.get("metrics") if isinstance(span_eval_info.get("metrics"), dict) else {}
+
+    style_total = int(counts.get("translation_edit_count") or len(style_records))
+    span_total = int(counts.get("span_translation_example_count") or len(span_records))
+    style_prompt = int(counts.get("style_learning_count") or 0)
+    style_eval = int(counts.get("style_gold_count") or 0)
+    span_prompt = int(counts.get("span_style_learning_count") or 0)
+    span_eval = int(counts.get("span_eval_count") or 0)
+    pending_style = sum(1 for record in style_records if record.get("accepted") is not True)
+    pending_span = sum(1 for record in span_records if record.get("accepted") is not True)
+
+    style_high = sum(1 for record in style_records if record.get("learning_risk") == "high")
+    style_medium = sum(1 for record in style_records if record.get("learning_risk") == "medium")
+    span_high = sum(1 for record in span_records if record.get("learning_risk") == "high")
+    span_medium = sum(1 for record in span_records if record.get("learning_risk") == "medium")
+    bad_example = sum(1 for record in style_records if "bad_example" in (record.get("edit_tags") or record.get("feedback_types") or []))
+    bad_alignment = sum(1 for record in span_records if "bad_alignment" in (record.get("edit_tags") or []))
+
+    style_unsafe = safe_number(eval_metrics.get("unsafe_sample_rate"), 0.0)
+    span_unsafe = safe_number(span_metrics.get("unsafe_sample_rate"), 0.0)
+    unsafe_rate = max(style_unsafe, span_unsafe)
+    thresholds = dict(LEARNING_QUALITY_THRESHOLDS)
+
+    score = 0
+    reasons: list[str] = []
+    recommendations = {"style": [], "span": []}
+
+    if style_prompt >= thresholds["style_prompt_min"]:
+        score += 20
+        recommendations["style"].append(f"ASS 学习数据较充足：已有 {style_prompt} 条 Prompt 样本，可继续关注质量而非盲目增加数量。")
+    else:
+        reasons.append(f"ASS Prompt 样本不足：当前 {style_prompt}/{thresholds['style_prompt_min']}。")
+        recommendations["style"].append("建议优先审核高质量 ASS 样本，并将低风险样本用于 Prompt。")
+
+    if style_eval >= thresholds["style_eval_min"]:
+        score += 20
+    else:
+        reasons.append(f"ASS Eval 样本不足：当前 {style_eval}/{thresholds['style_eval_min']}。")
+        recommendations["style"].append("建议运行 build-gold，并把一部分稳定样本保留为 Eval。")
+
+    if span_prompt >= thresholds["span_prompt_min"]:
+        score += 15
+    else:
+        reasons.append(f"Span 学习样本不足：当前 {span_prompt}/{thresholds['span_prompt_min']}。")
+        recommendations["span"].append("Span 学习样本不足：当前还没有足够可注入 Prompt 的 Span 样本。建议先审核待审 Span。")
+
+    if span_eval >= thresholds["span_eval_min"]:
+        score += 15
+    else:
+        reasons.append(f"Span Eval 样本不足：当前 {span_eval}/{thresholds['span_eval_min']}。")
+        recommendations["span"].append("Eval 样本不足：当前 Span Eval 不足，无法判断 Span 学习是否真的改善。")
+
+    if unsafe_rate <= thresholds["unsafe_rate_warn"]:
+        score += 15
+    else:
+        reasons.append(f"不安全样本率偏高：当前最高 {unsafe_rate:.1%}。")
+        recommendations["style"].append("先复核中高风险样本，不要把 bad-example 或 high-risk 样本放入 Prompt/Eval。")
+
+    pending_total = pending_style + pending_span
+    if pending_total <= thresholds["pending_warn"]:
+        score += 10
+    else:
+        reasons.append(f"待审样本过多：当前 {pending_total} 条。")
+
+    latest_times = [
+        str(item.get("created_at") or "")
+        for item in (eval_info, span_eval_info)
+        if isinstance(item, dict) and item.get("created_at")
+    ]
+    latest_eval_at = max(latest_times) if latest_times else ""
+    if latest_eval_at or summary.get("available", {}).get("learning_summary"):
+        score += 5
+    else:
+        reasons.append("还没有学习摘要或 Eval 报告。")
+
+    if unsafe_rate > thresholds["unsafe_rate_warn"] or style_high or span_high or bad_example or bad_alignment:
+        status = "unsafe"
+    elif eval_info.get("sample_insufficient") or span_eval_info.get("sample_insufficient") or style_eval < thresholds["style_eval_min"]:
+        status = "eval_insufficient"
+    elif span_prompt < thresholds["span_prompt_min"] or span_eval < thresholds["span_eval_min"]:
+        status = "span_insufficient"
+    elif pending_total > thresholds["pending_warn"]:
+        status = "review_needed"
+    else:
+        status = "healthy"
+
+    if not reasons:
+        reasons.append("学习数据覆盖和 Eval 状态良好，可以维持当前节奏。")
+
+    return {
+        "quality": {
+            "overall_status": status,
+            "score": min(100, max(0, score)),
+            "reasons": reasons,
+            "latest_eval_at": latest_eval_at,
+            "thresholds": thresholds,
+        },
+        "coverage": {
+            "style_prompt_ratio": safe_ratio(style_prompt, style_total),
+            "style_eval_ratio": safe_ratio(style_eval, style_total),
+            "span_prompt_ratio": safe_ratio(span_prompt, span_total),
+            "span_eval_ratio": safe_ratio(span_eval, span_total),
+            "style_pending_ratio": safe_ratio(pending_style, style_total),
+            "span_pending_ratio": safe_ratio(pending_span, span_total),
+        },
+        "risk": {
+            "style_high_risk_count": style_high,
+            "style_medium_risk_count": style_medium,
+            "span_high_risk_count": span_high,
+            "span_medium_risk_count": span_medium,
+            "bad_example_count": bad_example,
+            "bad_alignment_count": bad_alignment,
+        },
+        "distributions": {
+            "style_risk": count_by_field(style_records, "learning_risk"),
+            "span_risk": count_by_field(span_records, "learning_risk"),
+            "style_recommendation": count_by_field(style_records, "learning_recommendation"),
+            "span_recommendation": count_by_field(span_records, "learning_recommendation"),
+        },
+        "recommendations": recommendations,
+        "history": read_learning_quality_snapshots(dataset_dir),
+    }
+
+
 def build_learning_quality_summary(dataset_dir: Path | None = None) -> dict:
     summary = build_local_feedback_summary(dataset_dir)
     dataset_dir = Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR)
@@ -3007,7 +3219,7 @@ def build_learning_quality_summary(dataset_dir: Path | None = None) -> dict:
                 counts[key] = counts.get(key, 0) + 1
         return [{"tag": key, "count": value} for key, value in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:12]]
 
-    return {
+    result = {
         "ok": True,
         "dataset_dir": str(dataset_dir),
         "counts": summary.get("counts", {}),
@@ -3027,6 +3239,39 @@ def build_learning_quality_summary(dataset_dir: Path | None = None) -> dict:
         },
         "guidelines": summary.get("guidelines", []),
         "span_guidelines": summary.get("span_guidelines", []),
+    }
+    result.update(
+        build_learning_quality_details(
+            summary=summary,
+            style_records=style_records,
+            span_records=span_records,
+            dataset_dir=dataset_dir,
+        )
+    )
+    return result
+
+
+def run_local_feedback_action(payload: dict, dataset_dir: Path | None = None) -> dict:
+    dataset_dir = Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR)
+    action = str(payload.get("action") or "").strip().lower().replace("-", "_")
+    action_map = {
+        "summarize": summarize_learning,
+        "build_gold": build_gold_sets,
+        "eval_style": eval_style,
+        "eval_span_style": eval_span_style,
+    }
+    if action not in action_map:
+        raise ValueError(f"Unsupported local feedback action: {action}")
+    result = action_map[action](dataset_dir)
+    summary = build_learning_quality_summary(dataset_dir)
+    snapshot = append_learning_quality_snapshot(summary, dataset_dir)
+    summary["history"] = read_learning_quality_snapshots(dataset_dir)
+    return {
+        "ok": True,
+        "action": action,
+        "result": result,
+        "snapshot": snapshot,
+        "summary": summary,
     }
 
 
@@ -3650,6 +3895,25 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                             **build_error_payload(
                                 exc,
                                 operation="local_feedback_record_update",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                self._json_response(result)
+                return
+
+            if parsed.path == "/api/local-feedback-action":
+                try:
+                    result = run_local_feedback_action(payload)
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                operation="local_feedback_action",
                             ),
                         },
                         status=400,

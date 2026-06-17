@@ -31,6 +31,12 @@ const state = {
     selectedRecordId: "",
     message: "",
   },
+  learningQualityAction: {
+    status: "idle",
+    action: "",
+    message: "",
+  },
+  learningGuidelinesExpanded: false,
   organizePreview: null,
   learningQuality: null,
   selectedMediaInfo: null,
@@ -1586,6 +1592,112 @@ function renderCountList(rows, keyName, emptyText) {
     .join("")}</div>`;
 }
 
+function renderValueCountList(rows, emptyText) {
+  if (!Array.isArray(rows) || !rows.length) return `<div class="entity-empty">${escapeHtml(emptyText)}</div>`;
+  return `<div class="learning-count-list">${rows
+    .map((row) => `<div><span>${escapeHtml(row.value || "unknown")}</span><strong>${escapeHtml(row.count ?? 0)}</strong></div>`)
+    .join("")}</div>`;
+}
+
+function learningStatusLabel(status) {
+  const labels = {
+    healthy: "健康",
+    review_needed: "需要审核",
+    eval_insufficient: "Eval 不足",
+    span_insufficient: "Span 不足",
+    unsafe: "风险样本",
+  };
+  return labels[status] || "待检查";
+}
+
+function learningStatusClass(status) {
+  if (status === "healthy") return "ok";
+  if (status === "unsafe") return "danger";
+  if (status === "review_needed" || status === "eval_insufficient" || status === "span_insufficient") return "warn";
+  return "muted";
+}
+
+function actionLabel(action) {
+  const labels = {
+    summarize: "运行 summarize",
+    build_gold: "运行 build-gold",
+    eval_style: "运行 eval-style",
+    eval_span_style: "运行 eval-span-style",
+  };
+  return labels[action] || action;
+}
+
+function latestEvalTime(payload) {
+  return payload?.quality?.latest_eval_at || payload?.eval?.created_at || payload?.span_eval?.created_at || "暂无";
+}
+
+function renderLearningHistory(rows) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return `<div class="entity-empty">暂无质量快照。运行 summarize 或 eval 后会写入轻量历史。</div>`;
+  }
+  return `
+    <div class="learning-history-table">
+      <div class="learning-history-row head">
+        <span>时间</span><span>分数</span><span>ASS P/E</span><span>Span P/E</span><span>风险/信号</span>
+      </div>
+      ${rows
+        .slice(0, 10)
+        .map(
+          (row) => `
+            <div class="learning-history-row">
+              <span>${escapeHtml(row.created_at || "")}</span>
+              <strong>${escapeHtml(row.score ?? 0)}</strong>
+              <span>${escapeHtml(`${row.style_prompt_count ?? 0}/${row.style_eval_count ?? 0}`)}</span>
+              <span>${escapeHtml(`${row.span_prompt_count ?? 0}/${row.span_eval_count ?? 0}`)}</span>
+              <span>${escapeHtml(`${formatPercent(row.style_unsafe_rate ?? 0)} / ${formatPercent(row.style_signal_rate ?? row.span_signal_rate ?? 0)}`)}</span>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function jumpToFeedbackReview(kind) {
+  state.feedbackReview.kind = kind === "span" ? "span" : "style";
+  state.feedbackReview.status = "pending";
+  document.querySelectorAll(".tab, .nav-item").forEach((node) => {
+    const active = node.dataset.panel === "feedback-review";
+    node.classList.toggle("active", active);
+    node.setAttribute("aria-selected", active ? "true" : "false");
+    if (active) node.setAttribute("aria-current", "page");
+    else node.removeAttribute("aria-current");
+  });
+  document.querySelectorAll(".workspace-panel").forEach((node) => {
+    node.classList.toggle("active", node.dataset.panel === "feedback-review");
+  });
+  refreshFeedbackReview();
+  scrollToWorkspaceDetails();
+}
+
+async function runLocalFeedbackAction(action) {
+  state.learningQualityAction = { status: "running", action, message: `${actionLabel(action)} 中...` };
+  renderLearningQualityPanel();
+  try {
+    const response = await fetch("/api/local-feedback-action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || `${actionLabel(action)} 失败`);
+    state.learningQuality = payload.summary || state.learningQuality;
+    state.learningQualityAction = { status: "success", action, message: `${actionLabel(action)} 已完成；已刷新质量快照。` };
+    if (payload.summary) state.localFeedbackSummary = payload.summary;
+    renderLocalFeedbackSummary(state.localFeedbackSummary);
+    showToast(state.learningQualityAction.message);
+  } catch (error) {
+    state.learningQualityAction = { status: "error", action, message: `${actionLabel(action)} 失败：${error.message || error}` };
+    showToast(state.learningQualityAction.message, "error");
+  }
+  renderLearningQualityPanel();
+}
+
 function renderLearningQualityPanel() {
   const root = el("learningQualityPanel");
   if (!root) return;
@@ -1611,7 +1723,37 @@ function renderLearningQualityPanel() {
   const evalMetrics = payload.eval?.metrics || {};
   const spanMetrics = payload.span_eval?.metrics || {};
   const pending = payload.pending || {};
+  const quality = payload.quality || {};
+  const coverage = payload.coverage || {};
+  const risk = payload.risk || {};
+  const distributions = payload.distributions || {};
+  const action = state.learningQualityAction || {};
+  const actionClass = action.status === "error" ? " error" : action.status === "success" ? " ok" : "";
+  const status = quality.overall_status || "unknown";
+  const statusClass = learningStatusClass(status);
+  const allRecommendations = [...(payload.recommendations?.style || []), ...(payload.recommendations?.span || [])];
+  const guidelineExpanded = Boolean(state.learningGuidelinesExpanded);
   root.innerHTML = `
+    <section class="learning-quality-hero ${statusClass}">
+      <div>
+        <div class="learning-quality-title-row">
+          <span class="entity-chip ${statusClass}">${escapeHtml(learningStatusLabel(status))}</span>
+          <strong>${escapeHtml(quality.score ?? 0)} / 100</strong>
+        </div>
+        <h4>学习质量诊断</h4>
+        <p>${escapeHtml((quality.reasons || [])[0] || "正在读取本地学习质量。")}</p>
+        <div class="learning-quality-reasons">
+          ${(quality.reasons || []).slice(0, 4).map((reason) => `<span>${escapeHtml(reason)}</span>`).join("")}
+        </div>
+      </div>
+      <div class="learning-quality-meta">
+        <div><span>数据集</span><strong>${escapeHtml(payload.dataset_dir || "")}</strong></div>
+        <div><span>最近 Eval</span><strong>${escapeHtml(latestEvalTime(payload))}</strong></div>
+        <div><span>反馈注入</span><strong>${escapeHtml(state.config?.enable_local_translation_feedback ? "已开启" : "未开启")}</strong></div>
+        <div><span>Prompt / Eval</span><strong>${escapeHtml(`${(counts.style_learning_count ?? 0) + (counts.span_style_learning_count ?? 0)} / ${(counts.style_gold_count ?? 0) + (counts.span_eval_count ?? 0)}`)}</strong></div>
+      </div>
+    </section>
+
     <div class="learning-quality-grid">
       <div class="entity-metric"><span>ASS 编辑样本</span><strong>${escapeHtml(counts.translation_edit_count ?? 0)}</strong></div>
       <div class="entity-metric"><span>ASS Prompt 样本</span><strong>${escapeHtml(counts.style_learning_count ?? 0)}</strong></div>
@@ -1625,8 +1767,35 @@ function renderLearningQualityPanel() {
       <div class="entity-metric"><span>ASS 信号率</span><strong>${escapeHtml(formatPercent(evalMetrics.semantic_or_style_signal_rate ?? 0))}</strong></div>
       <div class="entity-metric"><span>Span 重分配率</span><strong>${escapeHtml(formatPercent(spanMetrics.semantic_reallocation_rate ?? 0))}</strong></div>
       <div class="entity-metric"><span>Span 碎句补全率</span><strong>${escapeHtml(formatPercent(spanMetrics.fragment_completion_rate ?? 0))}</strong></div>
+      <div class="entity-metric"><span>ASS Prompt 比例</span><strong>${escapeHtml(formatPercent(coverage.style_prompt_ratio ?? 0))}</strong></div>
+      <div class="entity-metric"><span>ASS Eval 比例</span><strong>${escapeHtml(formatPercent(coverage.style_eval_ratio ?? 0))}</strong></div>
+      <div class="entity-metric"><span>Span Prompt 比例</span><strong>${escapeHtml(formatPercent(coverage.span_prompt_ratio ?? 0))}</strong></div>
+      <div class="entity-metric"><span>Span Eval 比例</span><strong>${escapeHtml(formatPercent(coverage.span_eval_ratio ?? 0))}</strong></div>
     </div>
+
     <div class="learning-quality-sections">
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>样本覆盖</h5><span>Prompt / Eval / Pending</span></div>
+        <div class="learning-ratio-list">
+          <div><span>ASS Prompt</span><strong>${escapeHtml(formatPercent(coverage.style_prompt_ratio ?? 0))}</strong></div>
+          <div><span>ASS Eval</span><strong>${escapeHtml(formatPercent(coverage.style_eval_ratio ?? 0))}</strong></div>
+          <div><span>ASS 待审</span><strong>${escapeHtml(formatPercent(coverage.style_pending_ratio ?? 0))}</strong></div>
+          <div><span>Span Prompt</span><strong>${escapeHtml(formatPercent(coverage.span_prompt_ratio ?? 0))}</strong></div>
+          <div><span>Span Eval</span><strong>${escapeHtml(formatPercent(coverage.span_eval_ratio ?? 0))}</strong></div>
+          <div><span>Span 待审</span><strong>${escapeHtml(formatPercent(coverage.span_pending_ratio ?? 0))}</strong></div>
+        </div>
+      </section>
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>风险与安全</h5><span>High / Medium / Bad</span></div>
+        <div class="learning-ratio-list">
+          <div><span>ASS 高风险</span><strong>${escapeHtml(risk.style_high_risk_count ?? 0)}</strong></div>
+          <div><span>ASS 中风险</span><strong>${escapeHtml(risk.style_medium_risk_count ?? 0)}</strong></div>
+          <div><span>Span 高风险</span><strong>${escapeHtml(risk.span_high_risk_count ?? 0)}</strong></div>
+          <div><span>Span 中风险</span><strong>${escapeHtml(risk.span_medium_risk_count ?? 0)}</strong></div>
+          <div><span>bad-example</span><strong>${escapeHtml(risk.bad_example_count ?? 0)}</strong></div>
+          <div><span>bad-alignment</span><strong>${escapeHtml(risk.bad_alignment_count ?? 0)}</strong></div>
+        </div>
+      </section>
       <section class="entity-section">
         <div class="entity-section-head"><h5>ASS 项目来源</h5><span>Top 8</span></div>
         ${renderCountList(payload.projects?.style, "project_id", "暂无 ASS 来源统计")}
@@ -1643,8 +1812,52 @@ function renderLearningQualityPanel() {
         <div class="entity-section-head"><h5>Span 编辑标签</h5><span>Top 12</span></div>
         ${renderCountList(payload.tags?.span, "tag", "暂无 Span 标签统计")}
       </section>
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>ASS 推荐用途</h5><span>review / prompt / eval</span></div>
+        ${renderValueCountList(distributions.style_recommendation, "暂无 ASS 推荐用途统计")}
+      </section>
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>Span 推荐用途</h5><span>review / prompt / eval</span></div>
+        ${renderValueCountList(distributions.span_recommendation, "暂无 Span 推荐用途统计")}
+      </section>
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>ASS 风险分布</h5><span>low / medium / high</span></div>
+        ${renderValueCountList(distributions.style_risk, "暂无 ASS 风险统计")}
+      </section>
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>Span 风险分布</h5><span>low / medium / high</span></div>
+        ${renderValueCountList(distributions.span_risk, "暂无 Span 风险统计")}
+      </section>
+      <section class="entity-section wide">
+        <div class="entity-section-head"><h5>趋势快照</h5><span>最近 10 次</span></div>
+        ${renderLearningHistory(payload.history)}
+      </section>
+      <section class="entity-section wide">
+        <div class="entity-section-head"><h5>下一步行动</h5><span>不会启动字幕翻译</span></div>
+        <div class="learning-action-panel">
+          <div class="learning-action-copy">
+            <strong>建议</strong>
+            ${
+              allRecommendations.length
+                ? `<ul>${allRecommendations.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+                : `<p>当前没有额外建议。</p>`
+            }
+            <p>05/05a 仅作为机器基线，不作为人工学习目标；这些操作不会增加翻译请求量。</p>
+          </div>
+          <div class="learning-action-buttons">
+            <button class="mini-btn" type="button" data-learning-jump="style">去审核待审 ASS</button>
+            <button class="mini-btn" type="button" data-learning-jump="span">去审核待审 Span</button>
+            <button class="mini-btn" type="button" data-learning-action="summarize">运行 summarize</button>
+            <button class="mini-btn" type="button" data-learning-action="build_gold">运行 build-gold</button>
+            <button class="mini-btn" type="button" data-learning-action="eval_style">运行 eval-style</button>
+            <button class="mini-btn" type="button" data-learning-action="eval_span_style">运行 eval-span-style</button>
+            <button id="toggleLearningGuidelinesBtn" class="mini-btn" type="button">${guidelineExpanded ? "收起规则" : "查看规则"}</button>
+          </div>
+          <span class="local-feedback-action-status${actionClass}">${escapeHtml(action.message || "等待操作。")}</span>
+        </div>
+      </section>
     </div>
-    <div class="learning-guideline-row">
+    <div class="learning-guideline-row ${guidelineExpanded ? "" : "hidden"}">
       <div class="local-feedback-guidelines">
         <strong>ASS 已学习规则</strong>
         ${
@@ -1663,6 +1876,16 @@ function renderLearningQualityPanel() {
       </div>
     </div>
   `;
+  root.querySelectorAll("[data-learning-jump]").forEach((button) => {
+    button.addEventListener("click", () => jumpToFeedbackReview(button.getAttribute("data-learning-jump") || "style"));
+  });
+  root.querySelectorAll("[data-learning-action]").forEach((button) => {
+    button.addEventListener("click", () => runLocalFeedbackAction(button.getAttribute("data-learning-action") || ""));
+  });
+  el("toggleLearningGuidelinesBtn")?.addEventListener("click", () => {
+    state.learningGuidelinesExpanded = !state.learningGuidelinesExpanded;
+    renderLearningQualityPanel();
+  });
 }
 
 async function refreshLearningQualitySummary() {

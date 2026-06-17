@@ -1077,8 +1077,166 @@
     margin-bottom: var(--space-4);
   }
 
+  .learning-quality-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+    gap: var(--space-4);
+    min-width: 0;
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-soft);
+  }
+
+  .learning-quality-hero.ok {
+    border-color: rgba(92, 224, 162, 0.28);
+  }
+
+  .learning-quality-hero.warn {
+    border-color: rgba(255, 199, 102, 0.34);
+  }
+
+  .learning-quality-hero.danger {
+    border-color: rgba(255, 125, 139, 0.36);
+  }
+
+  .learning-quality-title-row,
+  .learning-quality-reasons,
+  .learning-action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .learning-quality-title-row {
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-2);
+  }
+
+  .learning-quality-title-row strong {
+    font-size: var(--font-xl);
+    color: var(--text);
+  }
+
+  .learning-quality-hero h4 {
+    margin-bottom: var(--space-2);
+  }
+
+  .learning-quality-hero p {
+    margin-bottom: 0;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  .learning-quality-reasons {
+    margin-top: var(--space-3);
+  }
+
+  .learning-quality-reasons span {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--muted);
+    font-size: var(--font-xs);
+    overflow-wrap: anywhere;
+  }
+
+  .learning-quality-meta,
+  .learning-ratio-list,
+  .learning-history-table,
+  .learning-action-panel {
+    display: grid;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .learning-quality-meta div,
+  .learning-ratio-list div {
+    display: grid;
+    grid-template-columns: minmax(84px, 0.45fr) minmax(0, 1fr);
+    gap: var(--space-2);
+    min-width: 0;
+    padding: var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  .learning-quality-meta span,
+  .learning-ratio-list span {
+    color: var(--muted);
+    font-size: var(--font-xs);
+  }
+
+  .learning-quality-meta strong,
+  .learning-ratio-list strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--text);
+    font-size: var(--font-xs);
+  }
+
   .learning-quality-sections {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .learning-history-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.3fr) 64px minmax(80px, 0.7fr) minmax(80px, 0.7fr) minmax(110px, 0.9fr);
+    gap: var(--space-2);
+    align-items: center;
+    min-width: 0;
+    padding: var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.035);
+    color: var(--muted);
+    font-size: var(--font-xs);
+  }
+
+  .learning-history-row.head {
+    background: rgba(255, 255, 255, 0.055);
+    color: var(--text);
+    font-weight: 720;
+  }
+
+  .learning-history-row span,
+  .learning-history-row strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .learning-action-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .learning-action-copy ul {
+    margin: var(--space-2) 0 0;
+    padding-left: var(--space-5);
+    color: var(--muted);
+  }
+
+  .learning-action-copy li {
+    margin-top: var(--space-1);
+    overflow-wrap: anywhere;
+  }
+
+  .learning-action-copy p {
+    margin-top: var(--space-2);
+    margin-bottom: 0;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  .learning-action-buttons {
+    margin-top: var(--space-3);
   }
 
   .learning-guideline-row {
@@ -2098,6 +2256,7 @@
     .feedback-summary-grid,
     .feedback-review-toolbar,
     .feedback-comparison,
+    .learning-quality-hero,
     .learning-quality-grid,
     .learning-quality-sections,
     .style-columns,
@@ -2184,6 +2343,9 @@
     .bilibili-candidate,
     .organize-preview-list div,
     .learning-count-list div,
+    .learning-history-row,
+    .learning-quality-meta div,
+    .learning-ratio-list div,
     .range-row,
     .color-control-head {
       grid-template-columns: 1fr;
