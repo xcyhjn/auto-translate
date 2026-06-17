@@ -48,7 +48,7 @@ from .feedback_dataset import (
 from .job_store import JobStore, ACTIVE_STATUSES
 from .models import BilingualSubtitleStyle
 from .media import normalize_asr_audio_mode, normalize_asr_vad_mode, probe_media
-from .pipeline_core import build_output_slug, burn_subtitle, create_safe_ass_copy, run_pipeline, write_json
+from .pipeline_core import build_output_slug, build_translation_style_prompt, burn_subtitle, create_safe_ass_copy, run_pipeline, write_json
 from .pipeline_runner import compute_output_dir
 from .qa import qa_final_ass_file
 from .qa_outputs import build_blocker_report
@@ -70,7 +70,7 @@ from .workflow_profiles import (
     summarize_dataset_profile,
 )
 from .youtube_meta import ensure_cover, ensure_padded_cover, fetch_youtube_info, fetch_youtube_meta, safe_project_slug, save_youtube_meta
-from .span_translate import read_span_examples, summarize_span_examples_for_hash, _stable_hash as stable_span_hash, DEFAULT_SPAN_EXAMPLE_TOP_K
+from .span_translate import compact_span_prompt_example, read_span_examples, summarize_span_examples_for_hash, _stable_hash as stable_span_hash, DEFAULT_SPAN_EXAMPLE_TOP_K
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -3070,6 +3070,68 @@ def update_local_feedback_record(payload: dict, dataset_dir: Path | None = None)
     }
 
 
+def get_local_feedback_record_detail(kind: str = "style", record_id: str = "", dataset_dir: Path | None = None) -> dict:
+    record_id = str(record_id or "").strip()
+    if not record_id:
+        raise ValueError("record_id required")
+    spec = feedback_kind_spec(kind, dataset_dir)
+    records = read_jsonl(spec["path"])
+    for index, record in enumerate(records):
+        if spec["key_func"](record) == record_id:
+            normalized_kind = str(spec["kind"])
+            preview = attach_feedback_review_metadata(normalized_kind, record, index, spec)
+            return {
+                "ok": True,
+                "kind": normalized_kind,
+                "path": str(spec["path"]),
+                "record_id": record_id,
+                "index": index,
+                "preview": preview,
+                "record": record,
+                "detail": build_feedback_record_detail(normalized_kind, record),
+            }
+    raise FileNotFoundError(f"Feedback record not found: {record_id}")
+
+
+def build_feedback_record_detail(kind: str, record: dict) -> dict:
+    tags = sorted(feedback_record_tags(record))
+    common = {
+        "project_id": str(record.get("project_id") or ""),
+        "created_at": str(record.get("created_at") or ""),
+        "learning_risk": str(record.get("learning_risk") or ""),
+        "learning_recommendation": str(record.get("learning_recommendation") or ""),
+        "classification_reasons": record.get("classification_reasons") if isinstance(record.get("classification_reasons"), list) else [],
+        "tags": tags,
+        "suggestion": feedback_review_suggestion(kind, record),
+    }
+    if kind == "span":
+        return {
+            **common,
+            "span_id": str(record.get("span_id") or ""),
+            "segment_ids": record.get("segment_ids") if isinstance(record.get("segment_ids"), list) else [],
+            "source_joined": str(record.get("source_joined") or ""),
+            "translation_strategy": str(record.get("translation_strategy") or ""),
+            "risk_reasons": record.get("risk_reasons") if isinstance(record.get("risk_reasons"), dict) else {},
+            "context_before": record.get("context_before") if isinstance(record.get("context_before"), list) else [],
+            "context_after": record.get("context_after") if isinstance(record.get("context_after"), list) else [],
+            "machine_target_by_id": record.get("machine_target_by_id") if isinstance(record.get("machine_target_by_id"), dict) else {},
+            "manual_target_by_id": record.get("manual_target_by_id") if isinstance(record.get("manual_target_by_id"), dict) else {},
+            "prompt_example_preview": compact_span_prompt_example(record),
+        }
+    return {
+        **common,
+        "segment_id": record.get("segment_id"),
+        "start": record.get("start"),
+        "end": record.get("end"),
+        "source_text": str(record.get("source_text") or ""),
+        "machine_target_text": str(record.get("machine_target_text") or ""),
+        "manual_target_text": str(record.get("manual_target_text") or ""),
+        "operation_summary": record.get("operation_summary") if isinstance(record.get("operation_summary"), dict) else {},
+        "quality_flags": record.get("quality_flags") if isinstance(record.get("quality_flags"), list) else [],
+        "features": record.get("features") if isinstance(record.get("features"), dict) else {},
+    }
+
+
 def feedback_bulk_filter_match(record: dict, filters: dict, prompt_flag: str) -> bool:
     if not filters:
         return True
@@ -3446,6 +3508,41 @@ def build_local_feedback_impact_preview(dataset_dir: Path | None = None) -> dict
     span_records = read_jsonl(paths["span_translation_examples"])
     span_prompt_examples = read_span_examples(paths["span_translation_examples"])
     span_hash = stable_span_hash(summarize_span_examples_for_hash(span_prompt_examples))
+    style_prompt_text = build_translation_style_prompt(
+        translation_prompt=str(config.get("translation_prompt") or ""),
+        project_style_prompt_path=None,
+        enable_local_translation_feedback=bool(config.get("enable_local_translation_feedback")),
+        local_feedback_style_path=paths["learned_style_guidelines"],
+    )
+    style_guidelines_text = (
+        paths["learned_style_guidelines"].read_text(encoding="utf-8", errors="replace").strip()
+        if paths["learned_style_guidelines"].exists()
+        else ""
+    )
+    span_guidelines_text = (
+        paths["learned_span_guidelines"].read_text(encoding="utf-8", errors="replace").strip()
+        if paths["learned_span_guidelines"].exists()
+        else ""
+    )
+    compact_span_examples = [compact_span_prompt_example(example) for example in span_prompt_examples[:DEFAULT_SPAN_EXAMPLE_TOP_K]]
+    preview_payload = {
+        "style_prompt_preview": style_prompt_text[:2500],
+        "style_prompt_char_count": len(style_prompt_text),
+        "style_prompt_estimated_tokens": max(1, math.ceil(len(style_prompt_text) / 3.2)) if style_prompt_text else 0,
+        "style_guidelines_preview": [
+            line.strip("- ").strip()
+            for line in style_guidelines_text.splitlines()
+            if line.strip().startswith("- ")
+        ][:10],
+        "span_guidelines_preview": [
+            line.strip("- ").strip()
+            for line in span_guidelines_text.splitlines()
+            if line.strip().startswith("- ")
+        ][:10],
+        "span_examples_preview": compact_span_examples,
+        "span_examples_char_count": len(json.dumps(compact_span_examples, ensure_ascii=False)),
+        "span_examples_estimated_tokens": max(1, math.ceil(len(json.dumps(compact_span_examples, ensure_ascii=False)) / 3.2)) if compact_span_examples else 0,
+    }
     style_prompt_count = sum(
         1
         for record in style_records
@@ -3489,6 +3586,7 @@ def build_local_feedback_impact_preview(dataset_dir: Path | None = None) -> dict
         "would_inject_span_examples": local_feedback_enabled and bool(span_prompt_examples),
         "max_span_examples_per_request": DEFAULT_SPAN_EXAMPLE_TOP_K,
         "would_refresh_span_cache": bool(span_prompt_examples),
+        "prompt_injection_preview": preview_payload,
         "notes": notes,
     }
 
@@ -3893,6 +3991,13 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 status_filter = qs.get("status", ["pending"])[0]
                 limit = int(qs.get("limit", ["80"])[0] or 80)
                 self._json_response(list_local_feedback_records(kind=kind, status_filter=status_filter, limit=limit))
+                return
+
+            if parsed.path == "/api/local-feedback-record-detail":
+                qs = parse_qs(parsed.query)
+                kind = qs.get("kind", ["style"])[0]
+                record_id = qs.get("record_id", [""])[0]
+                self._json_response(get_local_feedback_record_detail(kind=kind, record_id=record_id))
                 return
 
             if parsed.path == "/api/learning-quality-summary":

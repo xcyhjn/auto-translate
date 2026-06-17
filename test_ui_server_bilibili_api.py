@@ -5,6 +5,7 @@ import threading
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote
 
 from autosub_zh import ui_server
 from autosub_zh.workflow_profiles import project_artifact_path
@@ -656,6 +657,31 @@ def test_feedback_review_api_adds_span_suggestions(monkeypatch, tmp_path: Path) 
     assert payload["records"][0]["suggestion_reason"]
 
 
+def test_feedback_record_detail_api_returns_span_raw_and_prompt_preview(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    dataset.mkdir(parents=True)
+    record = _span_feedback_record(1, accepted=True, prompt=True)
+    (dataset / "span_translation_examples.jsonl").write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+    record_id = ui_server.span_record_key(record)
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _get_json(
+            server,
+            f"/api/local-feedback-record-detail?kind=span&record_id={quote(record_id)}",
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["kind"] == "span"
+    assert payload["record"]["span_id"] == "span-1"
+    assert payload["detail"]["prompt_example_preview"]["manual_target_by_id"]
+    assert payload["preview"]["record_id"] == record_id
+
+
 def test_local_feedback_bulk_update_span_prompt_skips_unsafe(monkeypatch, tmp_path: Path) -> None:
     dataset = tmp_path / "local_feedback"
     dataset.mkdir(parents=True)
@@ -754,6 +780,31 @@ def test_local_feedback_impact_preview_counts_and_hash(monkeypatch, tmp_path: Pa
     assert payload["style_guidelines_available"] is True
     assert payload["span_guidelines_available"] is True
     assert len(payload["span_examples_hash"]) == 64
+    preview = payload["prompt_injection_preview"]
+    assert preview["style_prompt_char_count"] > 0
+    assert preview["style_prompt_estimated_tokens"] > 0
+    assert preview["span_examples_preview"][0]["manual_target_by_id"]
+    assert preview["span_examples_estimated_tokens"] > 0
+
+
+def test_local_feedback_impact_preview_respects_disabled_feedback(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    dataset.mkdir(parents=True)
+    (dataset / "learned_style_guidelines.md").write_text("- Learned rule\n", encoding="utf-8")
+    (dataset / "span_translation_examples.jsonl").write_text(
+        json.dumps(_span_feedback_record(1, accepted=True, prompt=True), ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    monkeypatch.setattr(ui_server, "read_config", lambda: {"enable_local_translation_feedback": False, "translation_prompt": "Base prompt"})
+
+    payload = ui_server.build_local_feedback_impact_preview()
+
+    assert payload["enable_local_translation_feedback"] is False
+    assert payload["would_inject_span_examples"] is False
+    assert payload["span_prompt_count"] == 1
+    assert "Base prompt" in payload["prompt_injection_preview"]["style_prompt_preview"]
+    assert "Learned rule" not in payload["prompt_injection_preview"]["style_prompt_preview"]
 
 
 def test_learning_quality_summary_returns_diagnostics_and_history(monkeypatch, tmp_path: Path) -> None:

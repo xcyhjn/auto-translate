@@ -198,3 +198,10 @@ If there are fewer than three positive sources, the report is marked `sample_ins
 - Updated the feedback review UI with selection, low-risk filtering, batch actions, recommendation chips, and one-click recommended Prompt/Eval actions.
 - Updated the learning quality UI with a Span shortfall action card and a read-only learning impact preview card.
 - These actions do not start subtitle translation and do not add model requests. `05/05a` remain machine baselines only.
+
+## 2026-06-17 Review Detail and Prompt Preview v2
+
+- Added `GET /api/local-feedback-record-detail` to inspect one ASS or Span learning record without editing JSONL by hand.
+- The feedback review UI now has a detail drawer with full source/machine/manual comparison, tags, recommendation, classification reasons, and Span compact prompt-example preview.
+- Expanded `/api/local-feedback-impact-preview` with `prompt_injection_preview`, including style prompt excerpt, rough token estimates, learned rules, and compact Span examples.
+- The learning quality panel now shows what local feedback would actually inject into future translation prompts. This remains read-only and does not run translation or call a model.

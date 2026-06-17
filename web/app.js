@@ -30,6 +30,9 @@
     records: [],
     selectedRecordId: "",
     selectedRecordIds: [],
+    detailRecordId: "",
+    detailLoading: false,
+    detail: null,
     bulkBusy: false,
     message: "",
   },
@@ -1470,6 +1473,90 @@ function feedbackSuggestionCounts(records) {
   );
 }
 
+function renderJsonBlock(payload) {
+  return `<pre class="feedback-json-preview">${escapeHtml(JSON.stringify(payload || {}, null, 2))}</pre>`;
+}
+
+function renderFeedbackDetailDrawer() {
+  const detailState = state.feedbackReview.detail;
+  if (!state.feedbackReview.detailRecordId && !detailState) return "";
+  if (state.feedbackReview.detailLoading) {
+    return `
+      <aside class="feedback-detail-drawer">
+        <div class="entity-section-head">
+          <h5>样本详情</h5>
+          <button class="mini-btn" type="button" data-feedback-detail-close>关闭</button>
+        </div>
+        <div class="entity-loading">正在读取样本详情...</div>
+      </aside>
+    `;
+  }
+  if (!detailState || detailState.ok === false) {
+    return `
+      <aside class="feedback-detail-drawer">
+        <div class="entity-section-head">
+          <h5>样本详情</h5>
+          <button class="mini-btn" type="button" data-feedback-detail-close>关闭</button>
+        </div>
+        <div class="entity-alert">详情读取失败：${escapeHtml(detailState?.error || "unknown error")}</div>
+      </aside>
+    `;
+  }
+  const detail = detailState.detail || {};
+  const preview = detailState.preview || {};
+  const isSpan = detailState.kind === "span";
+  return `
+    <aside class="feedback-detail-drawer">
+      <div class="entity-section-head">
+        <h5>${isSpan ? "Span 样本详情" : "ASS 样本详情"}</h5>
+        <button class="mini-btn" type="button" data-feedback-detail-close>关闭</button>
+      </div>
+      <div class="feedback-detail-meta">
+        <span class="entity-chip ${preview.accepted ? "" : "muted"}">${preview.accepted ? "已接受" : "待审核"}</span>
+        <span class="entity-chip ${preview.use_for_prompt ? "ok" : "muted"}">Prompt ${preview.use_for_prompt ? "是" : "否"}</span>
+        <span class="entity-chip ${preview.use_for_eval ? "ok" : "muted"}">Eval ${preview.use_for_eval ? "是" : "否"}</span>
+        <span class="entity-chip ${detail.learning_risk === "high" ? "danger" : detail.learning_risk === "medium" ? "warn" : "ok"}">风险 ${escapeHtml(detail.learning_risk || "low")}</span>
+        <span class="entity-chip ${feedbackSuggestedActionClass(detail.suggestion?.suggested_action)}">${escapeHtml(feedbackSuggestedActionLabel(detail.suggestion?.suggested_action))}</span>
+      </div>
+      <div class="learning-ratio-list">
+        <div><span>项目</span><strong>${escapeHtml(detail.project_id || "")}</strong></div>
+        <div><span>创建时间</span><strong>${escapeHtml(detail.created_at || "")}</strong></div>
+        <div><span>推荐用途</span><strong>${escapeHtml(detail.learning_recommendation || "")}</strong></div>
+        ${isSpan ? `<div><span>Span ID</span><strong>${escapeHtml(detail.span_id || "")}</strong></div>` : `<div><span>Segment ID</span><strong>${escapeHtml(detail.segment_id ?? "")}</strong></div>`}
+      </div>
+      <div class="project-badges">${(detail.tags || []).map((tag) => `<span class="project-badge">${escapeHtml(tag)}</span>`).join("") || `<span class="project-badge muted">无标签</span>`}</div>
+      ${
+        isSpan
+          ? `
+            <div class="feedback-detail-section"><span>Span 原文</span><p>${escapeHtml(detail.source_joined || "")}</p></div>
+            <div class="feedback-comparison">
+              <div><span>前文</span>${renderJsonBlock(detail.context_before || [])}</div>
+              <div><span>机器基线</span>${renderJsonBlock(detail.machine_target_by_id || {})}</div>
+              <div><span>人工 ASS</span>${renderJsonBlock(detail.manual_target_by_id || {})}</div>
+            </div>
+            <div class="feedback-detail-section"><span>Prompt 示例预览</span>${renderJsonBlock(detail.prompt_example_preview || {})}</div>
+          `
+          : `
+            <div class="feedback-comparison">
+              <div><span>原文</span><p>${escapeHtml(detail.source_text || "")}</p></div>
+              <div><span>机器基线</span><p>${escapeHtml(detail.machine_target_text || "")}</p></div>
+              <div><span>人工 ASS</span><p>${escapeHtml(detail.manual_target_text || "")}</p></div>
+            </div>
+            <div class="feedback-detail-section"><span>操作摘要</span>${renderJsonBlock(detail.operation_summary || {})}</div>
+          `
+      }
+      <div class="feedback-detail-section"><span>分类理由</span>${renderJsonBlock(detail.classification_reasons || [])}</div>
+      <div class="feedback-detail-actions">
+        <button class="mini-btn" type="button" data-feedback-action="accept" data-feedback-record-id="${escapeHtml(detailState.record_id)}">接受</button>
+        <button class="mini-btn" type="button" data-feedback-action="prompt" data-feedback-record-id="${escapeHtml(detailState.record_id)}">用于 Prompt</button>
+        <button class="mini-btn" type="button" data-feedback-action="eval" data-feedback-record-id="${escapeHtml(detailState.record_id)}">用于 Eval</button>
+        <button class="mini-btn" type="button" data-feedback-action="clear" data-feedback-record-id="${escapeHtml(detailState.record_id)}">取消使用</button>
+        <button class="mini-btn" type="button" data-feedback-action="reject" data-feedback-record-id="${escapeHtml(detailState.record_id)}">退回待审</button>
+      </div>
+    </aside>
+  `;
+}
+
 function syncFeedbackReviewControls() {
   const kindNode = el("feedbackReviewKind");
   const statusNode = el("feedbackReviewStatus");
@@ -1592,6 +1679,7 @@ function renderFeedbackReviewPanel() {
               <div class="project-badges">${renderFeedbackTags(record)}</div>
               <p class="local-feedback-note">建议：${escapeHtml(record.learning_recommendation || "人工复核")} · ${escapeHtml(record.created_at || "")}</p>
               <div class="feedback-record-actions">
+                <button class="mini-btn" type="button" data-feedback-detail-id="${escapeHtml(record.record_id)}">查看详情</button>
                 <button class="mini-btn" type="button" data-feedback-action="accept" data-feedback-record-id="${escapeHtml(record.record_id)}" ${isBusy ? "disabled" : ""}>接受</button>
                 <button class="mini-btn" type="button" data-feedback-action="prompt" data-feedback-record-id="${escapeHtml(record.record_id)}" ${isBusy ? "disabled" : ""}>用于 Prompt</button>
                 <button class="mini-btn" type="button" data-feedback-action="eval" data-feedback-record-id="${escapeHtml(record.record_id)}" ${isBusy ? "disabled" : ""}>用于 Eval</button>
@@ -1603,6 +1691,7 @@ function renderFeedbackReviewPanel() {
         })
         .join("")}
     </div>
+    ${renderFeedbackDetailDrawer()}
   `;
   root.querySelectorAll("[data-feedback-select]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1637,6 +1726,17 @@ function renderFeedbackReviewPanel() {
           exclude_tags: ["bad_alignment", "bad_example"],
         },
       });
+    });
+  });
+  root.querySelectorAll("[data-feedback-detail-id]").forEach((button) => {
+    button.addEventListener("click", () => loadFeedbackRecordDetail(button.getAttribute("data-feedback-detail-id") || ""));
+  });
+  root.querySelectorAll("[data-feedback-detail-close]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.feedbackReview.detailRecordId = "";
+      state.feedbackReview.detail = null;
+      state.feedbackReview.detailLoading = false;
+      renderFeedbackReviewPanel();
     });
   });
   root.querySelectorAll("[data-feedback-action]").forEach((button) => {
@@ -1679,6 +1779,30 @@ async function refreshFeedbackReview() {
     showToast(state.feedbackReview.message, "error");
   } finally {
     state.feedbackReview.loading = false;
+    renderFeedbackReviewPanel();
+  }
+}
+
+async function loadFeedbackRecordDetail(recordId) {
+  if (!recordId) return;
+  state.feedbackReview.detailRecordId = recordId;
+  state.feedbackReview.detailLoading = true;
+  state.feedbackReview.detail = null;
+  renderFeedbackReviewPanel();
+  try {
+    const params = new URLSearchParams({
+      kind: state.feedbackReview.kind,
+      record_id: recordId,
+    });
+    const response = await fetch(`/api/local-feedback-record-detail?${params.toString()}`);
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "样本详情读取失败");
+    state.feedbackReview.detail = payload;
+  } catch (error) {
+    state.feedbackReview.detail = { ok: false, error: error.message || String(error) };
+    showToast(`样本详情读取失败：${error.message || error}`, "error");
+  } finally {
+    state.feedbackReview.detailLoading = false;
     renderFeedbackReviewPanel();
   }
 }
@@ -1741,6 +1865,7 @@ async function updateFeedbackReviewRecord(recordId, updates) {
     state.feedbackReview.message = "审核状态已更新";
     renderLocalFeedbackSummary(state.localFeedbackSummary);
     await refreshFeedbackReview();
+    if (state.feedbackReview.detailRecordId === recordId) loadFeedbackRecordDetail(recordId);
     refreshLearningQualitySummary();
   } catch (error) {
     state.feedbackReview.message = `审核状态更新失败：${error.message || error}`;
@@ -1849,6 +1974,8 @@ function renderLocalFeedbackImpactPreviewCard() {
       </section>
     `;
   }
+  const injection = impact.prompt_injection_preview || {};
+  const spanExamples = Array.isArray(injection.span_examples_preview) ? injection.span_examples_preview : [];
   return `
     <section class="entity-section">
       <div class="entity-section-head"><h5>学习影响预览</h5><span>Prompt / Cache</span></div>
@@ -1862,8 +1989,32 @@ function renderLocalFeedbackImpactPreviewCard() {
         <div><span>05a 缓存</span><strong>${impact.would_refresh_span_cache ? "样本变化会刷新" : "暂无 Span 示例影响"}</strong></div>
         <div><span>每次最多示例</span><strong>${escapeHtml(impact.max_span_examples_per_request ?? 3)}</strong></div>
         <div><span>Span hash</span><strong>${escapeHtml((impact.span_examples_hash || "").slice(0, 16))}</strong></div>
+        <div><span>Style Prompt 估算</span><strong>${escapeHtml(injection.style_prompt_estimated_tokens ?? 0)} tokens</strong></div>
+        <div><span>Span 示例估算</span><strong>${escapeHtml(injection.span_examples_estimated_tokens ?? 0)} tokens</strong></div>
       </div>
       ${(impact.notes || []).length ? `<div class="learning-quality-reasons">${impact.notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : ""}
+      <div class="prompt-preview-grid">
+        <div>
+          <span>Style Prompt 预览</span>
+          <pre class="feedback-json-preview">${escapeHtml(injection.style_prompt_preview || "暂无 style prompt。")}</pre>
+        </div>
+        <div>
+          <span>已学习规则</span>
+          ${
+            Array.isArray(injection.style_guidelines_preview) && injection.style_guidelines_preview.length
+              ? `<ul>${injection.style_guidelines_preview.slice(0, 8).map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+              : `<p class="local-feedback-note">暂无 learned_style_guidelines.md 规则。</p>`
+          }
+        </div>
+        <div class="wide">
+          <span>Span 示例注入预览</span>
+          ${
+            spanExamples.length
+              ? spanExamples.map((example, index) => `<pre class="feedback-json-preview">#${index + 1}\n${escapeHtml(JSON.stringify(example, null, 2))}</pre>`).join("")
+              : `<p class="local-feedback-note">暂无可注入的 Span 示例。</p>`
+          }
+        </div>
+      </div>
       <p class="local-feedback-note">这些操作只修改本地学习数据，不会启动字幕翻译，也不会增加翻译请求量。</p>
       <div class="learning-action-buttons">
         <button class="mini-btn" type="button" data-learning-impact-refresh>刷新预览</button>
