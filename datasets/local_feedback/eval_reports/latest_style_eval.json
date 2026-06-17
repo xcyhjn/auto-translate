@@ -1,22 +1,421 @@
 {
   "schema_version": 1,
-  "created_at": "2026-06-17T09:18:43.303386+00:00",
-  "sample_count": 0,
-  "sample_insufficient": true,
-  "sample_note": "Need at least 20 reviewed subtitle feedback samples before judging translation style trends.",
+  "created_at": "2026-06-17T10:00:21.365774+00:00",
+  "sample_count": 43,
+  "sample_insufficient": false,
+  "sample_note": "Gold set is large enough for a first subtitle feedback trend check.",
   "metrics": {
-    "avg_machine_manual_similarity": 0.0,
-    "avg_abs_char_delta": 0.0,
+    "avg_machine_manual_similarity": 0.421,
+    "avg_abs_char_delta": 12.42,
     "surface_edit_rate": 0.0,
-    "semantic_or_style_signal_rate": 0.0,
+    "semantic_or_style_signal_rate": 1.0,
     "unsafe_sample_rate": 0.0
   },
-  "feedback_type_counts": [],
-  "learning_risk_counts": [],
-  "learning_recommendation_counts": [],
-  "edit_tag_counts": [],
-  "strategy_counts": [],
-  "quality_flag_counts": [],
-  "high_value_cases": [],
+  "feedback_type_counts": [
+    {
+      "value": "style_edit",
+      "count": 42
+    },
+    {
+      "value": "semantic_fix",
+      "count": 36
+    },
+    {
+      "value": "term_fix",
+      "count": 13
+    }
+  ],
+  "learning_risk_counts": [
+    {
+      "value": "low",
+      "count": 43
+    }
+  ],
+  "learning_recommendation_counts": [
+    {
+      "value": "style_prompt_candidate",
+      "count": 43
+    }
+  ],
+  "edit_tag_counts": [
+    {
+      "value": "punctuation_tuned",
+      "count": 40
+    },
+    {
+      "value": "expanded",
+      "count": 35
+    },
+    {
+      "value": "preserve_english",
+      "count": 12
+    },
+    {
+      "value": "compressed",
+      "count": 2
+    },
+    {
+      "value": "mixed_naming",
+      "count": 1
+    }
+  ],
+  "strategy_counts": [
+    {
+      "value": "expand",
+      "count": 35
+    },
+    {
+      "value": "preserve_term",
+      "count": 12
+    },
+    {
+      "value": "compress",
+      "count": 2
+    },
+    {
+      "value": "reduce_clause_count",
+      "count": 2
+    }
+  ],
+  "quality_flag_counts": [
+    {
+      "value": "needs_human_acceptance",
+      "count": 43
+    }
+  ],
+  "high_value_cases": [
+    {
+      "project_id": "The-hardest-dungeon-EVER-designed",
+      "segment_id": 1,
+      "feedback_types": [
+        "style_edit",
+        "term_fix",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "compressed",
+        "preserve_english",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "compress",
+        "preserve_term",
+        "reduce_clause_count"
+      ]
+    },
+    {
+      "project_id": "Weatherday---Come-in-ALBUM-REVIEW",
+      "segment_id": 2,
+      "feedback_types": [
+        "style_edit",
+        "term_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "preserve_english",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "preserve_term",
+        "reduce_clause_count"
+      ]
+    },
+    {
+      "project_id": "Weatherday---Come-in-ALBUM-REVIEW",
+      "segment_id": 35,
+      "feedback_types": [
+        "style_edit",
+        "term_fix",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "preserve_english",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand",
+        "preserve_term"
+      ]
+    },
+    {
+      "project_id": "Weatherday---Come-in-ALBUM-REVIEW",
+      "segment_id": 70,
+      "feedback_types": [
+        "term_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "preserve_english"
+      ],
+      "strategies": [
+        "preserve_term"
+      ]
+    },
+    {
+      "project_id": "Weatherday---Come-in-ALBUM-REVIEW",
+      "segment_id": 89,
+      "feedback_types": [
+        "style_edit",
+        "term_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "preserve_english",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "preserve_term"
+      ]
+    },
+    {
+      "project_id": "Weatherday---Come-in-ALBUM-REVIEW",
+      "segment_id": 106,
+      "feedback_types": [
+        "style_edit",
+        "term_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "preserve_english",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "preserve_term"
+      ]
+    },
+    {
+      "project_id": "Weatherday---Come-in-ALBUM-REVIEW",
+      "segment_id": 161,
+      "feedback_types": [
+        "style_edit",
+        "term_fix",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "preserve_english",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand",
+        "preserve_term"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 1,
+      "feedback_types": [
+        "style_edit",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "compressed"
+      ],
+      "strategies": [
+        "compress"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 16,
+      "feedback_types": [
+        "style_edit",
+        "term_fix",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "preserve_english",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand",
+        "preserve_term"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 33,
+      "feedback_types": [
+        "style_edit",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 50,
+      "feedback_types": [
+        "style_edit",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 69,
+      "feedback_types": [
+        "style_edit",
+        "term_fix",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "preserve_english",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand",
+        "preserve_term"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 85,
+      "feedback_types": [
+        "style_edit"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 100,
+      "feedback_types": [
+        "style_edit"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "punctuation_tuned"
+      ],
+      "strategies": []
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 119,
+      "feedback_types": [
+        "style_edit",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 133,
+      "feedback_types": [
+        "style_edit",
+        "term_fix",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "preserve_english",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand",
+        "preserve_term"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 155,
+      "feedback_types": [
+        "style_edit",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 171,
+      "feedback_types": [
+        "style_edit",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 186,
+      "feedback_types": [
+        "style_edit",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand"
+      ]
+    },
+    {
+      "project_id": "What-even-is-Imperial-Stout",
+      "segment_id": 203,
+      "feedback_types": [
+        "style_edit",
+        "semantic_fix"
+      ],
+      "learning_risk": "low",
+      "edit_tags": [
+        "expanded",
+        "punctuation_tuned"
+      ],
+      "strategies": [
+        "expand"
+      ]
+    }
+  ],
   "unsafe_cases": []
 }

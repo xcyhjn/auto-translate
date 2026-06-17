@@ -7,9 +7,9 @@ Dataset: `D:\autosub_zh\datasets\local_feedback`
 - Bilibili feedback records: 0
 - Bilibili learning records: 0
 - Bilibili eval-marked records: 0
-- Translation edit records: 0
-- Translation style-learning records: 0
-- Translation eval-marked records: 0
+- Translation edit records: 547
+- Translation style-learning records: 499
+- Translation eval-marked records: 43
 
 ## Guardrails
 

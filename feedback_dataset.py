@@ -1046,6 +1046,7 @@ def eval_style(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
     char_deltas: list[int] = []
     high_value_cases: list[dict] = []
     unsafe_cases: list[dict] = []
+    semantic_or_style_signal_count = 0
 
     for record in gold_records:
         tag_counts.update(str(item) for item in record.get("edit_tags") or [] if str(item).strip())
@@ -1073,6 +1074,7 @@ def eval_style(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
         if is_unsafe_style_learning_record(record):
             unsafe_cases.append(case)
         elif {"qa_repair", "semantic_fix", "style_edit", "term_fix"} & set(feedback_types):
+            semantic_or_style_signal_count += 1
             high_value_cases.append(case)
 
     sample_count = len(gold_records)
@@ -1080,13 +1082,7 @@ def eval_style(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
         "avg_machine_manual_similarity": round(sum(similarities) / sample_count, 4) if sample_count else 0.0,
         "avg_abs_char_delta": round(sum(char_deltas) / sample_count, 2) if sample_count else 0.0,
         "surface_edit_rate": safe_ratio(feedback_type_counts.get("surface_edit", 0), sample_count),
-        "semantic_or_style_signal_rate": safe_ratio(
-            feedback_type_counts.get("semantic_fix", 0)
-            + feedback_type_counts.get("style_edit", 0)
-            + feedback_type_counts.get("term_fix", 0)
-            + feedback_type_counts.get("qa_repair", 0),
-            sample_count,
-        ),
+        "semantic_or_style_signal_rate": safe_ratio(semantic_or_style_signal_count, sample_count),
         "unsafe_sample_rate": safe_ratio(len(unsafe_cases), sample_count),
     }
     report = {
