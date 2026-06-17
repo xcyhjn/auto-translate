@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .style_learning import write_style_learning_artifacts
-from .workflow_profiles import find_existing_ass_path
+from .workflow_profiles import find_existing_ass_path, project_artifact_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
 def resolve_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     if args.project_dir:
         project_dir = Path(args.project_dir)
-        segments_path = Path(args.segments) if args.segments else project_dir / "05_translated_segments.json"
+        segments_path = Path(args.segments) if args.segments else project_artifact_path(project_dir, "05_translated_segments.json")
         manual_ass_path = Path(args.manual_ass) if args.manual_ass else find_existing_ass_path(project_dir)
         if not manual_ass_path:
             raise SystemExit(f"未找到 ASS 产物：{project_dir}")

@@ -22,6 +22,7 @@ VALID_SUBTITLE_MODES = {
 TOP_ASS_PREFIX = "00_ASS"
 TOP_ASS_GLOB = f"{TOP_ASS_PREFIX}_*.ass"
 LEGACY_ASS_GLOBS = ("08_bilingual_*.ass", "08_subtitle_*.ass", "08_source_*.ass")
+INTERNAL_ARTIFACTS_DIR_NAME = "99_internal_artifacts"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,16 @@ def read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"Workflow resource must be a JSON object: {path}")
     return payload
+
+
+def project_artifact_path(project: Path, name: str) -> Path:
+    root_path = project / name
+    if root_path.exists():
+        return root_path
+    internal_path = project / INTERNAL_ARTIFACTS_DIR_NAME / name
+    if internal_path.exists():
+        return internal_path
+    return root_path
 
 
 def normalize_subtitle_mode(value: object) -> str:

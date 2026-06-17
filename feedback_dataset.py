@@ -21,13 +21,12 @@ from .style_learning import (
     build_style_features,
     detect_edit_tags,
 )
-from .workflow_profiles import ass_candidate_paths
+from .workflow_profiles import INTERNAL_ARTIFACTS_DIR_NAME, ass_candidate_paths, project_artifact_path
 
 
 SCHEMA_VERSION = 1
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DATASET_DIR = BASE_DIR / "datasets" / "local_feedback"
-INTERNAL_ARTIFACTS_DIR_NAME = "99_internal_artifacts"
 BILIBILI_LABELS = {"duplicate", "not_duplicate", "same_topic", "manual_review"}
 STYLE_FEEDBACK_TYPES = {
     "bad_example",
@@ -66,13 +65,7 @@ def write_json(path: Path, payload: Any) -> None:
 
 
 def project_file_path(project: Path, name: str) -> Path:
-    root_path = project / name
-    if root_path.exists():
-        return root_path
-    internal_path = project / INTERNAL_ARTIFACTS_DIR_NAME / name
-    if internal_path.exists():
-        return internal_path
-    return root_path
+    return project_artifact_path(project, name)
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -711,6 +704,7 @@ def collect_span_style_project(project: Path, dataset_dir: Path = DEFAULT_DATASE
     paths = ensure_dataset_layout(dataset_dir)
     project = project.resolve()
     segments_path = span_machine_segments_path(project)
+    source_spans_path = project_file_path(project, "04a_source_spans.json")
     ass_path = find_manual_ass_path(project)
     segments = load_segments(segments_path)
     segments_by_id = {int(segment.id): segment for segment in segments}
@@ -750,7 +744,7 @@ def collect_span_style_project(project: Path, dataset_dir: Path = DEFAULT_DATASE
                     "project_id": project_id,
                     "project_path": str(project),
                     "segments_path": str(segments_path),
-                    "source_spans_path": str(project / "04a_source_spans.json"),
+                    "source_spans_path": str(source_spans_path),
                     "manual_ass_path": str(ass_path),
                     "learning_source": "manual_ass",
                     "machine_baseline_only": True,

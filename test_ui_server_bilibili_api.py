@@ -7,6 +7,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from autosub_zh import ui_server
+from autosub_zh.workflow_profiles import project_artifact_path
 
 
 def _get_json(server: ThreadingHTTPServer, path: str) -> tuple[int, dict]:
@@ -303,6 +304,7 @@ def test_organize_project_artifacts_moves_non_release_files(monkeypatch, tmp_pat
     for name in essentials:
         (project / name).write_text("essential", encoding="utf-8")
     (project / "05_translated_segments.json").write_text("[]", encoding="utf-8")
+    (project / "00_style_examples.jsonl").write_text("{}\n", encoding="utf-8")
     (project / "10_manifest_bilingual.json").write_text(
         json.dumps(
             {
@@ -317,14 +319,47 @@ def test_organize_project_artifacts_moves_non_release_files(monkeypatch, tmp_pat
     result = ui_server.organize_project_artifacts_job(str(project))
 
     internal = project / ui_server.INTERNAL_ARTIFACTS_DIR_NAME
-    assert result["moved_count"] == 2
+    assert result["moved_count"] == 3
     assert (internal / "05_translated_segments.json").exists()
+    assert (internal / "00_style_examples.jsonl").exists()
     assert (internal / "10_manifest_bilingual.json").exists()
     for name in essentials:
         assert (project / name).exists()
     refreshed = result["project"]
     assert refreshed["manifest_path"].endswith("10_manifest_bilingual.json")
-    assert refreshed["health"]["internal_file_count"] == 2
+    assert refreshed["health"]["internal_file_count"] == 3
+    assert any(file["name"] == "05_translated_segments.json" for file in refreshed["internal_files"])
+    assert any(file["name"] == "00_style_examples.jsonl" for file in refreshed["internal_files"])
+
+
+def test_organize_project_artifacts_rejects_running_pipeline(monkeypatch, tmp_path: Path) -> None:
+    output_root = tmp_path / "output"
+    project = output_root / "sample"
+    project.mkdir(parents=True)
+    monkeypatch.setattr(ui_server, "OUTPUT_DIR", output_root)
+    monkeypatch.setattr(ui_server, "is_busy", lambda: True)
+
+    try:
+        ui_server.organize_project_artifacts_job(str(project))
+    except RuntimeError as exc:
+        assert "pipeline task is running" in str(exc)
+    else:
+        raise AssertionError("organize_project_artifacts_job should reject a running pipeline")
+
+
+def test_project_artifact_path_prefers_root_and_falls_back_to_internal(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    internal = project / ui_server.INTERNAL_ARTIFACTS_DIR_NAME
+    internal.mkdir(parents=True)
+    internal_file = internal / "05_translated_segments.json"
+    internal_file.write_text("internal", encoding="utf-8")
+
+    assert project_artifact_path(project, "05_translated_segments.json") == internal_file
+
+    root_file = project / "05_translated_segments.json"
+    root_file.write_text("root", encoding="utf-8")
+
+    assert project_artifact_path(project, "05_translated_segments.json") == root_file
 
 
 def test_local_feedback_summary_api_reads_counts_and_eval(monkeypatch, tmp_path: Path) -> None:

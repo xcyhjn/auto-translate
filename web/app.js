@@ -1762,11 +1762,11 @@ function renderPhaseStatus(phaseStatus) {
 }
 
 function getProjectFile(project, name) {
-  return (project?.files || []).find((file) => file.name === name) || null;
+  return [...(project?.files || []), ...(project?.internal_files || [])].find((file) => file.name === name) || null;
 }
 
 function findProjectFile(project, predicate) {
-  return (project?.files || []).find((file) => predicate(file.name || "", file)) || null;
+  return [...(project?.files || []), ...(project?.internal_files || [])].find((file) => predicate(file.name || "", file)) || null;
 }
 
 function isFinalAssFileName(name) {

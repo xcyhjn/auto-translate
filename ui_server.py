@@ -45,6 +45,7 @@ from .style_learning import write_style_learning_artifacts
 from .subtitle_io import write_bilingual_ass
 from .workflow_profiles import (
     DEFAULT_WORKFLOW_PROFILE,
+    INTERNAL_ARTIFACTS_DIR_NAME,
     apply_workflow_profile,
     ensure_top_ass_alias,
     find_existing_ass_path,
@@ -52,6 +53,7 @@ from .workflow_profiles import (
     load_dataset_profile,
     load_prompt_profile,
     normalize_subtitle_mode,
+    project_artifact_path,
     summarize_dataset_profile,
 )
 from .youtube_meta import ensure_cover, ensure_padded_cover, fetch_youtube_info, fetch_youtube_meta, safe_project_slug, save_youtube_meta
@@ -69,7 +71,6 @@ LOCAL_FEEDBACK_DATASET_DIR = DEFAULT_DATASET_DIR
 SERVER_VERSION = "20260519-stability1"
 SERVER_PORT = int(os.environ.get("AUTOSUB_UI_PORT", "8777"))
 DEFAULT_HTTP_PROXY = "http://127.0.0.1:7890"
-INTERNAL_ARTIFACTS_DIR_NAME = "99_internal_artifacts"
 JOB_STORE = JobStore()
 STATE_SNAPSHOT_VERSION = 1
 STATE_STALE_TIMEOUT_SECONDS = 30 * 60
@@ -1266,13 +1267,7 @@ def internal_artifacts_dir(project_dir: Path) -> Path:
 
 
 def project_file_path(project_dir: Path, name: str) -> Path:
-    root_path = project_dir / name
-    if root_path.exists():
-        return root_path
-    internal_path = internal_artifacts_dir(project_dir) / name
-    if internal_path.exists():
-        return internal_path
-    return root_path
+    return project_artifact_path(project_dir, name)
 
 
 def read_project_json_file(project_dir: Path, name: str) -> dict:
@@ -1442,6 +1437,12 @@ def read_output_tree() -> list[dict]:
                 entry = file_entry(item)
                 files.append(entry)
                 file_index[item.name] = entry
+        internal_files = []
+        internal = internal_artifacts_dir(folder)
+        if internal.exists():
+            for item in sorted(internal.iterdir()):
+                if item.is_file():
+                    internal_files.append(file_entry(item))
         manifest_file = project_file_entry(folder, file_index, "10_manifest_bilingual.json")
         manifest_ass_name = str(subtitle_output.get("ass_name") or "").strip()
         ass_path = find_existing_ass_path(folder, manifest_ass_name)
@@ -1455,6 +1456,7 @@ def read_output_tree() -> list[dict]:
                 "name": folder.name,
                 "path": str(folder),
                 "files": files,
+                "internal_files": internal_files,
                 "ass_path": ass_file.get("path") if ass_file else "",
                 "ass_mtime_ts": ass_file.get("mtime_ts") if ass_file else 0,
                 "burned_video_path": burned_file.get("path") if burned_file else "",
@@ -2611,6 +2613,8 @@ def bilibili_duplicate_feedback_job(payload: dict) -> dict:
 
 
 def organize_project_artifacts_job(project_path: str) -> dict:
+    if is_busy():
+        raise RuntimeError("Cannot organize project artifacts while a pipeline task is running.")
     project_dir = Path(project_path)
     if not project_dir.exists() or not project_dir.is_dir():
         raise FileNotFoundError(f"Project folder not found: {project_dir}")

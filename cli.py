@@ -10,7 +10,7 @@ from .media import enhance_audio_for_asr, extract_audio, probe_media
 from .qa import qa_check
 from .segment_io import load_segments, save_segments
 from .style_learning import write_style_learning_artifacts
-from .workflow_profiles import find_existing_ass_path
+from .workflow_profiles import find_existing_ass_path, project_artifact_path
 from .subtitle_io import write_srt
 from .timing import refine_timing
 from .translate import dry_run_openai_translation, translate_segments
@@ -188,7 +188,7 @@ def main() -> None:
         if not ass_path:
             raise SystemExit(f"未找到 ASS 产物：{project_dir}")
         manifest = write_style_learning_artifacts(
-            segments_path=project_dir / "05_translated_segments.json",
+            segments_path=project_artifact_path(project_dir, "05_translated_segments.json"),
             manual_ass_path=ass_path,
             output_dir=project_dir,
         )

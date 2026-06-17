@@ -141,6 +141,45 @@ def test_collect_style_defaults_to_review_only_samples(tmp_path: Path) -> None:
     assert summary["style_learning_count"] == 0
 
 
+def test_collect_style_reads_segments_from_internal_artifacts(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    project = tmp_path / "organized_project"
+    internal = project / "99_internal_artifacts"
+    internal.mkdir(parents=True)
+    segments = {
+        "segments": [
+            {
+                "id": 1,
+                "start": 1.0,
+                "end": 3.0,
+                "source_text": "This is a long literal sentence.",
+                "target_text": "这是一句很直译的话。",
+                "reference_text": "",
+                "confidence": None,
+                "source": "asr",
+                "words": [],
+            }
+        ]
+    }
+    (internal / "05_translated_segments.json").write_text(json.dumps(segments, ensure_ascii=False), encoding="utf-8")
+    (project / "00_ASS_bilingual_zh_en.ass").write_text(
+        "\n".join(
+            [
+                "[Events]",
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+                "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,这句更自然。",
+            ]
+        ),
+        encoding="utf-8-sig",
+    )
+
+    result = collect_style_project(project, dataset_dir)
+
+    assert result["added"] == 1
+    assert result["project"] == str(project.resolve())
+    assert Path(result["ass_path"]).name == "00_ASS_bilingual_zh_en.ass"
+
+
 def test_collect_style_prefers_top_ass_artifact_name(tmp_path: Path) -> None:
     dataset_dir = tmp_path / "dataset"
     project = tmp_path / "style_project"

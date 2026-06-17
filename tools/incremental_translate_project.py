@@ -8,6 +8,7 @@ from pathlib import Path
 from autosub_zh.segment_io import load_segments, save_segments_payload
 from autosub_zh.translate import load_glossary, translate_chunk_with_openai
 from autosub_zh.ui_server import ensure_openai_runtime_env_loaded, read_config
+from autosub_zh.workflow_profiles import project_artifact_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,10 +32,10 @@ def main() -> None:
 
     project_dir = Path(args.project)
     config = read_config()
-    timed_path = project_dir / "03_timed_source_segments.json"
-    translated_path = project_dir / "05_translated_segments.json"
-    checkpoint_path = project_dir / "05_translated_segments.incremental_checkpoint.json"
-    glossary_path = project_dir / "03_glossary_resolved_prompt.txt"
+    timed_path = project_artifact_path(project_dir, "03_timed_source_segments.json")
+    translated_path = project_artifact_path(project_dir, "05_translated_segments.json")
+    checkpoint_path = project_artifact_path(project_dir, "05_translated_segments.incremental_checkpoint.json")
+    glossary_path = project_artifact_path(project_dir, "03_glossary_resolved_prompt.txt")
 
     segments = load_segments(timed_path)
     completed_chunks: set[int] = set()
