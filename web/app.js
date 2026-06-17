@@ -1897,14 +1897,18 @@ function renderDiagnosticGroupList(groups, emptyText, titleKey = "source") {
     .slice(0, 5)
     .map((group) => {
       const label = group[titleKey] || group.source || group.manual || "unknown";
-      const recordText = (group.records || [])
+      const recordButtons = (group.records || [])
         .slice(0, 4)
-        .map((record) => `${record.project_id || "unknown"} #${record.segment_id ?? record.span_id ?? record.index}`)
-        .join(" / ");
+        .map((record) => {
+          const recordLabel = `${record.project_id || "unknown"} #${record.segment_id ?? record.span_id ?? record.index}`;
+          return `<button class="mini-btn" type="button" data-diagnostic-record-kind="${escapeHtml(record.kind || "style")}" data-diagnostic-record-id="${escapeHtml(record.record_id || "")}">${escapeHtml(recordLabel)}</button>`;
+        })
+        .join("");
       return `
         <div>
           <span>${escapeHtml(label || "空文本")}</span>
-          <strong>${escapeHtml(group.count ?? 0)} 条 · ${escapeHtml(recordText || "无记录")}</strong>
+          <strong>${escapeHtml(group.count ?? 0)} 条</strong>
+          <div class="diagnostic-record-actions">${recordButtons || `<span class="local-feedback-note">无可打开记录</span>`}</div>
         </div>
       `;
     })
@@ -2107,6 +2111,26 @@ function jumpToFeedbackReview(kind) {
     node.classList.toggle("active", node.dataset.panel === "feedback-review");
   });
   refreshFeedbackReview();
+  scrollToWorkspaceDetails();
+}
+
+async function openDiagnosticFeedbackRecord(kind, recordId) {
+  if (!recordId) return;
+  state.feedbackReview.kind = kind === "span" ? "span" : "style";
+  state.feedbackReview.status = "all";
+  state.feedbackReview.detailRecordId = recordId;
+  document.querySelectorAll(".tab, .nav-item").forEach((node) => {
+    const active = node.dataset.panel === "feedback-review";
+    node.classList.toggle("active", active);
+    node.setAttribute("aria-selected", active ? "true" : "false");
+    if (active) node.setAttribute("aria-current", "page");
+    else node.removeAttribute("aria-current");
+  });
+  document.querySelectorAll(".workspace-panel").forEach((node) => {
+    node.classList.toggle("active", node.dataset.panel === "feedback-review");
+  });
+  await refreshFeedbackReview();
+  await loadFeedbackRecordDetail(recordId);
   scrollToWorkspaceDetails();
 }
 
@@ -2354,6 +2378,14 @@ function renderLearningQualityPanel() {
   });
   root.querySelectorAll("[data-learning-impact-refresh]").forEach((button) => {
     button.addEventListener("click", () => refreshLocalFeedbackImpactPreview());
+  });
+  root.querySelectorAll("[data-diagnostic-record-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openDiagnosticFeedbackRecord(
+        button.getAttribute("data-diagnostic-record-kind") || "style",
+        button.getAttribute("data-diagnostic-record-id") || "",
+      );
+    });
   });
   el("toggleLearningGuidelinesBtn")?.addEventListener("click", () => {
     state.learningGuidelinesExpanded = !state.learningGuidelinesExpanded;

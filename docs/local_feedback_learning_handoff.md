@@ -212,3 +212,4 @@ If there are fewer than three positive sources, the report is marked `sample_ins
 - A conflict means the same normalized source plus machine baseline maps to different manual ASS translations. These should be reviewed before both variants enter Prompt/Eval.
 - A duplicate means source, machine baseline, and manual ASS are all identical after normalization. Duplicates are review signals only; the system does not delete or mutate JSONL automatically.
 - The learning quality panel now shows ASS/Span conflicts, duplicates, and merge candidates as read-only local diagnostics. No translation request or model call is made.
+- Diagnostic records include `record_id` and can be opened from the learning quality panel; the UI switches to feedback review and opens the read-only detail drawer for manual review.

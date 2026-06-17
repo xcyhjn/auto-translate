@@ -3276,6 +3276,8 @@ def compact_record_ref(kind: str, record: dict, index: int) -> dict:
     if kind == "span":
         return {
             "index": index,
+            "kind": "span",
+            "record_id": span_record_key(record),
             "project_id": str(record.get("project_id") or ""),
             "span_id": str(record.get("span_id") or ""),
             "segment_ids": record.get("segment_ids") if isinstance(record.get("segment_ids"), list) else [],
@@ -3287,6 +3289,8 @@ def compact_record_ref(kind: str, record: dict, index: int) -> dict:
         }
     return {
         "index": index,
+        "kind": "style",
+        "record_id": style_record_key(record),
         "project_id": str(record.get("project_id") or ""),
         "segment_id": record.get("segment_id"),
         "accepted": bool(record.get("accepted")),

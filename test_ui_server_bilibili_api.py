@@ -903,6 +903,8 @@ def test_learning_quality_summary_reports_duplicate_and_conflict_groups(monkeypa
     assert diagnostics["style"]["conflict_group_count"] == 1
     assert diagnostics["span"]["conflict_group_count"] == 1
     assert diagnostics["style"]["duplicate_groups"][0]["count"] == 2
+    assert diagnostics["style"]["conflict_groups"][0]["records"][0]["record_id"]
+    assert diagnostics["span"]["conflict_groups"][0]["records"][0]["kind"] == "span"
     assert any("冲突" in reason for reason in payload["quality"]["reasons"])
 
 
