@@ -332,6 +332,32 @@ def test_organize_project_artifacts_moves_non_release_files(monkeypatch, tmp_pat
     assert any(file["name"] == "00_style_examples.jsonl" for file in refreshed["internal_files"])
 
 
+def test_organize_project_artifacts_preview_does_not_move_files(monkeypatch, tmp_path: Path) -> None:
+    output_root = tmp_path / "output"
+    project = output_root / "sample"
+    project.mkdir(parents=True)
+    for name in [
+        "00_youtube_info.txt",
+        "00_youtube_cover.jpg",
+        "00_youtube_cover_1280x960.jpg",
+        "00_ASS_bilingual_zh_en.ass",
+        "09_burned_bilingual_video.mp4",
+    ]:
+        (project / name).write_text("essential", encoding="utf-8")
+    internal_candidate = project / "05_translated_segments.json"
+    internal_candidate.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(ui_server, "OUTPUT_DIR", output_root)
+
+    result = ui_server.organize_project_artifacts_job(str(project), preview_only=True)
+
+    assert result["preview_only"] is True
+    assert result["move_count"] == 1
+    assert result["moved_count"] == 0
+    assert internal_candidate.exists()
+    assert not (project / ui_server.INTERNAL_ARTIFACTS_DIR_NAME).exists()
+    assert result["planned"][0]["from"].endswith("05_translated_segments.json")
+
+
 def test_organize_project_artifacts_rejects_running_pipeline(monkeypatch, tmp_path: Path) -> None:
     output_root = tmp_path / "output"
     project = output_root / "sample"
@@ -470,6 +496,69 @@ def test_local_feedback_summary_api_handles_missing_files(monkeypatch, tmp_path:
     assert payload["counts"]["span_eval_count"] == 0
     assert payload["available"]["latest_style_eval"] is False
     assert payload["available"]["latest_span_eval"] is False
+
+
+def test_feedback_review_api_lists_and_updates_style_record(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    dataset.mkdir(parents=True)
+    record = {
+        "schema_version": 1,
+        "created_at": "2026-06-17T00:00:00+00:00",
+        "project_id": "sample-project",
+        "segment_id": 7,
+        "start": 1.0,
+        "end": 3.0,
+        "source_text": "This is a literal line.",
+        "machine_target_text": "这是一句直译的台词。",
+        "manual_target_text": "这句更像人话。",
+        "edit_tags": ["style_edit"],
+        "features": {},
+        "operation_summary": {},
+        "quality_flags": ["needs_human_acceptance"],
+        "feedback_types": ["style_edit"],
+        "learning_risk": "low",
+        "learning_recommendation": "style_prompt_candidate",
+        "classification_reasons": ["manual edit improves subtitle style"],
+        "accepted": False,
+        "use_for_style_prompt": False,
+        "use_for_eval": False,
+    }
+    (dataset / "translation_edit_examples.jsonl").write_text(
+        json.dumps(record, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _get_json(server, "/api/local-feedback-records?kind=style&status=pending")
+        assert status == 200
+        assert payload["ok"] is True
+        assert payload["filtered_count"] == 1
+        record_id = payload["records"][0]["record_id"]
+
+        update_status, update_payload = _post_json(
+            server,
+            "/api/local-feedback-record-update",
+            {
+                "kind": "style",
+                "record_id": record_id,
+                "updates": {"use_for_style_prompt": True, "use_for_eval": True},
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert update_status == 200
+    assert update_payload["ok"] is True
+    updated = update_payload["record"]
+    assert updated["accepted"] is True
+    assert updated["use_for_prompt"] is True
+    assert updated["use_for_eval"] is False
+    saved = json.loads((dataset / "translation_edit_examples.jsonl").read_text(encoding="utf-8"))
+    assert saved["accepted"] is True
+    assert saved["use_for_style_prompt"] is True
+    assert saved["use_for_eval"] is False
 
 
 def test_local_feedback_summary_api_tolerates_invalid_eval_report(monkeypatch, tmp_path: Path) -> None:

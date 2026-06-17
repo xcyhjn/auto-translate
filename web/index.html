@@ -31,6 +31,8 @@
           <button class="nav-item" data-panel="advanced" type="button">高级策略</button>
           <button class="nav-item" data-panel="subtitle" type="button">字幕样式</button>
           <button class="nav-item" data-panel="outputs" type="button">项目产物</button>
+          <button class="nav-item" data-panel="feedback-review" type="button">反馈审核</button>
+          <button class="nav-item" data-panel="learning-quality" type="button">学习质量</button>
         </nav>
 
         <div class="sidebar-footer">
@@ -174,6 +176,8 @@
               <button class="tab" data-panel="advanced" type="button" role="tab" aria-selected="false">高级策略</button>
               <button class="tab" data-panel="subtitle" type="button" role="tab" aria-selected="false">字幕样式</button>
               <button class="tab" data-panel="outputs" type="button" role="tab" aria-selected="false">项目产物</button>
+              <button class="tab" data-panel="feedback-review" type="button" role="tab" aria-selected="false">反馈审核</button>
+              <button class="tab" data-panel="learning-quality" type="button" role="tab" aria-selected="false">学习质量</button>
             </div>
 
             <div class="workspace-panels">
@@ -525,6 +529,46 @@
                     <pre id="textPreview" class="text-preview"></pre>
                   </div>
                 </div>
+              </section>
+
+              <section class="workspace-panel" data-panel="feedback-review">
+                <div class="section-head">
+                  <div>
+                    <h3>反馈审核</h3>
+                    <p>审核本地 ASS 与 Span 学习样本，决定哪些进入 Prompt 学习，哪些保留为 Eval 样本。</p>
+                  </div>
+                  <button id="refreshFeedbackReviewBtn" class="mini-btn" type="button">刷新审核列表</button>
+                </div>
+                <div class="feedback-review-toolbar">
+                  <label><span>样本类型</span>
+                    <select id="feedbackReviewKind">
+                      <option value="style">ASS 单句翻译</option>
+                      <option value="span">Span 跨段预翻译</option>
+                    </select>
+                  </label>
+                  <label><span>审核状态</span>
+                    <select id="feedbackReviewStatus">
+                      <option value="pending">待审核</option>
+                      <option value="accepted">已接受</option>
+                      <option value="prompt">已用于 Prompt</option>
+                      <option value="eval">Eval 样本</option>
+                      <option value="risk">中高风险</option>
+                      <option value="all">全部</option>
+                    </select>
+                  </label>
+                </div>
+                <div id="feedbackReviewPanel" class="feedback-review-panel"></div>
+              </section>
+
+              <section class="workspace-panel" data-panel="learning-quality">
+                <div class="section-head">
+                  <div>
+                    <h3>学习质量</h3>
+                    <p>查看本地学习数据规模、待审核量、风险信号和已学习规则预览。</p>
+                  </div>
+                  <button id="refreshLearningQualityBtn" class="mini-btn" type="button">刷新质量面板</button>
+                </div>
+                <div id="learningQualityPanel" class="learning-quality-panel"></div>
               </section>
             </div>
 

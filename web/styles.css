@@ -916,6 +916,183 @@
     color: var(--text);
   }
 
+  .feedback-review-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 260px));
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+  }
+
+  .feedback-review-toolbar label {
+    display: grid;
+    gap: var(--space-2);
+    color: var(--muted);
+    font-size: var(--font-sm);
+  }
+
+  .feedback-review-panel,
+  .learning-quality-panel,
+  .feedback-record-list,
+  .learning-quality-sections {
+    display: grid;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+
+  .feedback-review-explain,
+  .feedback-record,
+  .organize-preview {
+    min-width: 0;
+    padding: var(--space-4);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-soft);
+  }
+
+  .feedback-review-explain p,
+  .feedback-record p {
+    margin-bottom: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .feedback-review-explain p {
+    margin-top: var(--space-2);
+    color: var(--muted);
+  }
+
+  .feedback-record-head,
+  .feedback-record-actions,
+  .feedback-status-row,
+  .learning-guideline-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .feedback-record-head {
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: var(--space-3);
+  }
+
+  .feedback-record-head h4 {
+    margin-bottom: var(--space-1);
+  }
+
+  .feedback-record-head p {
+    color: var(--muted);
+    font-size: var(--font-xs);
+  }
+
+  .feedback-comparison {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .feedback-comparison > div {
+    min-width: 0;
+    padding: var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  .feedback-comparison span {
+    color: var(--muted);
+    font-size: var(--font-xs);
+  }
+
+  .feedback-comparison p {
+    margin-top: var(--space-2);
+    line-height: 1.58;
+  }
+
+  .feedback-record-actions {
+    margin-top: var(--space-3);
+  }
+
+  .entity-chip.warn {
+    border-color: rgba(255, 199, 102, 0.34);
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+
+  .entity-chip.danger {
+    border-color: rgba(255, 125, 139, 0.36);
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+
+  .entity-chip.ok {
+    border-color: rgba(92, 224, 162, 0.32);
+    background: var(--success-soft);
+    color: var(--success);
+  }
+
+  .organize-preview {
+    margin-top: var(--space-4);
+  }
+
+  .organize-preview-list,
+  .learning-count-list {
+    display: grid;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .organize-preview-list div,
+  .learning-count-list div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-3);
+    align-items: center;
+    min-width: 0;
+    padding: var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  .organize-preview-list span,
+  .organize-preview-list strong,
+  .learning-count-list span,
+  .learning-count-list strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: var(--font-xs);
+  }
+
+  .organize-preview-list strong,
+  .learning-count-list strong {
+    color: var(--text);
+  }
+
+  .learning-quality-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-3);
+    min-width: 0;
+    margin-bottom: var(--space-4);
+  }
+
+  .learning-quality-sections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .learning-guideline-row {
+    align-items: stretch;
+  }
+
+  .learning-guideline-row .local-feedback-guidelines {
+    flex: 1 1 320px;
+    padding: var(--space-4);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-soft);
+  }
+
   .download-block {
     margin-bottom: var(--space-4);
   }
@@ -1919,6 +2096,10 @@
     .advanced-groups,
     .advanced-summary-grid,
     .feedback-summary-grid,
+    .feedback-review-toolbar,
+    .feedback-comparison,
+    .learning-quality-grid,
+    .learning-quality-sections,
     .style-columns,
     .output-layout,
     .workflow-effective-grid,
@@ -2001,6 +2182,8 @@
     .proxy-status-row,
     .bilibili-best,
     .bilibili-candidate,
+    .organize-preview-list div,
+    .learning-count-list div,
     .range-row,
     .color-control-head {
       grid-template-columns: 1fr;

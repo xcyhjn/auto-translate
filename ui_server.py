@@ -29,8 +29,15 @@ from .feedback_dataset import (
     DEFAULT_DATASET_DIR,
     collect_span_style_project,
     collect_style_project,
+    dataset_paths,
+    jsonl_file_lock,
     read_jsonl,
     save_bilibili_feedback_label,
+    span_record_key,
+    style_record_key,
+    validate_span_record,
+    validate_style_record,
+    write_jsonl,
 )
 from .job_store import JobStore, ACTIVE_STATUSES
 from .models import BilingualSubtitleStyle
@@ -2612,7 +2619,7 @@ def bilibili_duplicate_feedback_job(payload: dict) -> dict:
     )
 
 
-def organize_project_artifacts_job(project_path: str) -> dict:
+def organize_project_artifacts_job(project_path: str, preview_only: bool = False) -> dict:
     if is_busy():
         raise RuntimeError("Cannot organize project artifacts while a pipeline task is running.")
     project_dir = Path(project_path)
@@ -2624,10 +2631,10 @@ def organize_project_artifacts_job(project_path: str) -> dict:
         raise FileNotFoundError(f"Project is not under output directory: {project_dir}")
     keep_paths = project_public_release_paths(project_snapshot)
     internal_dir = internal_artifacts_dir(project_dir)
-    internal_dir.mkdir(exist_ok=True)
 
     moved = []
     kept = []
+    planned = []
     for item in sorted(project_dir.iterdir()):
         if item.name == INTERNAL_ARTIFACTS_DIR_NAME:
             continue
@@ -2641,18 +2648,25 @@ def organize_project_artifacts_job(project_path: str) -> dict:
             kept.append(str(item))
             continue
         destination = collision_safe_destination(internal_dir / item.name)
-        shutil.move(str(item), str(destination))
-        moved.append({"from": str(item), "to": str(destination)})
+        planned_item = {"from": str(item), "to": str(destination)}
+        planned.append(planned_item)
+        if not preview_only:
+            internal_dir.mkdir(exist_ok=True)
+            shutil.move(str(item), str(destination))
+            moved.append(planned_item)
 
-    refreshed = next((project for project in read_output_tree() if Path(project["path"]).resolve() == project_dir.resolve()), None)
+    refreshed = project_snapshot if preview_only else next((project for project in read_output_tree() if Path(project["path"]).resolve() == project_dir.resolve()), None)
     return {
+        "preview_only": bool(preview_only),
         "project_path": str(project_dir),
         "internal_dir": str(internal_dir),
+        "move_count": len(planned),
         "moved_count": len(moved),
+        "planned": planned,
         "moved": moved,
         "kept": kept,
         "project": refreshed or project_snapshot,
-        "projects": read_output_tree(),
+        "projects": read_output_tree() if not preview_only else [],
     }
 
 
@@ -2812,6 +2826,207 @@ def build_local_feedback_summary(dataset_dir: Path | None = None) -> dict:
             "learned_style_guidelines": guidelines_path.exists(),
             "learned_span_guidelines": span_guidelines_path.exists(),
         },
+    }
+
+
+def feedback_kind_spec(kind: str, dataset_dir: Path | None = None) -> dict:
+    paths = dataset_paths(Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR))
+    normalized = str(kind or "style").strip().lower()
+    if normalized in {"style", "ass", "translation"}:
+        return {
+            "kind": "style",
+            "path": paths["translation_edits"],
+            "key_func": style_record_key,
+            "validator": validate_style_record,
+            "prompt_flag": "use_for_style_prompt",
+            "source_label": "ASS 翻译样本",
+        }
+    if normalized in {"span", "span_translation"}:
+        return {
+            "kind": "span",
+            "path": paths["span_translation_examples"],
+            "key_func": span_record_key,
+            "validator": validate_span_record,
+            "prompt_flag": "use_for_span_prompt",
+            "source_label": "Span 预翻译样本",
+        }
+    raise ValueError(f"Unsupported feedback kind: {kind}")
+
+
+def feedback_record_preview(kind: str, record: dict) -> dict:
+    if kind == "span":
+        manual_by_id = record.get("manual_target_by_id") if isinstance(record.get("manual_target_by_id"), dict) else {}
+        machine_by_id = record.get("machine_target_by_id") if isinstance(record.get("machine_target_by_id"), dict) else {}
+        return {
+            "project_id": str(record.get("project_id") or ""),
+            "record_id": "",
+            "span_id": str(record.get("span_id") or ""),
+            "segment_ids": record.get("segment_ids") if isinstance(record.get("segment_ids"), list) else [],
+            "source": str(record.get("source_joined") or ""),
+            "machine": " / ".join(str(machine_by_id[key]) for key in sorted(machine_by_id)),
+            "manual": " / ".join(str(manual_by_id[key]) for key in sorted(manual_by_id)),
+            "edit_tags": record.get("edit_tags") if isinstance(record.get("edit_tags"), list) else [],
+            "learning_risk": str(record.get("learning_risk") or ""),
+            "learning_recommendation": str(record.get("learning_recommendation") or ""),
+            "accepted": bool(record.get("accepted")),
+            "use_for_prompt": bool(record.get("use_for_span_prompt")),
+            "use_for_eval": bool(record.get("use_for_eval")),
+            "created_at": str(record.get("created_at") or ""),
+        }
+    return {
+        "project_id": str(record.get("project_id") or ""),
+        "record_id": "",
+        "segment_id": record.get("segment_id"),
+        "source": str(record.get("source_text") or ""),
+        "machine": str(record.get("machine_target_text") or ""),
+        "manual": str(record.get("manual_target_text") or ""),
+        "edit_tags": record.get("edit_tags") if isinstance(record.get("edit_tags"), list) else [],
+        "feedback_types": record.get("feedback_types") if isinstance(record.get("feedback_types"), list) else [],
+        "learning_risk": str(record.get("learning_risk") or ""),
+        "learning_recommendation": str(record.get("learning_recommendation") or ""),
+        "accepted": bool(record.get("accepted")),
+        "use_for_prompt": bool(record.get("use_for_style_prompt")),
+        "use_for_eval": bool(record.get("use_for_eval")),
+        "created_at": str(record.get("created_at") or ""),
+    }
+
+
+def list_local_feedback_records(kind: str = "style", status_filter: str = "pending", limit: int = 80, dataset_dir: Path | None = None) -> dict:
+    spec = feedback_kind_spec(kind, dataset_dir)
+    records = read_jsonl(spec["path"])
+    prompt_flag = str(spec["prompt_flag"])
+    normalized_filter = str(status_filter or "pending").strip().lower()
+    rows = []
+    for index, record in enumerate(records):
+        accepted = bool(record.get("accepted"))
+        use_for_prompt = bool(record.get(prompt_flag))
+        use_for_eval = bool(record.get("use_for_eval"))
+        if normalized_filter == "pending" and accepted:
+            continue
+        if normalized_filter == "accepted" and not accepted:
+            continue
+        if normalized_filter == "prompt" and not use_for_prompt:
+            continue
+        if normalized_filter == "eval" and not use_for_eval:
+            continue
+        if normalized_filter == "risk" and str(record.get("learning_risk") or "") not in {"high", "medium"}:
+            continue
+        row = feedback_record_preview(str(spec["kind"]), record)
+        row["record_id"] = spec["key_func"](record)
+        row["index"] = index
+        row["kind"] = spec["kind"]
+        rows.append(row)
+    rows.sort(key=lambda item: (item.get("accepted") is True, str(item.get("created_at") or "")), reverse=False)
+    safe_limit = max(1, min(500, int(limit or 80)))
+    return {
+        "ok": True,
+        "kind": spec["kind"],
+        "source_label": spec["source_label"],
+        "path": str(spec["path"]),
+        "total": len(records),
+        "filtered_count": len(rows),
+        "records": rows[:safe_limit],
+    }
+
+
+def update_local_feedback_record(payload: dict, dataset_dir: Path | None = None) -> dict:
+    kind = str(payload.get("kind") or "style")
+    record_id = str(payload.get("record_id") or "").strip()
+    if not record_id:
+        raise ValueError("record_id required")
+    spec = feedback_kind_spec(kind, dataset_dir)
+    prompt_flag = str(spec["prompt_flag"])
+    updates = payload.get("updates") if isinstance(payload.get("updates"), dict) else {}
+    allowed_bool_fields = {"accepted", "use_for_eval", prompt_flag}
+    allowed_text_fields = {"review_note"}
+    with jsonl_file_lock(spec["path"]):
+        records = read_jsonl(spec["path"])
+        target_index = -1
+        for index, record in enumerate(records):
+            if spec["key_func"](record) == record_id:
+                target_index = index
+                break
+        if target_index < 0:
+            raise FileNotFoundError(f"Feedback record not found: {record_id}")
+        next_record = dict(records[target_index])
+        for field in allowed_bool_fields:
+            if field in updates:
+                next_record[field] = bool(updates[field])
+        for field in allowed_text_fields:
+            if field in updates:
+                next_record[field] = str(updates[field] or "").strip()
+        if next_record.get("use_for_eval") or next_record.get(prompt_flag):
+            next_record["accepted"] = True
+        if next_record.get("use_for_eval") and next_record.get(prompt_flag):
+            if prompt_flag in updates and updates.get(prompt_flag):
+                next_record["use_for_eval"] = False
+            else:
+                next_record[prompt_flag] = False
+        validation_errors: list[str] = []
+        spec["validator"](next_record, f"{spec['path']}:{target_index + 1}", validation_errors)
+        if validation_errors:
+            raise ValueError("; ".join(validation_errors[:3]))
+        records[target_index] = next_record
+        write_jsonl(spec["path"], records)
+    return {
+        "ok": True,
+        "kind": spec["kind"],
+        "record": {
+            **feedback_record_preview(str(spec["kind"]), next_record),
+            "record_id": spec["key_func"](next_record),
+            "index": target_index,
+            "kind": spec["kind"],
+        },
+        "summary": build_local_feedback_summary(dataset_dir),
+    }
+
+
+def build_learning_quality_summary(dataset_dir: Path | None = None) -> dict:
+    summary = build_local_feedback_summary(dataset_dir)
+    dataset_dir = Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR)
+    paths = dataset_paths(dataset_dir)
+    style_records = read_jsonl(paths["translation_edits"])
+    span_records = read_jsonl(paths["span_translation_examples"])
+
+    def count_pending(records: list[dict]) -> int:
+        return sum(1 for record in records if record.get("accepted") is not True)
+
+    def project_counts(records: list[dict]) -> list[dict]:
+        counts: dict[str, int] = {}
+        for record in records:
+            project_id = str(record.get("project_id") or "unknown")
+            counts[project_id] = counts.get(project_id, 0) + 1
+        return [{"project_id": key, "count": value} for key, value in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:8]]
+
+    def tag_counts(records: list[dict]) -> list[dict]:
+        counts: dict[str, int] = {}
+        for record in records:
+            tags = record.get("edit_tags") or record.get("feedback_types") or []
+            for tag in tags if isinstance(tags, list) else []:
+                key = str(tag)
+                counts[key] = counts.get(key, 0) + 1
+        return [{"tag": key, "count": value} for key, value in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:12]]
+
+    return {
+        "ok": True,
+        "dataset_dir": str(dataset_dir),
+        "counts": summary.get("counts", {}),
+        "eval": summary.get("eval", {}),
+        "span_eval": summary.get("span_eval", {}),
+        "pending": {
+            "style": count_pending(style_records),
+            "span": count_pending(span_records),
+        },
+        "projects": {
+            "style": project_counts(style_records),
+            "span": project_counts(span_records),
+        },
+        "tags": {
+            "style": tag_counts(style_records),
+            "span": tag_counts(span_records),
+        },
+        "guidelines": summary.get("guidelines", []),
+        "span_guidelines": summary.get("span_guidelines", []),
     }
 
 
@@ -3185,6 +3400,18 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 self._json_response(build_local_feedback_summary())
                 return
 
+            if parsed.path == "/api/local-feedback-records":
+                qs = parse_qs(parsed.query)
+                kind = qs.get("kind", ["style"])[0]
+                status_filter = qs.get("status", ["pending"])[0]
+                limit = int(qs.get("limit", ["80"])[0] or 80)
+                self._json_response(list_local_feedback_records(kind=kind, status_filter=status_filter, limit=limit))
+                return
+
+            if parsed.path == "/api/learning-quality-summary":
+                self._json_response(build_learning_quality_summary())
+                return
+
             if parsed.path == "/api/file":
                 qs = parse_qs(parsed.query)
                 path = qs.get("path", [""])[0]
@@ -3412,6 +3639,25 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 self._json_response({"ok": True, **result})
                 return
 
+            if parsed.path == "/api/local-feedback-record-update":
+                try:
+                    result = update_local_feedback_record(payload)
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                operation="local_feedback_record_update",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                self._json_response(result)
+                return
+
             if parsed.path == "/api/rebuild-youtube-cover-1280x960":
                 project_path = str(payload.get("project_path") or "").strip()
                 if not project_path:
@@ -3427,7 +3673,7 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                     self._json_response({"ok": False, "error": "project_path required"}, status=400)
                     return
                 try:
-                    result = organize_project_artifacts_job(project_path)
+                    result = organize_project_artifacts_job(project_path, preview_only=bool(payload.get("preview_only")))
                 except Exception as exc:
                     append_error_log(traceback.format_exc())
                     self._json_response(

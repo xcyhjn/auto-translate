@@ -1256,3 +1256,46 @@ Verification:
 - `node --check web\app.js`
 - `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`
 - `pytest test_subtitle_output_modes.py`
+
+## 2026-06-17 23:01 +08:00 - Feedback Review UI and Learning Quality Panel
+
+User direction:
+
+- Build a Chinese review UI with simple explanations and keep it decoupled.
+- Continue safe two-stage artifact organization and cache compatibility optimization.
+- Add an initial learning quality panel.
+
+What:
+
+- Added `反馈审核` and `学习质量` workspace tabs.
+- Feedback review UI now lists local ASS/Span learning records, shows source / machine baseline / manual ASS comparison, and supports:
+  - accept
+  - use for Prompt learning
+  - use for Eval
+  - clear usage
+  - return to pending review
+- Added read/update APIs:
+  - `GET /api/local-feedback-records`
+  - `POST /api/local-feedback-record-update`
+  - `GET /api/learning-quality-summary`
+- Kept review actions local to JSONL learning metadata. They do not trigger translation requests.
+- Changed project artifact organization to safe two-stage flow:
+  - preview planned moves first
+  - only move files into `99_internal_artifacts` after confirmation
+- Improved pipeline cache compatibility after artifact organization:
+  - translated segments
+  - timed source segments
+  - source spans
+  - span translated segments/report
+  - style rewrite prompt
+- Added initial learning quality cards for sample counts, pending review counts, eval signals, project sources, tag distribution, and learned rule previews.
+
+Verification:
+
+- `python -m py_compile ui_server.py feedback_dataset.py pipeline_core.py workflow_profiles.py`
+- `node --check web\app.js`
+- `git diff --check -- ui_server.py pipeline_core.py web\app.js web\index.html web\styles.css test_ui_server_bilibili_api.py`
+- `pytest test_ui_server_bilibili_api.py`
+- `pytest test_feedback_dataset.py test_span_translation_flow.py`
+- `pytest test_subtitle_output_modes.py`
+- Direct data check showed current local dataset has 5 pending ASS records, 7 pending Span records, 1101 ASS edit records, and 7 Span examples.

@@ -64,7 +64,13 @@ from .text_quality import find_text_pollution, format_pollution_issues
 from .timing import refine_timing
 from .translate import load_glossary, translate_segments
 from .style_rules import load_style_prompt_text
-from .workflow_profiles import load_dataset_glossary_terms, load_dataset_profile, write_dataset_profile_assets, build_subtitle_output_plan
+from .workflow_profiles import (
+    build_subtitle_output_plan,
+    load_dataset_glossary_terms,
+    load_dataset_profile,
+    project_artifact_path,
+    write_dataset_profile_assets,
+)
 from .zh_reading_axis import (
     ZhReadingAxisConfig,
     build_zh_display_cues,
@@ -618,12 +624,18 @@ def run_pipeline(
     output_root.mkdir(parents=True, exist_ok=True)
     output_dir = resolve_output_dir(input_path, output_root)
     translated_json_path = output_dir / "05_translated_segments.json"
+    translated_json_read_path = project_artifact_path(output_dir, "05_translated_segments.json")
     timed_json_path = output_dir / "03_timed_source_segments.json"
+    timed_json_read_path = project_artifact_path(output_dir, "03_timed_source_segments.json")
+    source_spans_read_path = project_artifact_path(output_dir, "04a_source_spans.json")
+    span_segments_read_path = project_artifact_path(output_dir, "05a_span_translated_segments.json")
+    span_report_read_path = project_artifact_path(output_dir, "05a_span_translation_report.json")
     zh_reading_groups_path = output_dir / "04b_zh_reading_groups.json"
     style_prompt_path = output_dir / "06d_style_rewrite_prompt.txt"
+    style_prompt_read_path = project_artifact_path(output_dir, "06d_style_rewrite_prompt.txt")
     style_prompt_for_translation = build_translation_style_prompt(
         translation_prompt=translation_prompt,
-        project_style_prompt_path=style_prompt_path,
+        project_style_prompt_path=style_prompt_read_path,
         enable_local_translation_feedback=enable_local_translation_feedback,
     )
     span_prompt_examples = (
@@ -788,12 +800,12 @@ def run_pipeline(
     if (
         load_existing_segments
         and not force_retranslate_existing_segments
-        and translated_segments_match_timing_mode(translated_json_path, dual_axis_mode=dual_axis_mode)
-        and (not dual_axis_mode or timed_json_path.exists())
+        and translated_segments_match_timing_mode(translated_json_read_path, dual_axis_mode=dual_axis_mode)
+        and (not dual_axis_mode or timed_json_read_path.exists())
     ):
-        checkpoint(control_callback, "load_existing_segments", {"path": str(translated_json_path)})
-        translated_segments = load_segments(translated_json_path)
-        source_axis_segments = load_segments(timed_json_path) if dual_axis_mode and timed_json_path.exists() else translated_segments
+        checkpoint(control_callback, "load_existing_segments", {"path": str(translated_json_read_path)})
+        translated_segments = load_segments(translated_json_read_path)
+        source_axis_segments = load_segments(timed_json_read_path) if dual_axis_mode and timed_json_read_path.exists() else translated_segments
         postprocess_stats = postprocess_bilingual_segments(translated_segments)
         source_repair_report = repair_source_segments(translated_segments, get_glossary_json_path(output_dir))
         write_stage_json(
@@ -835,7 +847,7 @@ def run_pipeline(
             write_srt(translated_segments, output_dir / plan.source_srt_name)
         if not (output_dir / "05b_terminology_actions.json").exists():
             write_json(output_dir / "05b_terminology_actions.json", empty_terminology_report(len(translated_segments)))
-        if not (output_dir / "05a_span_translation_report.json").exists():
+        if not span_report_read_path.exists():
             save_segments_payload(
                 translated_segments,
                 output_dir / "05a_span_translated_segments.json",
@@ -862,9 +874,9 @@ def run_pipeline(
             },
         )
     else:
-        if (load_existing_segments or force_retranslate_existing_segments) and timed_json_path.exists():
-            checkpoint(control_callback, "timing_start", {"reused": True, "path": str(timed_json_path)})
-            timed_segments = load_segments(timed_json_path)
+        if (load_existing_segments or force_retranslate_existing_segments) and timed_json_read_path.exists():
+            checkpoint(control_callback, "timing_start", {"reused": True, "path": str(timed_json_read_path)})
+            timed_segments = load_segments(timed_json_read_path)
             source_axis_segments = timed_segments
             source_repair_report = repair_source_segments(timed_segments, get_glossary_json_path(output_dir))
             write_stage_json(
@@ -1204,7 +1216,7 @@ def run_pipeline(
             },
         )
         if not dual_axis_mode:
-            source_spans_path = output_dir / "04a_source_spans.json"
+            source_spans_path = source_spans_read_path
             source_spans_for_translation = load_current_source_spans(source_spans_path, translation_segments)
             span_glossary_text = "\n\n".join(
                 item
@@ -1231,7 +1243,7 @@ def run_pipeline(
             )
             span_checkpoint = (
                 load_span_translation_checkpoint(
-                    output_dir / "05a_span_translated_segments.json",
+                    span_segments_read_path,
                     translation_segments,
                     expected_fingerprint=span_translation_fingerprint,
                 )
@@ -1240,7 +1252,7 @@ def run_pipeline(
             )
             if span_checkpoint:
                 translation_segments, span_translated_ids = span_checkpoint
-                span_translation_report_path = output_dir / "05a_span_translation_report.json"
+                span_translation_report_path = span_report_read_path
                 span_translation_report = (
                     json.loads(span_translation_report_path.read_text(encoding="utf-8"))
                     if span_translation_report_path.exists()
@@ -1250,8 +1262,8 @@ def run_pipeline(
                     callback,
                     "span_translation_done",
                     {
-                        "segments_path": str(output_dir / "05a_span_translated_segments.json"),
-                        "report_path": str(output_dir / "05a_span_translation_report.json"),
+                        "segments_path": str(span_segments_read_path),
+                        "report_path": str(span_translation_report_path),
                         "reused": True,
                         **span_translation_report.get("summary", {}),
                     },
@@ -1387,7 +1399,7 @@ def run_pipeline(
     display_rewrite_report = rewrite_display_segments(
         translated_segments,
         effective_style,
-        style_prompt_path=style_prompt_path if style_prompt_path.exists() else None,
+        style_prompt_path=style_prompt_read_path if style_prompt_read_path.exists() else None,
         enable_ai_rewrite=enable_ai_display_rewrite,
         ai_model=translation_model,
         openai_base_url=openai_base_url,
@@ -1590,7 +1602,7 @@ def run_pipeline(
         },
     )
 
-    source_spans_path = output_dir / "04a_source_spans.json"
+    source_spans_path = source_spans_read_path
     source_spans_for_allocation = load_current_source_spans(source_spans_path, translated_segments)
     semantic_allocation_report = build_semantic_allocation_report(
         translated_segments,

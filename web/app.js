@@ -23,6 +23,16 @@ const state = {
   bilibiliDuplicate: null,
   localFeedbackSummary: null,
   localFeedbackAction: null,
+  feedbackReview: {
+    kind: "style",
+    status: "pending",
+    loading: false,
+    records: [],
+    selectedRecordId: "",
+    message: "",
+  },
+  organizePreview: null,
+  learningQuality: null,
   selectedMediaInfo: null,
   mediaInspectToken: 0,
   lastErrorPayload: null,
@@ -1351,6 +1361,10 @@ async function collectLocalFeedback(kind) {
     state.localFeedbackAction = { status: "success", kind, projectPath, message };
     showToast(message);
     await refreshLocalFeedbackSummary();
+    refreshLearningQualitySummary();
+    if (state.feedbackReview.kind === kind || (kind === "ass" && state.feedbackReview.kind === "style")) {
+      refreshFeedbackReview();
+    }
   } catch (error) {
     const label = kind === "span" ? "Span" : "ASS";
     const message = `${label} 学习采集失败：${error.message || error}`;
@@ -1393,6 +1407,274 @@ async function refreshLocalFeedbackSummary() {
     };
   }
   renderLocalFeedbackSummary(state.localFeedbackSummary);
+}
+
+function feedbackPromptField(kind = state.feedbackReview.kind) {
+  return kind === "span" ? "use_for_span_prompt" : "use_for_style_prompt";
+}
+
+function syncFeedbackReviewControls() {
+  const kindNode = el("feedbackReviewKind");
+  const statusNode = el("feedbackReviewStatus");
+  if (kindNode) kindNode.value = state.feedbackReview.kind;
+  if (statusNode) statusNode.value = state.feedbackReview.status;
+}
+
+function renderFeedbackTags(record) {
+  const tags = [...(record.edit_tags || []), ...(record.feedback_types || [])].filter(Boolean);
+  if (!tags.length) return `<span class="project-badge muted">无标签</span>`;
+  return tags.map((tag) => `<span class="project-badge">${escapeHtml(tag)}</span>`).join("");
+}
+
+function renderFeedbackReviewPanel() {
+  const root = el("feedbackReviewPanel");
+  if (!root) return;
+  syncFeedbackReviewControls();
+  const review = state.feedbackReview;
+  if (review.loading) {
+    root.innerHTML = `
+      <div class="entity-panel">
+        <div class="entity-panel-head">
+          <div>
+            <h4>正在读取审核样本</h4>
+            <p>从本地 JSONL 数据集中读取，不会触发翻译请求。</p>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  const records = Array.isArray(review.records) ? review.records : [];
+  if (!records.length) {
+    root.innerHTML = `
+      <div class="entity-panel">
+        <div class="entity-panel-head">
+          <div>
+            <h4>暂无可审核样本</h4>
+            <p>${escapeHtml(review.message || "当前筛选条件下没有记录。可以先在项目产物里选择 ASS，再点击“学习本次 ASS”或“学习本次 Span”。")}</p>
+          </div>
+        </div>
+        <p class="local-feedback-note">说明：05/05a 只作为机器基线参与差异对齐，不会作为人工学习目标写入。</p>
+      </div>
+    `;
+    return;
+  }
+  root.innerHTML = `
+    <div class="feedback-review-explain">
+      <strong>简单说明</strong>
+      <p>“用于 Prompt”会被后续翻译检索注入；“Eval 样本”只用于离线评估，两者互斥。中高风险样本建议先人工确认，再决定是否接受。</p>
+      ${review.message ? `<p>${escapeHtml(review.message)}</p>` : ""}
+    </div>
+    <div class="feedback-record-list">
+      ${records
+        .map((record) => {
+          const isBusy = review.selectedRecordId === record.record_id;
+          const title =
+            review.kind === "span"
+              ? `Span ${record.span_id || record.index || ""} · ${Array.isArray(record.segment_ids) ? record.segment_ids.join(", ") : ""}`
+              : `分段 ${record.segment_id ?? record.index ?? ""}`;
+          const riskClass = record.learning_risk === "high" ? "danger" : record.learning_risk === "medium" ? "warn" : "ok";
+          return `
+            <article class="feedback-record">
+              <div class="feedback-record-head">
+                <div>
+                  <h4>${escapeHtml(title)}</h4>
+                  <p>${escapeHtml(record.project_id || "unknown project")}</p>
+                </div>
+                <div class="feedback-status-row">
+                  <span class="entity-chip ${record.accepted ? "" : "muted"}">${record.accepted ? "已接受" : "待审核"}</span>
+                  <span class="entity-chip ${record.use_for_prompt ? "" : "muted"}">Prompt ${record.use_for_prompt ? "是" : "否"}</span>
+                  <span class="entity-chip ${record.use_for_eval ? "" : "muted"}">Eval ${record.use_for_eval ? "是" : "否"}</span>
+                  <span class="entity-chip ${riskClass}">风险 ${escapeHtml(record.learning_risk || "low")}</span>
+                </div>
+              </div>
+              <div class="feedback-comparison">
+                <div><span>原文</span><p>${escapeHtml(record.source || "")}</p></div>
+                <div><span>机器基线</span><p>${escapeHtml(record.machine || "")}</p></div>
+                <div><span>人工 ASS</span><p>${escapeHtml(record.manual || "")}</p></div>
+              </div>
+              <div class="project-badges">${renderFeedbackTags(record)}</div>
+              <p class="local-feedback-note">建议：${escapeHtml(record.learning_recommendation || "人工复核")} · ${escapeHtml(record.created_at || "")}</p>
+              <div class="feedback-record-actions">
+                <button class="mini-btn" type="button" data-feedback-action="accept" data-feedback-record-id="${escapeHtml(record.record_id)}" ${isBusy ? "disabled" : ""}>接受</button>
+                <button class="mini-btn" type="button" data-feedback-action="prompt" data-feedback-record-id="${escapeHtml(record.record_id)}" ${isBusy ? "disabled" : ""}>用于 Prompt</button>
+                <button class="mini-btn" type="button" data-feedback-action="eval" data-feedback-record-id="${escapeHtml(record.record_id)}" ${isBusy ? "disabled" : ""}>用于 Eval</button>
+                <button class="mini-btn" type="button" data-feedback-action="clear" data-feedback-record-id="${escapeHtml(record.record_id)}" ${isBusy ? "disabled" : ""}>取消使用</button>
+                <button class="mini-btn" type="button" data-feedback-action="reject" data-feedback-record-id="${escapeHtml(record.record_id)}" ${isBusy ? "disabled" : ""}>退回待审</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+  root.querySelectorAll("[data-feedback-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const recordId = button.getAttribute("data-feedback-record-id") || "";
+      const action = button.getAttribute("data-feedback-action") || "";
+      const promptField = feedbackPromptField();
+      const updatesByAction = {
+        accept: { accepted: true },
+        prompt: { accepted: true, [promptField]: true, use_for_eval: false },
+        eval: { accepted: true, [promptField]: false, use_for_eval: true },
+        clear: { [promptField]: false, use_for_eval: false },
+        reject: { accepted: false, [promptField]: false, use_for_eval: false },
+      };
+      updateFeedbackReviewRecord(recordId, updatesByAction[action] || {});
+    });
+  });
+}
+
+async function refreshFeedbackReview() {
+  state.feedbackReview.loading = true;
+  state.feedbackReview.message = "";
+  renderFeedbackReviewPanel();
+  try {
+    const params = new URLSearchParams({
+      kind: state.feedbackReview.kind,
+      status: state.feedbackReview.status,
+      limit: "100",
+    });
+    const response = await fetch(`/api/local-feedback-records?${params.toString()}`);
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "读取审核样本失败");
+    state.feedbackReview.records = Array.isArray(payload.records) ? payload.records : [];
+    state.feedbackReview.message = `${payload.source_label || "学习样本"}：显示 ${payload.records?.length || 0} / ${payload.filtered_count || 0} 条，数据集总计 ${payload.total || 0} 条`;
+  } catch (error) {
+    state.feedbackReview.records = [];
+    state.feedbackReview.message = `读取审核样本失败：${error.message || error}`;
+    showToast(state.feedbackReview.message, "error");
+  } finally {
+    state.feedbackReview.loading = false;
+    renderFeedbackReviewPanel();
+  }
+}
+
+async function updateFeedbackReviewRecord(recordId, updates) {
+  if (!recordId) return;
+  const kind = state.feedbackReview.kind;
+  state.feedbackReview.selectedRecordId = recordId;
+  state.feedbackReview.message = "正在更新审核状态...";
+  renderFeedbackReviewPanel();
+  try {
+    const response = await fetch("/api/local-feedback-record-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, record_id: recordId, updates }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "审核状态更新失败");
+    if (payload.summary) state.localFeedbackSummary = payload.summary;
+    state.feedbackReview.message = "审核状态已更新";
+    renderLocalFeedbackSummary(state.localFeedbackSummary);
+    await refreshFeedbackReview();
+    refreshLearningQualitySummary();
+  } catch (error) {
+    state.feedbackReview.message = `审核状态更新失败：${error.message || error}`;
+    showToast(state.feedbackReview.message, "error");
+    renderFeedbackReviewPanel();
+  } finally {
+    state.feedbackReview.selectedRecordId = "";
+    renderFeedbackReviewPanel();
+  }
+}
+
+function renderCountList(rows, keyName, emptyText) {
+  if (!Array.isArray(rows) || !rows.length) return `<div class="entity-empty">${escapeHtml(emptyText)}</div>`;
+  return `<div class="learning-count-list">${rows
+    .map((row) => `<div><span>${escapeHtml(row[keyName] || "unknown")}</span><strong>${escapeHtml(row.count ?? 0)}</strong></div>`)
+    .join("")}</div>`;
+}
+
+function renderLearningQualityPanel() {
+  const root = el("learningQualityPanel");
+  if (!root) return;
+  const payload = state.learningQuality;
+  if (!payload) {
+    root.innerHTML = `
+      <div class="entity-panel">
+        <div class="entity-panel-head">
+          <div>
+            <h4>学习质量面板</h4>
+            <p>点击刷新后读取本地反馈数据集、Eval 报告和已学习规则。</p>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  if (payload.ok === false) {
+    root.innerHTML = `<div class="entity-alert">学习质量读取失败：${escapeHtml(payload.error || "unknown error")}</div>`;
+    return;
+  }
+  const counts = payload.counts || {};
+  const evalMetrics = payload.eval?.metrics || {};
+  const spanMetrics = payload.span_eval?.metrics || {};
+  const pending = payload.pending || {};
+  root.innerHTML = `
+    <div class="learning-quality-grid">
+      <div class="entity-metric"><span>ASS 编辑样本</span><strong>${escapeHtml(counts.translation_edit_count ?? 0)}</strong></div>
+      <div class="entity-metric"><span>ASS Prompt 样本</span><strong>${escapeHtml(counts.style_learning_count ?? 0)}</strong></div>
+      <div class="entity-metric"><span>ASS Eval 样本</span><strong>${escapeHtml(counts.style_gold_count ?? 0)}</strong></div>
+      <div class="entity-metric"><span>Span 样本</span><strong>${escapeHtml(counts.span_translation_example_count ?? 0)}</strong></div>
+      <div class="entity-metric"><span>Span Prompt 样本</span><strong>${escapeHtml(counts.span_style_learning_count ?? 0)}</strong></div>
+      <div class="entity-metric"><span>Span Eval 样本</span><strong>${escapeHtml(counts.span_eval_count ?? 0)}</strong></div>
+      <div class="entity-metric"><span>待审 ASS</span><strong>${escapeHtml(pending.style ?? 0)}</strong></div>
+      <div class="entity-metric"><span>待审 Span</span><strong>${escapeHtml(pending.span ?? 0)}</strong></div>
+      <div class="entity-metric"><span>ASS 不安全率</span><strong>${escapeHtml(formatPercent(evalMetrics.unsafe_sample_rate ?? 0))}</strong></div>
+      <div class="entity-metric"><span>ASS 信号率</span><strong>${escapeHtml(formatPercent(evalMetrics.semantic_or_style_signal_rate ?? 0))}</strong></div>
+      <div class="entity-metric"><span>Span 重分配率</span><strong>${escapeHtml(formatPercent(spanMetrics.semantic_reallocation_rate ?? 0))}</strong></div>
+      <div class="entity-metric"><span>Span 碎句补全率</span><strong>${escapeHtml(formatPercent(spanMetrics.fragment_completion_rate ?? 0))}</strong></div>
+    </div>
+    <div class="learning-quality-sections">
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>ASS 项目来源</h5><span>Top 8</span></div>
+        ${renderCountList(payload.projects?.style, "project_id", "暂无 ASS 来源统计")}
+      </section>
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>Span 项目来源</h5><span>Top 8</span></div>
+        ${renderCountList(payload.projects?.span, "project_id", "暂无 Span 来源统计")}
+      </section>
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>ASS 编辑标签</h5><span>Top 12</span></div>
+        ${renderCountList(payload.tags?.style, "tag", "暂无 ASS 标签统计")}
+      </section>
+      <section class="entity-section">
+        <div class="entity-section-head"><h5>Span 编辑标签</h5><span>Top 12</span></div>
+        ${renderCountList(payload.tags?.span, "tag", "暂无 Span 标签统计")}
+      </section>
+    </div>
+    <div class="learning-guideline-row">
+      <div class="local-feedback-guidelines">
+        <strong>ASS 已学习规则</strong>
+        ${
+          Array.isArray(payload.guidelines) && payload.guidelines.length
+            ? `<ul>${payload.guidelines.slice(0, 6).map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+            : `<p>暂无 ASS 规则预览。</p>`
+        }
+      </div>
+      <div class="local-feedback-guidelines">
+        <strong>Span 已学习规则</strong>
+        ${
+          Array.isArray(payload.span_guidelines) && payload.span_guidelines.length
+            ? `<ul>${payload.span_guidelines.slice(0, 6).map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+            : `<p>暂无 Span 规则预览。</p>`
+        }
+      </div>
+    </div>
+  `;
+}
+
+async function refreshLearningQualitySummary() {
+  try {
+    const response = await fetch("/api/learning-quality-summary");
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload) throw new Error(payload?.error || "学习质量读取失败");
+    state.learningQuality = payload;
+  } catch (error) {
+    state.learningQuality = { ok: false, error: error.message || String(error) };
+  }
+  renderLearningQualityPanel();
 }
 
 function humanRunStateLabel(stageKey, title) {
@@ -1860,9 +2142,31 @@ function renderReleaseArtifacts(project) {
     .join("")}</div>`;
 }
 
-async function organizeSelectedProjectArtifacts(projectPath) {
+async function previewSelectedProjectArtifacts(projectPath) {
   if (!projectPath) return;
   const button = el("organizeProjectArtifactsBtn");
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch("/api/organize-project-artifacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_path: projectPath, preview_only: true }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "预览整理方案失败");
+    state.organizePreview = payload;
+    renderProjectHealthSummary();
+    showToast(`整理预览已生成：计划移动 ${payload.move_count || 0} 个内部文件`);
+  } catch (error) {
+    showToast(`整理预览失败：${error.message || error}`, "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function confirmSelectedProjectArtifacts(projectPath) {
+  if (!projectPath) return;
+  const button = el("confirmOrganizeProjectArtifactsBtn");
   if (button) button.disabled = true;
   try {
     const response = await fetch("/api/organize-project-artifacts", {
@@ -1871,12 +2175,13 @@ async function organizeSelectedProjectArtifacts(projectPath) {
       body: JSON.stringify({ project_path: projectPath }),
     });
     const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "整理项目产物失败");
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "确认整理项目产物失败");
     if (Array.isArray(payload.projects)) {
       state.projects = payload.projects;
       state.selectedProject = payload.projects.find((project) => project.path === projectPath) || payload.project || state.selectedProject;
       renderProjects(state.projects);
     }
+    state.organizePreview = null;
     renderProjectHealthSummary();
     showToast(`发布产物已整理：移动 ${payload.moved_count || 0} 个内部文件`);
   } catch (error) {
@@ -1884,6 +2189,36 @@ async function organizeSelectedProjectArtifacts(projectPath) {
   } finally {
     if (button) button.disabled = false;
   }
+}
+
+function renderOrganizePreview(project) {
+  const preview = state.organizePreview;
+  if (!preview || preview.project_path !== project?.path) return "";
+  const planned = Array.isArray(preview.planned) ? preview.planned : [];
+  const kept = Array.isArray(preview.kept) ? preview.kept : [];
+  const previewRows = planned.slice(0, 10);
+  return `
+    <div class="organize-preview">
+      <div class="project-health-section-head">
+        <strong>整理预览</strong>
+        <button id="confirmOrganizeProjectArtifactsBtn" class="mini-btn" type="button">确认移动内部文件</button>
+      </div>
+      <p class="local-feedback-note">安全两段式：这里还没有移动文件；确认后才会把非发布必需品移入 99_internal_artifacts。</p>
+      ${
+        previewRows.length
+          ? `<div class="organize-preview-list">${previewRows
+              .map((item) => `<div><span>${escapeHtml(item.from || "")}</span><strong>${escapeHtml(item.to || "")}</strong></div>`)
+              .join("")}</div>`
+          : `<div class="entity-empty">没有需要移动的内部文件。</div>`
+      }
+      ${
+        planned.length > previewRows.length
+          ? `<p class="local-feedback-note">还有 ${escapeHtml(planned.length - previewRows.length)} 个移动项未展开显示。</p>`
+          : ""
+      }
+      <p class="local-feedback-note">将保留 ${escapeHtml(kept.length)} 个发布必需品在项目根目录。</p>
+    </div>
+  `;
 }
 
 function renderProjectHealthSummary() {
@@ -1910,6 +2245,7 @@ function renderProjectHealthSummary() {
     Number(entitySummary.ass_issue_count ?? 0) +
     Number(entitySummary.target_entity_residue_count ?? 0) +
     Number(entitySummary.english_residue_count ?? 0);
+  const health = project.health || {};
   const hasFeedback = Boolean(getProjectFile(project, "00_style_examples.jsonl"));
   const missing = Array.isArray(health.missing_release_artifacts) ? health.missing_release_artifacts : [];
   const healthLabel = health.ready ? "可发布" : missing.length ? `缺少 ${missing.join(" / ")}` : "待复核";
@@ -1932,14 +2268,16 @@ function renderProjectHealthSummary() {
     <div class="project-health-section">
       <div class="project-health-section-head">
         <strong>发布必需品</strong>
-        <button id="organizeProjectArtifactsBtn" class="mini-btn" type="button">整理发布产物</button>
+        <button id="organizeProjectArtifactsBtn" class="mini-btn" type="button">预览整理方案</button>
       </div>
       ${renderReleaseArtifacts(project)}
       <p class="local-feedback-note">保留简介、两个封面、最终 ASS 和烤制视频；其他根目录文件移动到 99_internal_artifacts。</p>
     </div>
+    ${renderOrganizePreview(project)}
     ${renderProjectHealthBadges(project)}
   `;
-  el("organizeProjectArtifactsBtn")?.addEventListener("click", () => organizeSelectedProjectArtifacts(project.path));
+  el("organizeProjectArtifactsBtn")?.addEventListener("click", () => previewSelectedProjectArtifacts(project.path));
+  el("confirmOrganizeProjectArtifactsBtn")?.addEventListener("click", () => confirmSelectedProjectArtifacts(project.path));
 }
 
 const ENTITY_ARTIFACT_FILES = {
@@ -3188,6 +3526,8 @@ function renderState(payload) {
   renderWorkflowSummary();
   renderAdvancedStrategySummary();
   renderLocalFeedbackSummary(state.localFeedbackSummary);
+  renderFeedbackReviewPanel();
+  renderLearningQualityPanel();
   renderOpenAiRuntimeStatus();
   renderCommandContext();
 }
@@ -3438,6 +3778,8 @@ function bindTabs() {
       const panel = btn.dataset.panel;
       if (!panel) return;
       switchPanel(panel);
+      if (panel === "feedback-review") refreshFeedbackReview();
+      if (panel === "learning-quality") refreshLearningQualitySummary();
       scrollToWorkspaceDetails();
     });
   });
@@ -3756,6 +4098,16 @@ function bindActions() {
   el("collectSpanFeedbackBtn")?.addEventListener("click", () => {
     collectLocalFeedback("span");
   });
+  el("feedbackReviewKind")?.addEventListener("change", (event) => {
+    state.feedbackReview.kind = event.target.value || "style";
+    refreshFeedbackReview();
+  });
+  el("feedbackReviewStatus")?.addEventListener("change", (event) => {
+    state.feedbackReview.status = event.target.value || "pending";
+    refreshFeedbackReview();
+  });
+  el("refreshFeedbackReviewBtn")?.addEventListener("click", refreshFeedbackReview);
+  el("refreshLearningQualityBtn")?.addEventListener("click", refreshLearningQualitySummary);
   el("reburnFromInputBtn").addEventListener("click", () => {
     const projectPath = state.selectedVideoProjectPath || null;
     if (!projectPath) return;
@@ -3849,7 +4201,7 @@ function bindSubtitleStyleControls() {
 function bindConfigInputs() {
   document.querySelectorAll("input, textarea, select").forEach((node) => {
     if (!node.id) return;
-    if (["videoFileInput", "audioFileInput"].includes(node.id)) return;
+    if (["videoFileInput", "audioFileInput", "feedbackReviewKind", "feedbackReviewStatus"].includes(node.id)) return;
     if (node.id.endsWith("_value")) return;
     const eventName = node.type === "checkbox" || node.tagName === "SELECT" ? "change" : "input";
     node.addEventListener(eventName, () => {
@@ -3867,6 +4219,9 @@ bindActions();
 renderConfigSaveState();
 renderAdvancedStrategySummary();
 renderLocalFeedbackSummary(null);
+renderFeedbackReviewPanel();
+renderLearningQualityPanel();
 revealMotionNodes();
 refreshLocalFeedbackSummary();
+refreshLearningQualitySummary();
 bootstrap();
