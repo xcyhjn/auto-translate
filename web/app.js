@@ -2356,6 +2356,7 @@ function bilibiliDecisionLabel(decision) {
     low_confidence_related: "仅发现低置信相关",
     no_clear_duplicate_found: "未发现明确重复",
     no_candidates_manual_review: "未解析到候选，可手动复核",
+    no_candidates_search_completed: "已搜索，未发现可解析候选",
     search_unavailable_manual_review: "检测失败，可手动复核",
   };
   return labels[decision] || "未检测";
@@ -2377,6 +2378,7 @@ function renderBilibiliDuplicate() {
   const candidates = Array.isArray(report.candidates) ? report.candidates.slice(0, 5) : [];
   const query = (report.queries || report.query_plan || [])[0] || {};
   const best = report.best_candidate || candidates[0] || null;
+  const searchSummary = report.search_summary || {};
   const isFailure = status === "error";
   const isRunning = status === "running";
   const high = decision === "high_confidence_possible_duplicate";
@@ -2395,7 +2397,9 @@ function renderBilibiliDuplicate() {
     ? "正在生成查询并轻量搜索 B 站"
     : isFailure
       ? escapeHtml(stateValue.error || "检测失败")
-      : `候选 ${candidates.length} 个 · Top score ${report.scoring_summary?.top_score ?? 0}`;
+      : searchSummary.searched
+        ? `已搜索 ${searchSummary.successful_query_count || 0}/${searchSummary.attempted_query_count || 0} 个查询 · 解析候选 ${searchSummary.parsed_candidate_count || 0} 个 · Top score ${report.scoring_summary?.top_score ?? 0}`
+        : `未触发搜索 · 候选 ${candidates.length} 个 · Top score ${report.scoring_summary?.top_score ?? 0}`;
 
   const bestHtml = best
     ? `<div class="bilibili-best">

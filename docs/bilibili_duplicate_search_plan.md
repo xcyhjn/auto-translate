@@ -42,6 +42,8 @@ New API:
 
 The user does not need to click the YouTube info button first. If `youtube_meta` is already available, the API reuses it; otherwise it fetches YouTube metadata internally before building Bilibili queries. The search still depends on metadata, because title and duration are required for useful query generation and scoring.
 
+If the search runs but does not find parseable candidates, the UI should say so explicitly and keep the manual search links. Only a total inability to search should be treated as a failure.
+
 Artifacts written into the selected output folder:
 - `00b_bilibili_duplicate_search.json`
 - `00b_bilibili_duplicate_candidates.tsv`

@@ -44,7 +44,37 @@ def test_parse_failure_keeps_search_url_fallback_in_report() -> None:
         sleep_seconds=0,
     )
 
-    assert report["decision"] == "no_candidates_manual_review"
+    assert report["decision"] == "no_candidates_search_completed"
     assert report["queries"]
     assert report["queries"][0]["fallback_manual_review"] is True
     assert report["queries"][0]["search_url"].startswith("https://search.bilibili.com/video?keyword=")
+
+
+def test_partial_search_timeout_is_not_reported_as_total_failure() -> None:
+    meta = {
+        "title": "The Russian book about a dying god",
+        "description": "",
+        "author": "Paper Trail",
+        "published_at": "2025-01-10",
+        "duration": 1200,
+    }
+    calls = {"count": 0}
+
+    def empty_then_timeout(query: str, **kwargs) -> list[dict]:
+        calls["count"] += 1
+        if calls["count"] >= 3:
+            raise TimeoutError("Bilibili request timed out")
+        return []
+
+    report = build_bilibili_duplicate_report(
+        "https://www.youtube.com/watch?v=abc123XYZ09",
+        meta,
+        search_func=empty_then_timeout,
+        max_queries=4,
+        sleep_seconds=0,
+    )
+
+    assert report["decision"] == "no_candidates_search_completed"
+    assert report["search_summary"]["searched"] is True
+    assert report["search_summary"]["successful_query_count"] == 2
+    assert report["errors"]

@@ -679,7 +679,22 @@ def score_bilibili_candidate(candidate: dict, youtube_meta: dict, query_plan: li
     return scored
 
 
-def decision_for_candidates(candidates: list[dict], errors: list[dict]) -> str:
+def summarize_query_runs(query_runs: list[dict], errors: list[dict]) -> dict:
+    attempted_count = len(query_runs)
+    successful_count = sum(1 for run in query_runs if run.get("ok") is True)
+    parsed_count = sum(int(run.get("parsed_count") or 0) for run in query_runs)
+    manual_fallback_count = sum(1 for run in query_runs if run.get("fallback_manual_review"))
+    return {
+        "attempted_query_count": attempted_count,
+        "successful_query_count": successful_count,
+        "parsed_candidate_count": parsed_count,
+        "manual_fallback_query_count": manual_fallback_count,
+        "error_count": len(errors),
+        "searched": successful_count > 0,
+    }
+
+
+def decision_for_candidates(candidates: list[dict], errors: list[dict], search_summary: dict | None = None) -> str:
     if candidates:
         best_score = int(candidates[0].get("score") or 0)
         if best_score >= 80:
@@ -689,6 +704,8 @@ def decision_for_candidates(candidates: list[dict], errors: list[dict]) -> str:
         if best_score >= 40:
             return "low_confidence_related"
         return "no_clear_duplicate_found"
+    if search_summary and search_summary.get("searched"):
+        return "no_candidates_search_completed"
     if errors:
         return "search_unavailable_manual_review"
     return "no_candidates_manual_review"
@@ -782,6 +799,7 @@ def build_bilibili_duplicate_report(
         for candidate in merged_candidates
     ]
     scored_candidates.sort(key=lambda item: int(item.get("score") or 0), reverse=True)
+    search_summary = summarize_query_runs(query_runs, errors)
     report = {
         "input_youtube_url": input_youtube_url,
         "youtube_meta": youtube_meta,
@@ -790,7 +808,8 @@ def build_bilibili_duplicate_report(
         "candidates": scored_candidates,
         "scoring_summary": summarize_scores(scored_candidates),
         "best_candidate": scored_candidates[0] if scored_candidates else None,
-        "decision": decision_for_candidates(scored_candidates, errors),
+        "search_summary": search_summary,
+        "decision": decision_for_candidates(scored_candidates, errors, search_summary),
         "errors": errors,
         "proxy_info": {
             "proxy_url": proxy_url or "",

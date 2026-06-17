@@ -734,3 +734,41 @@ Rollback:
 Next:
 
 - Optional: replace the saved proxy field with a real proxy endpoint, or leave it blank for direct Bilibili checks.
+
+## 2026-06-17 08:55 +00:00 - Bilibili Search State Label Fix
+
+Observation:
+
+- The UI card showed `检测失败，可手动复核` for `Russian book about a dying god`.
+- The written report showed the search did run:
+  - six queries had `ok = true`
+  - each parsed `0` candidates
+  - the seventh query was skipped by the 45s total timeout
+- That means the correct state is not total failure; it is "searched, no parseable candidates".
+
+What:
+
+- Added `search_summary` to Bilibili duplicate reports:
+  - attempted query count
+  - successful query count
+  - parsed candidate count
+  - manual fallback query count
+  - error count
+  - searched flag
+- Changed decision logic:
+  - no successful searches + error => `search_unavailable_manual_review`
+  - at least one successful search + no candidates => `no_candidates_search_completed`
+- Updated the frontend card text to show searched query counts and parsed candidate counts while keeping manual search links.
+- Added a regression test for partial timeout after successful empty searches.
+
+Validation:
+
+- `pytest test_bilibili_query_plan.py test_bilibili_candidate_scoring.py test_bilibili_search_parsing.py test_ui_server_bilibili_api.py`
+  - `10 passed in 1.29s`
+- `python -m py_compile bilibili_search.py ui_server.py`
+- `node --check web\app.js`
+- Live API request after restarting UI server on port 8790:
+  - `decision = no_candidates_search_completed`
+  - `searched = true`
+  - `successful_query_count = 7`
+  - `parsed_candidate_count = 0`
