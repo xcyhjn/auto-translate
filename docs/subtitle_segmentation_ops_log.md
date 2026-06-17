@@ -1127,3 +1127,24 @@ Verification:
 Notes:
 
 - The collectors still read `05_translated_segments.json` or `05a_span_translated_segments.json` only to compare the machine output against final ASS edits. They are not accepted as target learning data.
+
+## 2026-06-17 22:45 +08:00 - Move Feedback Learning To Selected Input Video
+
+User direction:
+
+- Do not require opening an ASS page/file before learning.
+- Allow clicking learn after selecting a video in the workspace.
+
+What:
+
+- Added `学习本次 ASS` and `学习本次 Span` buttons directly to the top input-video card.
+- Changed feedback-learning target selection to prefer the current selected input video's matched output project.
+- Kept the project/file fallback only for cases where no input video is selected.
+- Updated the feedback card status to show `学习目标：当前选中视频 -> project`.
+- Disabled the top learning buttons unless the selected input video has a matched output project with a usable ASS path.
+
+Verification:
+
+- `node --check web\app.js`
+- `python -m py_compile ui_server.py feedback_dataset.py`
+- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`

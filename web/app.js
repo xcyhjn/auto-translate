@@ -374,6 +374,8 @@ function decorateStaticButtons() {
     ["rebuildPaddedCoverBtn", "refresh"],
     ["copyErrorBtn", "copy"],
     ["applyRussianWorkflowBtn", "spark"],
+    ["collectVideoAssFeedbackBtn", "spark"],
+    ["collectVideoSpanFeedbackBtn", "spark"],
     ["collectStyleFeedbackBtn", "spark"],
     ["learnStyleBtn", "spark"],
     ["reburnFromInputBtn", "refresh"],
@@ -489,11 +491,16 @@ function findProjectForSelectedVideo() {
 function renderInputAssStatus() {
   const statusNode = el("inputAssStatus");
   const buttonNode = el("reburnFromInputBtn");
+  const assLearningButton = el("collectVideoAssFeedbackBtn");
+  const spanLearningButton = el("collectVideoSpanFeedbackBtn");
   if (!statusNode || !buttonNode) return;
 
   const project = state.selectedVideoProject;
   const busy = taskIsBusy(state.runtime);
   buttonNode.disabled = busy || !project?.ass_path;
+  const learningDisabled = busy || !state.selectedVideo || !project?.ass_path;
+  if (assLearningButton) assLearningButton.disabled = learningDisabled;
+  if (spanLearningButton) spanLearningButton.disabled = learningDisabled;
 
   if (!state.selectedVideo) {
     statusNode.textContent = "请先选择一个 input 视频";
@@ -1214,6 +1221,7 @@ function renderLocalFeedbackSummary(payload) {
     (state.projects || []).find((project) => project.path === selectedProjectPath) ||
     (state.selectedProject?.path === selectedProjectPath ? state.selectedProject : null);
   const selectedProjectName = selectedProject?.name || (selectedProjectPath ? selectedProjectPath.split(/[\\/]/).filter(Boolean).pop() : "");
+  const projectSourceLabel = currentFeedbackProjectSourceLabel();
   const rawAction = state.localFeedbackAction || {};
   const action = rawAction.projectPath === selectedProjectPath ? rawAction : {};
   const actionBusy = action.status === "running";
@@ -1223,8 +1231,10 @@ function renderLocalFeedbackSummary(payload) {
       : action.status === "error"
         ? action.message
         : selectedProjectName
-          ? `当前项目：${selectedProjectName}`
-          : "请先在产物页选择一个项目";
+          ? `学习目标：${projectSourceLabel} -> ${selectedProjectName}`
+          : state.selectedVideo
+            ? "当前选中视频还没有匹配到输出项目或 ASS"
+            : "请先在工作区选择一个 input 视频";
   const actionClass = action.status === "error" ? " error" : action.status === "success" ? " ok" : "";
   root.innerHTML = `
     <div class="local-feedback-head">
@@ -1297,7 +1307,17 @@ function renderLocalFeedbackSummary(payload) {
 }
 
 function currentFeedbackProjectPath() {
+  if (state.selectedVideo) {
+    return state.selectedVideoProjectPath || null;
+  }
   return state.selectedFileProjectPath || state.selectedProject?.path || null;
+}
+
+function currentFeedbackProjectSourceLabel() {
+  if (state.selectedVideo) return "当前选中视频";
+  if (state.selectedFileProjectPath) return "当前预览文件";
+  if (state.selectedProject?.path) return "当前产物项目";
+  return "未选择";
 }
 
 function localFeedbackResultMessage(kind, payload) {
@@ -1316,7 +1336,7 @@ function localFeedbackResultMessage(kind, payload) {
 async function collectLocalFeedback(kind) {
   const projectPath = currentFeedbackProjectPath();
   if (!projectPath) {
-    showToast("请先在产物页选择一个项目", "warn");
+    showToast("请先在工作区选择一个已有输出项目的 input 视频", "warn");
     return;
   }
   const endpoint = kind === "span" ? "/api/collect-span-feedback" : "/api/collect-style-feedback";
@@ -1447,6 +1467,7 @@ function syncSelectedVideo(videos) {
     inspectSelectedVideo();
   }
   renderInputAssStatus();
+  renderLocalFeedbackSummary(state.localFeedbackSummary);
 }
 
 function renderVideos(videos) {
@@ -3608,6 +3629,12 @@ function bindActions() {
   });
   el("collectStyleFeedbackBtn")?.addEventListener("click", () => {
     collectLocalFeedback("ass");
+  });
+  el("collectVideoAssFeedbackBtn")?.addEventListener("click", () => {
+    collectLocalFeedback("ass");
+  });
+  el("collectVideoSpanFeedbackBtn")?.addEventListener("click", () => {
+    collectLocalFeedback("span");
   });
   el("reburnFromInputBtn").addEventListener("click", () => {
     const projectPath = state.selectedVideoProjectPath || null;
