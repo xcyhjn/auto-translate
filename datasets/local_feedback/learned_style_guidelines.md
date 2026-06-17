@@ -4,25 +4,25 @@ Generated from accepted local feedback samples only.
 
 ## Observed Signals
 
-- Accepted style samples: 898
-- Feedback type `style_edit`: 889
-- Feedback type `semantic_fix`: 560
-- Feedback type `term_fix`: 139
+- Accepted style samples: 1009
+- Feedback type `style_edit`: 999
+- Feedback type `semantic_fix`: 613
+- Feedback type `term_fix`: 155
+- Feedback type `surface_edit`: 15
 - Feedback type `qa_repair`: 14
-- Feedback type `surface_edit`: 10
-- Tag `punctuation_tuned`: 817
-- Tag `expanded`: 377
-- Tag `compressed`: 257
-- Tag `preserve_english`: 129
-- Tag `mixed_naming`: 21
+- Tag `punctuation_tuned`: 907
+- Tag `expanded`: 384
+- Tag `compressed`: 318
+- Tag `preserve_english`: 145
+- Tag `mixed_naming`: 22
 - Tag `fixed_open_ending`: 14
-- Strategy `expand`: 377
-- Strategy `compress`: 257
-- Strategy `preserve_term`: 129
-- Strategy `trim_lead`: 21
-- Strategy `reduce_clause_count`: 17
+- Strategy `expand`: 384
+- Strategy `compress`: 318
+- Strategy `preserve_term`: 145
+- Strategy `trim_lead`: 25
+- Strategy `reduce_clause_count`: 21
+- Strategy `trim_tail`: 15
 - Strategy `close_open_clause`: 14
-- Strategy `trim_tail`: 12
 - Strategy `keep_core_clause`: 1
 
 ## Suggested Guidelines

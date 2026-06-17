@@ -1,24 +1,24 @@
 {
   "schema_version": 1,
-  "created_at": "2026-06-17T10:59:08.242786+00:00",
-  "sample_count": 78,
+  "created_at": "2026-06-17T12:44:09.497475+00:00",
+  "sample_count": 87,
   "sample_insufficient": false,
   "sample_note": "Gold set is large enough for a first subtitle feedback trend check.",
   "metrics": {
-    "avg_machine_manual_similarity": 0.5232,
-    "avg_abs_char_delta": 9.67,
-    "surface_edit_rate": 0.0256,
+    "avg_machine_manual_similarity": 0.5334,
+    "avg_abs_char_delta": 9.49,
+    "surface_edit_rate": 0.023,
     "semantic_or_style_signal_rate": 1.0,
     "unsafe_sample_rate": 0.0
   },
   "feedback_type_counts": [
     {
       "value": "style_edit",
-      "count": 77
+      "count": 86
     },
     {
       "value": "semantic_fix",
-      "count": 51
+      "count": 57
     },
     {
       "value": "term_fix",
@@ -32,19 +32,19 @@
   "learning_risk_counts": [
     {
       "value": "low",
-      "count": 78
+      "count": 87
     }
   ],
   "learning_recommendation_counts": [
     {
       "value": "style_prompt_candidate",
-      "count": 78
+      "count": 87
     }
   ],
   "edit_tag_counts": [
     {
       "value": "punctuation_tuned",
-      "count": 72
+      "count": 79
     },
     {
       "value": "expanded",
@@ -52,7 +52,7 @@
     },
     {
       "value": "compressed",
-      "count": 24
+      "count": 30
     },
     {
       "value": "preserve_english",
@@ -70,7 +70,7 @@
     },
     {
       "value": "compress",
-      "count": 24
+      "count": 30
     },
     {
       "value": "preserve_term",
@@ -78,17 +78,21 @@
     },
     {
       "value": "reduce_clause_count",
-      "count": 3
+      "count": 4
     },
     {
       "value": "trim_lead",
+      "count": 2
+    },
+    {
+      "value": "trim_tail",
       "count": 1
     }
   ],
   "quality_flag_counts": [
     {
       "value": "needs_human_acceptance",
-      "count": 78
+      "count": 87
     },
     {
       "value": "surface_only_edit",

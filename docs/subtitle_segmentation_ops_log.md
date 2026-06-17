@@ -1010,3 +1010,40 @@ Verification:
 - `py -m autosub_zh.feedback_dataset build-gold`
 - `py -m autosub_zh.feedback_dataset eval-style`
 - `py -m autosub_zh.feedback_dataset summarize`
+
+## 2026-06-17 20:45 +08:00 - Archive ASS Feedback Learning Batch 2
+
+User direction:
+
+- Continue learning subtitle translation style from three archived bilingual ASS files:
+  - `A-huge-path-drawing-puzzle-where-the-rules-keep-changing-Rorschach-s-River`
+  - `An-Ignorant-Guide-to-Shoegaze`
+  - `Dubai-Has-a-Sewage-Problem`
+
+What:
+
+- Confirmed all three projects have usable `08_bilingual_zh_en.ass` and `05_translated_segments.json`.
+- Collected subtitle edit feedback serially to avoid concurrent JSONL writes.
+- Accepted low-risk style feedback and kept learning/eval separation:
+  - Rorschach's River: 5 eligible samples, 5 style-learning, 0 eval
+  - Shoegaze: 62 eligible samples, 57 style-learning, 5 eval
+  - Dubai sewage: 53 eligible samples, 49 style-learning, 4 eval
+
+Dataset state after rebuild:
+
+- Translation edit records: 1101
+- Translation style-learning records: 1009
+- Translation eval-marked records: 87
+- Style gold records: 87
+- Latest style eval unsafe sample rate: 0.0
+
+Verification:
+
+- `python -m py_compile feedback_dataset.py ui_server.py`
+- `node --check web\app.js`
+- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py`
+- `py -m autosub_zh.feedback_dataset dedupe`
+- `py -m autosub_zh.feedback_dataset validate`
+- `py -m autosub_zh.feedback_dataset build-gold`
+- `py -m autosub_zh.feedback_dataset eval-style`
+- `py -m autosub_zh.feedback_dataset summarize`
