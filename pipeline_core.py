@@ -51,7 +51,7 @@ from .semantic_allocation import build_semantic_allocation_report
 from .source_repair import repair_source_segments
 from .source_spans import SOURCE_SPAN_POLICY_VERSION, detect_source_spans
 from .span_repair import repair_difficult_spans
-from .span_translate import build_span_translation_fingerprint, translate_source_spans
+from .span_translate import read_span_examples, build_span_translation_fingerprint, translate_source_spans
 from .subtitle_io import (
     prepare_bilingual_ass_segments,
     write_bilingual_ass_from_display_cues,
@@ -88,6 +88,7 @@ VIDEO_PRESET = "p4"
 VIDEO_QUALITY = "25"
 TARGET_MAX_HEIGHT = 1080
 LOCAL_FEEDBACK_STYLE_GUIDELINES_PATH = Path(__file__).resolve().parent / "datasets" / "local_feedback" / "learned_style_guidelines.md"
+LOCAL_FEEDBACK_SPAN_EXAMPLES_PATH = Path(__file__).resolve().parent / "datasets" / "local_feedback" / "span_translation_examples.jsonl"
 
 
 def write_json(path: Path, payload: object) -> None:
@@ -568,6 +569,11 @@ def run_pipeline(
         translation_prompt=translation_prompt,
         project_style_prompt_path=style_prompt_path,
         enable_local_translation_feedback=enable_local_translation_feedback,
+    )
+    span_prompt_examples = (
+        read_span_examples(LOCAL_FEEDBACK_SPAN_EXAMPLES_PATH)
+        if enable_local_translation_feedback
+        else []
     )
     processing_video_path = input_path
     auto_glossary_path = ensure_project_glossary(output_dir)
@@ -1158,6 +1164,7 @@ def run_pipeline(
                 glossary_text=span_glossary_text,
                 model=translation_model,
                 style_prompt_text=style_prompt_for_translation,
+                span_examples=span_prompt_examples,
                 max_spans=span_translation_max_spans,
                 max_segments_per_span=span_translation_max_segments,
                 max_duration=span_translation_max_duration,
@@ -1202,6 +1209,7 @@ def run_pipeline(
                     glossary_text=span_glossary_text,
                     model=translation_model,
                     style_prompt_text=style_prompt_for_translation,
+                    span_prompt_examples=span_prompt_examples,
                     base_url=openai_base_url,
                     max_retries=translation_retries,
                     max_spans=span_translation_max_spans,

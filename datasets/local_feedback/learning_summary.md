@@ -10,6 +10,9 @@ Dataset: `D:\autosub_zh\datasets\local_feedback`
 - Translation edit records: 1101
 - Translation style-learning records: 1009
 - Translation eval-marked records: 87
+- Span translation example records: 7
+- Span style-learning records: 0
+- Span eval-marked records: 0
 
 ## Guardrails
 

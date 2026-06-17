@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
+from pathlib import Path
 from typing import Callable
 
 from .english_residue_policy import analyze_english_residue
@@ -30,6 +32,8 @@ DEFAULT_MAX_SEGMENTS_PER_SPAN = 4
 DEFAULT_MAX_SPAN_DURATION = 12.0
 DEFAULT_MIN_RISK_SCORE = 10
 SPAN_TRANSLATION_POLICY_VERSION = "span_translation_v2"
+DEFAULT_SPAN_EXAMPLES_PATH = Path(__file__).resolve().parent / "datasets" / "local_feedback" / "span_translation_examples.jsonl"
+DEFAULT_SPAN_EXAMPLE_TOP_K = 3
 
 
 def _stable_hash(payload: object) -> str:
@@ -44,6 +48,7 @@ def build_span_translation_fingerprint(
     glossary_text: str = "",
     model: str = "",
     style_prompt_text: str = "",
+    span_examples: list[dict] | None = None,
     max_spans: int = DEFAULT_MAX_SPANS,
     max_segments_per_span: int = DEFAULT_MAX_SEGMENTS_PER_SPAN,
     max_duration: float = DEFAULT_MAX_SPAN_DURATION,
@@ -89,9 +94,123 @@ def build_span_translation_fingerprint(
         "source_spans_hash": _stable_hash(span_payload),
         "glossary_hash": _stable_hash(glossary_text or ""),
         "style_prompt_hash": _stable_hash(style_prompt_text or ""),
+        "span_examples_hash": _stable_hash(summarize_span_examples_for_hash(span_examples or [])),
         "model": model,
         "config": config,
     }
+
+
+def summarize_span_examples_for_hash(examples: list[dict]) -> list[dict]:
+    return [
+        {
+            "project_id": example.get("project_id"),
+            "span_id": example.get("span_id"),
+            "segment_ids": example.get("segment_ids") or [],
+            "edit_tags": example.get("edit_tags") or [],
+            "manual_target_by_id": example.get("manual_target_by_id") or {},
+        }
+        for example in examples
+    ]
+
+
+def read_span_examples(path: str | Path | None = DEFAULT_SPAN_EXAMPLES_PATH) -> list[dict]:
+    if not path:
+        return []
+    examples_path = Path(path)
+    if not examples_path.exists():
+        return []
+    records: list[dict] = []
+    for raw_line in examples_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(payload, dict)
+            and payload.get("accepted") is True
+            and payload.get("use_for_span_prompt") is True
+            and payload.get("use_for_eval") is not True
+            and payload.get("learning_risk") != "high"
+            and "bad_alignment" not in set(str(item) for item in payload.get("edit_tags") or [])
+        ):
+            records.append(payload)
+    return records
+
+
+TOKEN_RE = re.compile(r"[A-Za-z0-9']+|[\u3400-\u9fff]{1,2}")
+
+
+def token_set(text: str) -> set[str]:
+    return {token.casefold() for token in TOKEN_RE.findall(str(text or ""))}
+
+
+def score_span_example(span: dict, example: dict) -> int:
+    score = 0
+    span_risks = set((span.get("risk_reasons") or {}).keys()) if isinstance(span.get("risk_reasons"), dict) else set()
+    example_risks = set((example.get("risk_reasons") or {}).keys()) if isinstance(example.get("risk_reasons"), dict) else set()
+    score += len(span_risks & example_risks) * 8
+    if str(span.get("translation_strategy") or "") == str(example.get("translation_strategy") or ""):
+        score += 10
+    source_tokens = token_set(str(span.get("source_joined") or ""))
+    example_tokens = token_set(str(example.get("source_joined") or ""))
+    if source_tokens and example_tokens:
+        score += int(20 * len(source_tokens & example_tokens) / max(len(source_tokens | example_tokens), 1))
+    span_count = len(span.get("segment_ids") or [])
+    example_count = len(example.get("segment_ids") or [])
+    score += max(0, 6 - abs(span_count - example_count) * 2)
+    span_duration = float(span.get("duration") or 0.0)
+    example_duration = float(example.get("duration") or 0.0)
+    if span_duration and example_duration:
+        score += max(0, 5 - int(abs(span_duration - example_duration)))
+    if set(example.get("edit_tags") or []) & {"semantic_reallocation", "fragment_completion", "close_open_clause"}:
+        score += 3
+    return score
+
+
+def select_span_prompt_examples(span: dict, examples: list[dict], *, top_k: int = DEFAULT_SPAN_EXAMPLE_TOP_K) -> list[dict]:
+    if top_k <= 0 or not examples:
+        return []
+    scored = [
+        (score_span_example(span, example), index, example)
+        for index, example in enumerate(examples)
+    ]
+    scored = [item for item in scored if item[0] > 0]
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [item[2] for item in scored[:top_k]]
+
+
+def compact_span_prompt_example(example: dict) -> dict:
+    return {
+        "source_joined": str(example.get("source_joined") or "")[:500],
+        "risk_reasons": example.get("risk_reasons") if isinstance(example.get("risk_reasons"), dict) else {},
+        "translation_strategy": str(example.get("translation_strategy") or ""),
+        "context_before": (example.get("context_before") or [])[-2:],
+        "context_after": (example.get("context_after") or [])[:2],
+        "manual_target_by_id": example.get("manual_target_by_id") if isinstance(example.get("manual_target_by_id"), dict) else {},
+        "edit_tags": example.get("edit_tags") or [],
+        "lesson": build_span_example_lesson(example),
+    }
+
+
+def build_span_example_lesson(example: dict) -> str:
+    tags = set(str(item) for item in example.get("edit_tags") or [])
+    lessons: list[str] = []
+    if "semantic_reallocation" in tags:
+        lessons.append("redistribute the full idea across IDs")
+    if "fragment_completion" in tags:
+        lessons.append("avoid orphan fragments")
+    if "close_open_clause" in tags:
+        lessons.append("close dangling clauses")
+    if "compress_span" in tags:
+        lessons.append("compress wordy span wording")
+    if "expand_span" in tags:
+        lessons.append("restore missing context")
+    if "preserve_term" in tags:
+        lessons.append("preserve key terms")
+    return "; ".join(lessons) or "follow the manual ID-level span allocation"
 
 
 def build_span_translation_schema() -> dict:
@@ -129,6 +248,7 @@ def build_span_translation_prompt(
     dst_lang: str,
     glossary_text: str,
     style_prompt_text: str = "",
+    span_prompt_examples: list[dict] | None = None,
 ) -> str:
     input_payload = [
         {
@@ -147,6 +267,13 @@ def build_span_translation_prompt(
         {"id": segment.id, "source_text": segment.source_text, "target_text": segment.target_text or ""}
         for segment in context_after
     ]
+    examples_payload = [compact_span_prompt_example(example) for example in span_prompt_examples or []]
+    examples_block = (
+        "Matched local span examples JSON:\n"
+        f"{json.dumps(examples_payload, ensure_ascii=False)}\n\n"
+        if examples_payload
+        else ""
+    )
     return (
         "You are translating a high-risk subtitle span before normal chunk translation.\n"
         f"Translate from {src_lang or 'auto-detected source language'} to {dst_lang}.\n\n"
@@ -170,6 +297,7 @@ def build_span_translation_prompt(
         "- Short function words and pronouns such as and, but, then, I, I'm, and that's must be translated or absorbed. Never leave mixed Chinese like Then我觉得, I'm可以, That's问题, or And I他妈太喜欢了.\n"
         "- Do not add manual line breaks, markdown, bullets, numbering, or polluted scripts.\n\n"
         f"Style guidance:\n{build_style_guidance(style_prompt_text)}\n\n"
+        f"{examples_block}"
         f"{style_glossary_hints(glossary_text)}\n"
         f"Source span metadata:\n{json.dumps(span, ensure_ascii=False)}\n\n"
         f"Glossary:\n{glossary_text or 'No glossary provided.'}\n\n"
@@ -317,6 +445,7 @@ def translate_source_span_with_openai(
     glossary_text: str,
     model: str,
     style_prompt_text: str = "",
+    span_prompt_examples: list[dict] | None = None,
     base_url: str | None = None,
     max_retries: int = 2,
     context_window: int = 4,
@@ -354,6 +483,7 @@ def translate_source_span_with_openai(
         dst_lang=dst_lang,
         glossary_text=glossary_text,
         style_prompt_text=style_prompt_text,
+        span_prompt_examples=span_prompt_examples,
     )
 
     client_kwargs = {"timeout": resolve_openai_timeout_seconds(), "max_retries": 0}
@@ -414,6 +544,7 @@ def translate_source_span_with_openai(
                 "status": "translated",
                 "segment_ids": span_ids,
                 "translated_count": len(span_segments),
+                "matched_span_example_count": len(span_prompt_examples or []),
                 "intent_zh": str(payload.get("intent_zh") or "") if isinstance(payload, dict) else "",
                 "span_note": str(payload.get("span_note") or "") if isinstance(payload, dict) else "",
             }
@@ -448,6 +579,8 @@ def translate_source_spans(
     glossary_text: str,
     model: str,
     style_prompt_text: str = "",
+    span_prompt_examples: list[dict] | None = None,
+    span_prompt_example_top_k: int = DEFAULT_SPAN_EXAMPLE_TOP_K,
     base_url: str | None = None,
     max_retries: int = 2,
     locked_ids: set[int] | None = None,
@@ -491,9 +624,15 @@ def translate_source_spans(
 
     segments_by_id = {segment.id: segment for segment in segments}
     resolved_base_url = resolve_openai_base_url(base_url)
+    span_prompt_examples = list(span_prompt_examples or [])
     translated_ids: set[int] = set()
     results: list[dict] = []
     for index, span in enumerate(candidates, start=1):
+        matched_examples = select_span_prompt_examples(
+            span,
+            span_prompt_examples,
+            top_k=span_prompt_example_top_k,
+        )
         if progress_callback:
             progress_callback(
                 "span_translation_start",
@@ -502,6 +641,7 @@ def translate_source_spans(
                     "span_total": len(candidates),
                     "span_id": span.get("span_id"),
                     "segment_ids": span.get("segment_ids") or [],
+                    "matched_span_example_count": len(matched_examples),
                 },
             )
         result = translate_source_span_with_openai(
@@ -512,6 +652,7 @@ def translate_source_spans(
             dst_lang=dst_lang,
             glossary_text=glossary_text,
             style_prompt_text=style_prompt_text,
+            span_prompt_examples=matched_examples,
             model=model,
             base_url=resolved_base_url,
             max_retries=max_retries,
@@ -542,6 +683,8 @@ def translate_source_spans(
             "translated_span_count": translated_span_count,
             "translated_segment_count": len(translated_ids),
             "failed_count": failed_count,
+            "span_prompt_example_count": len(span_prompt_examples),
+            "span_prompt_example_top_k": int(span_prompt_example_top_k or 0),
             "selection_policy": selection_policy,
         },
         "results": results,

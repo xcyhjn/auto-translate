@@ -6,9 +6,11 @@ from pathlib import Path
 from autosub_zh.feedback_dataset import (
     build_gold_sets,
     collect_bilibili_project,
+    collect_span_style_project,
     collect_style_project,
     dataset_paths,
     eval_bilibili,
+    eval_span_style,
     eval_style,
     read_jsonl,
     save_bilibili_feedback_label,
@@ -225,6 +227,122 @@ def test_style_gold_eval_reports_feedback_health(tmp_path: Path) -> None:
     assert report["sample_insufficient"] is True
     assert report["metrics"]["semantic_or_style_signal_rate"] > 0
     assert paths["latest_style_eval"].exists()
+
+
+def test_collect_span_style_defaults_to_review_only_samples(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    project = tmp_path / "span_project"
+    project.mkdir()
+    segments = {
+        "segments": [
+            {
+                "id": 1,
+                "start": 1.0,
+                "end": 2.0,
+                "source_text": "He told me just before leaving, and",
+                "target_text": "他离开前告诉我，而且",
+                "reference_text": "",
+                "confidence": None,
+                "source": "asr",
+                "words": [],
+            },
+            {
+                "id": 2,
+                "start": 2.1,
+                "end": 3.0,
+                "source_text": "and the next day the police",
+                "target_text": "第二天警方",
+                "reference_text": "",
+                "confidence": None,
+                "source": "asr",
+                "words": [],
+            },
+        ]
+    }
+    (project / "05_translated_segments.json").write_text(json.dumps(segments, ensure_ascii=False), encoding="utf-8")
+    (project / "04a_source_spans.json").write_text(
+        json.dumps(
+            {
+                "spans": [
+                    {
+                        "span_id": "srcspan-0001",
+                        "segment_ids": [1, 2],
+                        "start": 1.0,
+                        "end": 3.0,
+                        "duration": 2.0,
+                        "risk_score": 32,
+                        "risk_reasons": {"ends_with_function_word": 1, "starts_with_continuation": 1},
+                        "translation_strategy": "span_first",
+                        "source_joined": "He told me just before leaving, and and the next day the police",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (project / "08_bilingual_zh_en.ass").write_text(
+        "\n".join(
+            [
+                "[Events]",
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+                "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,他离开前告诉我",
+                "Dialogue: 0,0:00:02.10,0:00:03.00,Default,,0,0,0,,第二天警方就来了",
+            ]
+        ),
+        encoding="utf-8-sig",
+    )
+
+    result = collect_span_style_project(project, dataset_dir)
+
+    assert result["added"] == 1
+    paths = dataset_paths(dataset_dir)
+    record = read_jsonl(paths["span_translation_examples"])[0]
+    assert record["accepted"] is False
+    assert record["use_for_span_prompt"] is False
+    assert record["use_for_eval"] is False
+    assert record["learning_recommendation"] == "span_prompt_candidate"
+    assert "close_open_clause" in record["edit_tags"]
+
+
+def test_span_gold_eval_and_validation_reject_overlap(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    paths = dataset_paths(dataset_dir)
+    paths["root"].mkdir(parents=True, exist_ok=True)
+    record = {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "project_id": "span_project",
+        "span_id": "srcspan-0001",
+        "segment_ids": [1, 2],
+        "source_joined": "He told me just before leaving, and and the next day the police",
+        "risk_reasons": {"ends_with_function_word": 1},
+        "translation_strategy": "span_first",
+        "context_before": [],
+        "context_after": [],
+        "machine_target_by_id": {"1": "他离开前告诉我，而且", "2": "第二天警方"},
+        "manual_target_by_id": {"1": "他离开前告诉我", "2": "第二天警方就来了"},
+        "edit_tags": ["semantic_reallocation", "fragment_completion"],
+        "learning_risk": "low",
+        "learning_recommendation": "span_prompt_candidate",
+        "classification_reasons": ["manual edit changes multiple IDs"],
+        "accepted": True,
+        "use_for_span_prompt": False,
+        "use_for_eval": True,
+    }
+    write_jsonl(paths["span_translation_examples"], [record])
+
+    gold = build_gold_sets(dataset_dir)
+    assert gold["span_gold_count"] == 1
+    report = eval_span_style(dataset_dir)
+    assert report["sample_count"] == 1
+    assert report["metrics"]["fragment_completion_rate"] == 1.0
+
+    record["use_for_span_prompt"] = True
+    write_jsonl(paths["span_translation_examples"], [record])
+    result = validate_dataset(dataset_dir)
+    assert result["ok"] is False
+    assert any("use_for_eval and use_for_span_prompt" in error for error in result["errors"])
 
 
 def test_validate_rejects_eval_learning_overlap(tmp_path: Path) -> None:

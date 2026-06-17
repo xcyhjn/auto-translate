@@ -1011,6 +1011,54 @@ Verification:
 - `py -m autosub_zh.feedback_dataset eval-style`
 - `py -m autosub_zh.feedback_dataset summarize`
 
+## 2026-06-17 21:10 +08:00 - Span Pre-Translation Feedback Learning Layer
+
+Goal:
+
+- Extend local subtitle feedback learning from single-segment style edits to span pre-translation examples.
+- Keep the first implementation explainable, local, opt-in, and request-count neutral.
+
+What:
+
+- Added span feedback dataset files:
+  - `span_translation_examples.jsonl`
+  - `eval_sets/span_translation_gold.jsonl`
+  - `eval_reports/latest_span_translation_eval.json`
+  - `learned_span_guidelines.md`
+- Added `collect-span-style` to collect span-first/high-risk span examples from `04a_source_spans.json`, translated segments, and manual ASS alignment.
+- Added span schema validation, dedupe, gold build, span eval, and learned span guideline summary.
+- Added span top-k example retrieval for span pre-translation prompts, gated by the existing local translation feedback toggle.
+- Added `span_examples_hash` to the span pre-translation fingerprint so updated local examples invalidate stale span pre-translation cache.
+- Extended `/api/local-feedback-summary` and the frontend feedback card with span-learning counts and span eval metrics.
+
+Smoke collection:
+
+- Ran `collect-span-style` on `An-Ignorant-Guide-to-Shoegaze`.
+- Added 7 review-only span examples from 52 candidate spans.
+- These examples are not injected into prompts until reviewed and marked `accepted=true` + `use_for_span_prompt=true`.
+
+Current dataset state:
+
+- Span translation example records: 7
+- Span style-learning records: 0
+- Span eval-marked records: 0
+- Latest span eval unsafe sample rate: 0.0
+
+Verification:
+
+- `python -m py_compile feedback_dataset.py span_translate.py pipeline_core.py ui_server.py`
+- `node --check web\app.js`
+- `pytest test_feedback_dataset.py test_span_translation_flow.py test_ui_server_bilibili_api.py`
+- `py -m autosub_zh.feedback_dataset validate`
+- `py -m autosub_zh.feedback_dataset collect-span-style --project "D:\autosub_zh\output\已发归档\An-Ignorant-Guide-to-Shoegaze"`
+- `py -m autosub_zh.feedback_dataset build-gold`
+- `py -m autosub_zh.feedback_dataset eval-span-style`
+- `py -m autosub_zh.feedback_dataset summarize`
+
+Follow-up:
+
+- Collect span feedback from archived projects and then mark low-risk accepted span examples for `use_for_span_prompt` / eval split.
+
 ## 2026-06-17 20:45 +08:00 - Archive ASS Feedback Learning Batch 2
 
 User direction:

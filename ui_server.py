@@ -2484,18 +2484,31 @@ def collect_style_feedback_job(project_path: str) -> dict:
 def build_local_feedback_summary(dataset_dir: Path | None = None) -> dict:
     dataset_dir = Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR)
     translation_edits_path = dataset_dir / "translation_edit_examples.jsonl"
+    span_examples_path = dataset_dir / "span_translation_examples.jsonl"
     style_gold_path = dataset_dir / "eval_sets" / "translation_style_gold.jsonl"
+    span_gold_path = dataset_dir / "eval_sets" / "span_translation_gold.jsonl"
     eval_report_path = dataset_dir / "eval_reports" / "latest_style_eval.json"
+    span_eval_report_path = dataset_dir / "eval_reports" / "latest_span_translation_eval.json"
     guidelines_path = dataset_dir / "learned_style_guidelines.md"
+    span_guidelines_path = dataset_dir / "learned_span_guidelines.md"
     summary_path = dataset_dir / "learning_summary.md"
 
     translation_records = read_jsonl(translation_edits_path)
+    span_records = read_jsonl(span_examples_path)
     style_gold_records = read_jsonl(style_gold_path)
+    span_gold_records = read_jsonl(span_gold_path)
     style_learning_count = sum(
         1
         for record in translation_records
         if record.get("accepted") is True
         and record.get("use_for_style_prompt") is True
+        and record.get("use_for_eval") is not True
+    )
+    span_learning_count = sum(
+        1
+        for record in span_records
+        if record.get("accepted") is True
+        and record.get("use_for_span_prompt") is True
         and record.get("use_for_eval") is not True
     )
     eval_report: dict = {}
@@ -2505,10 +2518,23 @@ def build_local_feedback_summary(dataset_dir: Path | None = None) -> dict:
             eval_report = payload if isinstance(payload, dict) else {}
         except json.JSONDecodeError:
             eval_report = {}
+    span_eval_report: dict = {}
+    if span_eval_report_path.exists():
+        try:
+            payload = json.loads(span_eval_report_path.read_text(encoding="utf-8"))
+            span_eval_report = payload if isinstance(payload, dict) else {}
+        except json.JSONDecodeError:
+            span_eval_report = {}
     guidelines_text = guidelines_path.read_text(encoding="utf-8", errors="replace") if guidelines_path.exists() else ""
     guideline_lines = [
         line.strip("- ").strip()
         for line in guidelines_text.splitlines()
+        if line.strip().startswith("- ")
+    ][:8]
+    span_guidelines_text = span_guidelines_path.read_text(encoding="utf-8", errors="replace") if span_guidelines_path.exists() else ""
+    span_guideline_lines = [
+        line.strip("- ").strip()
+        for line in span_guidelines_text.splitlines()
         if line.strip().startswith("- ")
     ][:8]
     return {
@@ -2517,12 +2543,17 @@ def build_local_feedback_summary(dataset_dir: Path | None = None) -> dict:
         "paths": {
             "learning_summary": str(summary_path),
             "latest_style_eval": str(eval_report_path),
+            "latest_span_eval": str(span_eval_report_path),
             "learned_style_guidelines": str(guidelines_path),
+            "learned_span_guidelines": str(span_guidelines_path),
         },
         "counts": {
             "translation_edit_count": len(translation_records),
             "style_learning_count": style_learning_count,
             "style_gold_count": len(style_gold_records),
+            "span_translation_example_count": len(span_records),
+            "span_style_learning_count": span_learning_count,
+            "span_eval_count": len(span_gold_records),
         },
         "eval": {
             "sample_count": eval_report.get("sample_count", 0),
@@ -2530,11 +2561,20 @@ def build_local_feedback_summary(dataset_dir: Path | None = None) -> dict:
             "metrics": eval_report.get("metrics") if isinstance(eval_report.get("metrics"), dict) else {},
             "created_at": str(eval_report.get("created_at") or ""),
         },
+        "span_eval": {
+            "sample_count": span_eval_report.get("sample_count", 0),
+            "sample_insufficient": bool(span_eval_report.get("sample_insufficient", True)),
+            "metrics": span_eval_report.get("metrics") if isinstance(span_eval_report.get("metrics"), dict) else {},
+            "created_at": str(span_eval_report.get("created_at") or ""),
+        },
         "guidelines": guideline_lines,
+        "span_guidelines": span_guideline_lines,
         "available": {
             "learning_summary": summary_path.exists(),
             "latest_style_eval": eval_report_path.exists(),
+            "latest_span_eval": span_eval_report_path.exists(),
             "learned_style_guidelines": guidelines_path.exists(),
+            "learned_span_guidelines": span_guidelines_path.exists(),
         },
     }
 

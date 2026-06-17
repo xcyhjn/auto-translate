@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .bilibili_search import build_bilibili_query_plan, parse_duration_to_seconds, score_bilibili_candidate
+from .segment_io import load_segments
+from .source_spans import detect_source_spans
 from .style_learning import (
     align_segments_to_manual_ass,
     build_edit_operation_summary,
@@ -36,6 +38,16 @@ STYLE_FEEDBACK_TYPES = {
 }
 STYLE_LEARNING_RISKS = {"low", "medium", "high"}
 STYLE_LEARNING_RECOMMENDATIONS = {"eval_candidate", "review_only", "style_prompt_candidate"}
+SPAN_FEEDBACK_TYPES = {
+    "bad_alignment",
+    "close_open_clause",
+    "compress_span",
+    "expand_span",
+    "fragment_completion",
+    "preserve_term",
+    "semantic_reallocation",
+}
+SPAN_LEARNING_RECOMMENDATIONS = {"eval_candidate", "review_only", "span_prompt_candidate"}
 
 
 def utc_now() -> str:
@@ -115,16 +127,20 @@ def dataset_paths(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict[str, Path]:
         "schema": dataset_dir / "schema_version.json",
         "bilibili_labels": dataset_dir / "bilibili_duplicate_labels.jsonl",
         "translation_edits": dataset_dir / "translation_edit_examples.jsonl",
+        "span_translation_examples": dataset_dir / "span_translation_examples.jsonl",
         "term_decisions": dataset_dir / "term_entity_decisions.jsonl",
         "qa_repairs": dataset_dir / "qa_repair_examples.jsonl",
         "eval_sets": dataset_dir / "eval_sets",
         "bilibili_gold": dataset_dir / "eval_sets" / "bilibili_duplicate_gold.jsonl",
         "style_gold": dataset_dir / "eval_sets" / "translation_style_gold.jsonl",
+        "span_gold": dataset_dir / "eval_sets" / "span_translation_gold.jsonl",
         "eval_reports": dataset_dir / "eval_reports",
         "latest_bilibili_eval": dataset_dir / "eval_reports" / "latest_bilibili_eval.json",
         "latest_style_eval": dataset_dir / "eval_reports" / "latest_style_eval.json",
+        "latest_span_eval": dataset_dir / "eval_reports" / "latest_span_translation_eval.json",
         "learned_bilibili_hints": dataset_dir / "learned_bilibili_hints.json",
         "learned_style_guidelines": dataset_dir / "learned_style_guidelines.md",
+        "learned_span_guidelines": dataset_dir / "learned_span_guidelines.md",
         "learning_summary": dataset_dir / "learning_summary.md",
         "readme": dataset_dir / "README.md",
     }
@@ -135,7 +151,16 @@ def ensure_dataset_layout(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict[str, 
     paths["root"].mkdir(parents=True, exist_ok=True)
     paths["eval_sets"].mkdir(parents=True, exist_ok=True)
     paths["eval_reports"].mkdir(parents=True, exist_ok=True)
-    for key in ("bilibili_labels", "translation_edits", "term_decisions", "qa_repairs", "bilibili_gold", "style_gold"):
+    for key in (
+        "bilibili_labels",
+        "translation_edits",
+        "span_translation_examples",
+        "term_decisions",
+        "qa_repairs",
+        "bilibili_gold",
+        "style_gold",
+        "span_gold",
+    ):
         paths[key].touch(exist_ok=True)
     if not paths["schema"].exists():
         write_json(
@@ -167,10 +192,12 @@ Principles:
 Main files:
 - `bilibili_duplicate_labels.jsonl`: Bilibili duplicate-search candidate labels.
 - `translation_edit_examples.jsonl`: aligned machine subtitle text and manual ASS edits.
+- `span_translation_examples.jsonl`: span-first translation examples aligned against manual ASS edits.
 - `term_entity_decisions.jsonl`: reserved for terminology/entity decisions.
 - `qa_repair_examples.jsonl`: reserved for QA repair examples.
 - `eval_sets/`: frozen gold samples copied from reviewed feedback.
 - `eval_reports/latest_style_eval.json`: latest offline subtitle-translation feedback eval.
+- `eval_reports/latest_span_translation_eval.json`: latest offline span pre-translation feedback eval.
 - `eval_reports/latest_bilibili_eval.json`: latest offline Bilibili replay eval.
 
 Typical commands:
@@ -179,9 +206,11 @@ Typical commands:
 $env:PYTHONPATH='D:\\'
 python -m autosub_zh.feedback_dataset collect-bilibili --project "D:\\autosub_zh\\output\\project"
 python -m autosub_zh.feedback_dataset collect-style --project "D:\\autosub_zh\\output\\project"
+python -m autosub_zh.feedback_dataset collect-span-style --project "D:\\autosub_zh\\output\\project"
 python -m autosub_zh.feedback_dataset validate
 python -m autosub_zh.feedback_dataset build-gold
 python -m autosub_zh.feedback_dataset eval-style
+python -m autosub_zh.feedback_dataset eval-span-style
 python -m autosub_zh.feedback_dataset eval-bilibili
 python -m autosub_zh.feedback_dataset summarize
 ```
@@ -262,6 +291,21 @@ def style_record_key(record: dict) -> str:
         str(record.get("manual_target_text") or ""),
     ]
     return "::".join(parts)
+
+
+def span_record_key(record: dict) -> str:
+    segment_ids = ",".join(str(item) for item in record.get("segment_ids") or [])
+    manual_targets = record.get("manual_target_by_id") if isinstance(record.get("manual_target_by_id"), dict) else {}
+    manual_payload = "|".join(f"{key}:{manual_targets[key]}" for key in sorted(manual_targets))
+    return "::".join(
+        [
+            str(record.get("project_id") or ""),
+            str(record.get("span_id") or ""),
+            segment_ids,
+            str(record.get("source_joined") or ""),
+            manual_payload,
+        ]
+    )
 
 
 def append_new_records(path: Path, records: list[dict], key_func: Callable[[dict], str]) -> dict:
@@ -549,6 +593,194 @@ def collect_style_project(project: Path, dataset_dir: Path = DEFAULT_DATASET_DIR
     return result
 
 
+def load_source_spans_for_project(project: Path, segments_path: Path) -> dict:
+    source_spans_path = project / "04a_source_spans.json"
+    if source_spans_path.exists():
+        payload = read_json(source_spans_path)
+        if isinstance(payload, dict):
+            return payload
+    return detect_source_spans(load_segments(segments_path))
+
+
+def span_machine_segments_path(project: Path) -> Path:
+    span_segments_path = project / "05a_span_translated_segments.json"
+    if span_segments_path.exists():
+        return span_segments_path
+    translated_path = project / "05_translated_segments.json"
+    if translated_path.exists():
+        return translated_path
+    raise FileNotFoundError(f"Translated segments not found in {project}")
+
+
+def should_collect_span(span: dict) -> bool:
+    strategy = str(span.get("translation_strategy") or "")
+    risk_score = int(span.get("risk_score") or 0)
+    risk_reasons = span.get("risk_reasons") if isinstance(span.get("risk_reasons"), dict) else {}
+    if strategy == "span_first":
+        return True
+    if strategy == "span_context" and (risk_score >= 10 or len(risk_reasons) >= 2):
+        return True
+    return False
+
+
+def classify_span_feedback(span: dict, pairs: list[dict]) -> dict:
+    changed_pairs = [pair for pair in pairs if pair.get("changed")]
+    tags: list[str] = []
+    reasons: list[str] = []
+    risk_reasons = span.get("risk_reasons") if isinstance(span.get("risk_reasons"), dict) else {}
+    segment_count = len(pairs)
+    changed_count = len(changed_pairs)
+    machine_joined = normalize_inline_payload(" ".join(str(pair.get("machine_target_text") or "") for pair in pairs))
+    manual_joined = normalize_inline_payload(" ".join(str(pair.get("manual_target_text") or "") for pair in pairs))
+
+    if not pairs or not changed_pairs:
+        tags.append("bad_alignment")
+        reasons.append("span has no changed aligned manual subtitle rows")
+    if any(float(pair.get("overlap_ratio") or 0.0) < 0.5 for pair in pairs):
+        tags.append("bad_alignment")
+        reasons.append("at least one span segment has low manual ASS alignment overlap")
+    if segment_count >= 2 and changed_count >= 2:
+        tags.append("semantic_reallocation")
+        reasons.append("manual edit changes multiple IDs in the same source span")
+    if any(
+        str(pair.get("machine_target_text") or "").endswith(("的", "和", "你", "因为", "所以", "about", "of", "and"))
+        and not str(pair.get("manual_target_text") or "").endswith(("的", "和", "你", "因为", "所以", "about", "of", "and"))
+        for pair in changed_pairs
+    ) or risk_reasons.get("ends_with_function_word") or risk_reasons.get("open_clause"):
+        tags.append("close_open_clause")
+        reasons.append("span repairs an open or dangling clause")
+    if any(len(str(pair.get("machine_target_text") or "")) <= 3 and len(str(pair.get("manual_target_text") or "")) >= 4 for pair in changed_pairs):
+        tags.append("fragment_completion")
+        reasons.append("manual edit turns a tiny fragment into a readable subtitle")
+    if len(manual_joined) < len(machine_joined) - 6:
+        tags.append("compress_span")
+        reasons.append("manual span wording is materially shorter")
+    if len(manual_joined) > len(machine_joined) + 6:
+        tags.append("expand_span")
+        reasons.append("manual span wording is materially fuller")
+    if any("preserve_english" in detect_edit_tags(pair) for pair in changed_pairs):
+        tags.append("preserve_term")
+        reasons.append("manual span preserves English terminology or names")
+    if changed_pairs and not tags:
+        tags.append("semantic_reallocation")
+        reasons.append("manual edit changes span wording")
+
+    tags = [item for item in dict.fromkeys(tags) if item in SPAN_FEEDBACK_TYPES]
+    learning_risk = "high" if "bad_alignment" in tags else "low"
+    recommendation = "span_prompt_candidate" if learning_risk == "low" else "review_only"
+    return {
+        "edit_tags": tags,
+        "learning_risk": learning_risk,
+        "learning_recommendation": recommendation,
+        "classification_reasons": list(dict.fromkeys(reasons)),
+    }
+
+
+def normalize_inline_payload(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def compact_segment_context(segments: list, anchor_ids: set[int], *, before: bool) -> list[dict]:
+    ordered = list(segments)
+    indices = [index for index, segment in enumerate(ordered) if int(segment.id) in anchor_ids]
+    if not indices:
+        return []
+    start = min(indices)
+    end = max(indices)
+    context = ordered[max(0, start - 2) : start] if before else ordered[end + 1 : min(len(ordered), end + 3)]
+    return [
+        {
+            "id": segment.id,
+            "source_text": segment.source_text,
+            "target_text": segment.target_text or "",
+        }
+        for segment in context
+    ]
+
+
+def collect_span_style_project(project: Path, dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
+    paths = ensure_dataset_layout(dataset_dir)
+    project = project.resolve()
+    segments_path = span_machine_segments_path(project)
+    ass_path = find_manual_ass_path(project)
+    segments = load_segments(segments_path)
+    segments_by_id = {int(segment.id): segment for segment in segments}
+    source_spans = load_source_spans_for_project(project, segments_path)
+    aligned_pairs = align_segments_to_manual_ass(segments_path, ass_path)
+    pairs_by_id = {int(pair.get("segment_id")): pair for pair in aligned_pairs if pair.get("segment_id") is not None}
+    project_id = project.name
+    records: list[dict] = []
+    candidate_count = 0
+    skipped_no_change = 0
+    skipped_alignment = 0
+
+    for span in source_spans.get("spans") or []:
+        if not isinstance(span, dict) or not should_collect_span(span):
+            continue
+        candidate_count += 1
+        segment_ids = [int(value) for value in span.get("segment_ids") or [] if int(value) in segments_by_id]
+        pairs = [pairs_by_id[segment_id] for segment_id in segment_ids if segment_id in pairs_by_id]
+        if not pairs or len(pairs) < len(segment_ids):
+            skipped_alignment += 1
+            continue
+        changed_pairs = [pair for pair in pairs if pair.get("changed")]
+        if not changed_pairs:
+            skipped_no_change += 1
+            continue
+        classification = classify_span_feedback(span, pairs)
+        manual_by_id = {str(pair["segment_id"]): pair.get("manual_target_text") or "" for pair in pairs}
+        machine_by_id = {str(pair["segment_id"]): pair.get("machine_target_text") or "" for pair in pairs}
+        source_by_id = {str(segment_id): segments_by_id[segment_id].source_text for segment_id in segment_ids}
+        anchor_ids = set(segment_ids)
+        records.append(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "created_at": utc_now(),
+                "source": {
+                    "kind": "manual_ass_span_alignment",
+                    "project_id": project_id,
+                    "project_path": str(project),
+                    "segments_path": str(segments_path),
+                    "source_spans_path": str(project / "04a_source_spans.json"),
+                    "manual_ass_path": str(ass_path),
+                },
+                "project_id": project_id,
+                "span_id": str(span.get("span_id") or ""),
+                "segment_ids": segment_ids,
+                "start": span.get("start"),
+                "end": span.get("end"),
+                "duration": span.get("duration"),
+                "source_joined": str(span.get("source_joined") or ""),
+                "risk_reasons": span.get("risk_reasons") if isinstance(span.get("risk_reasons"), dict) else {},
+                "risk_score": int(span.get("risk_score") or 0),
+                "translation_strategy": str(span.get("translation_strategy") or ""),
+                "context_before": compact_segment_context(segments, anchor_ids, before=True),
+                "context_after": compact_segment_context(segments, anchor_ids, before=False),
+                "source_by_id": source_by_id,
+                "machine_target_by_id": machine_by_id,
+                "manual_target_by_id": manual_by_id,
+                "quality_flags": ["needs_human_acceptance"],
+                **classification,
+                "accepted": False,
+                "use_for_span_prompt": False,
+                "use_for_eval": False,
+            }
+        )
+    result = append_new_records(paths["span_translation_examples"], records, span_record_key)
+    result.update(
+        {
+            "project": str(project),
+            "candidate_span_count": candidate_count,
+            "added_span_record_count": len(records),
+            "skipped_no_change": skipped_no_change,
+            "skipped_alignment": skipped_alignment,
+            "segments_path": str(segments_path),
+            "ass_path": str(ass_path),
+        }
+    )
+    return result
+
+
 def require_fields(record: dict, fields: list[str], path: str, errors: list[str]) -> None:
     for field in fields:
         if field not in record:
@@ -641,6 +873,75 @@ def validate_style_record(record: dict, path: str, errors: list[str]) -> None:
         errors.append(f"{path}: high-risk/bad style samples cannot be used for eval or style prompt")
 
 
+def is_unsafe_span_learning_record(record: dict) -> bool:
+    edit_tags = set(str(item) for item in record.get("edit_tags") or [])
+    return record.get("learning_risk") == "high" or "bad_alignment" in edit_tags
+
+
+def validate_span_record(record: dict, path: str, errors: list[str]) -> None:
+    require_fields(
+        record,
+        [
+            "schema_version",
+            "created_at",
+            "project_id",
+            "span_id",
+            "segment_ids",
+            "source_joined",
+            "risk_reasons",
+            "translation_strategy",
+            "context_before",
+            "context_after",
+            "machine_target_by_id",
+            "manual_target_by_id",
+            "edit_tags",
+            "learning_risk",
+            "learning_recommendation",
+            "classification_reasons",
+            "accepted",
+            "use_for_span_prompt",
+            "use_for_eval",
+        ],
+        path,
+        errors,
+    )
+    if record.get("schema_version") != SCHEMA_VERSION:
+        errors.append(f"{path}: unsupported schema_version {record.get('schema_version')!r}")
+    if not isinstance(record.get("segment_ids"), list) or not record.get("segment_ids"):
+        errors.append(f"{path}: segment_ids must be a non-empty list")
+    if not isinstance(record.get("risk_reasons"), dict):
+        errors.append(f"{path}: risk_reasons must be an object")
+    if not isinstance(record.get("context_before"), list):
+        errors.append(f"{path}: context_before must be a list")
+    if not isinstance(record.get("context_after"), list):
+        errors.append(f"{path}: context_after must be a list")
+    if not isinstance(record.get("machine_target_by_id"), dict):
+        errors.append(f"{path}: machine_target_by_id must be an object")
+    if not isinstance(record.get("manual_target_by_id"), dict):
+        errors.append(f"{path}: manual_target_by_id must be an object")
+    if not isinstance(record.get("edit_tags"), list):
+        errors.append(f"{path}: edit_tags must be a list")
+    else:
+        invalid_tags = [item for item in record.get("edit_tags") or [] if item not in SPAN_FEEDBACK_TYPES]
+        if invalid_tags:
+            errors.append(f"{path}: invalid edit_tags {invalid_tags!r}")
+    if record.get("learning_risk") not in STYLE_LEARNING_RISKS:
+        errors.append(f"{path}: invalid learning_risk {record.get('learning_risk')!r}")
+    if record.get("learning_recommendation") not in SPAN_LEARNING_RECOMMENDATIONS:
+        errors.append(f"{path}: invalid learning_recommendation {record.get('learning_recommendation')!r}")
+    if not isinstance(record.get("classification_reasons"), list):
+        errors.append(f"{path}: classification_reasons must be a list")
+    for flag in ("accepted", "use_for_span_prompt", "use_for_eval"):
+        if not isinstance(record.get(flag), bool):
+            errors.append(f"{path}: {flag} must be boolean")
+    if record.get("use_for_eval") and record.get("use_for_span_prompt"):
+        errors.append(f"{path}: use_for_eval and use_for_span_prompt must stay separate")
+    if (record.get("use_for_eval") or record.get("use_for_span_prompt")) and not record.get("accepted"):
+        errors.append(f"{path}: accepted must be true before use_for_eval/use_for_span_prompt")
+    if is_unsafe_span_learning_record(record) and (record.get("use_for_eval") or record.get("use_for_span_prompt")):
+        errors.append(f"{path}: high-risk/bad span samples cannot be used for eval or span prompt")
+
+
 def validate_dataset(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
     paths = ensure_dataset_layout(dataset_dir)
     errors: list[str] = []
@@ -649,6 +950,8 @@ def validate_dataset(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
         ("bilibili_gold", paths["bilibili_gold"], validate_bilibili_record, bilibili_record_key),
         ("translation_edits", paths["translation_edits"], validate_style_record, style_record_key),
         ("style_gold", paths["style_gold"], validate_style_record, style_record_key),
+        ("span_translation_examples", paths["span_translation_examples"], validate_span_record, span_record_key),
+        ("span_gold", paths["span_gold"], validate_span_record, span_record_key),
     ]
     counts: dict[str, int] = {}
     duplicate_counts: dict[str, int] = {}
@@ -682,7 +985,12 @@ def validate_dataset(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
 def record_priority(record: dict) -> tuple[int, int, int]:
     has_human_note = bool(str(record.get("human_note") or "").strip())
     has_non_default_label = record.get("label") not in (None, "manual_review")
-    has_use_flag = bool(record.get("use_for_eval") or record.get("use_for_learning") or record.get("use_for_style_prompt"))
+    has_use_flag = bool(
+        record.get("use_for_eval")
+        or record.get("use_for_learning")
+        or record.get("use_for_style_prompt")
+        or record.get("use_for_span_prompt")
+    )
     return (int(has_use_flag), int(has_non_default_label), int(has_human_note))
 
 
@@ -708,8 +1016,10 @@ def dedupe_dataset(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
     return {
         "bilibili_labels": dedupe_file(paths["bilibili_labels"], bilibili_record_key),
         "translation_edits": dedupe_file(paths["translation_edits"], style_record_key),
+        "span_translation_examples": dedupe_file(paths["span_translation_examples"], span_record_key),
         "bilibili_gold": dedupe_file(paths["bilibili_gold"], bilibili_record_key),
         "style_gold": dedupe_file(paths["style_gold"], style_record_key),
+        "span_gold": dedupe_file(paths["span_gold"], span_record_key),
     }
 
 
@@ -726,13 +1036,22 @@ def build_gold_sets(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
         if record.get("use_for_eval") is True and record.get("use_for_style_prompt") is not True and record.get("accepted") is True
         and not is_unsafe_style_learning_record(record)
     ]
+    span_records = [
+        record
+        for record in read_jsonl(paths["span_translation_examples"])
+        if record.get("use_for_eval") is True and record.get("use_for_span_prompt") is not True and record.get("accepted") is True
+        and not is_unsafe_span_learning_record(record)
+    ]
     write_jsonl(paths["bilibili_gold"], unique_records(bilibili_records, bilibili_record_key))
     write_jsonl(paths["style_gold"], unique_records(style_records, style_record_key))
+    write_jsonl(paths["span_gold"], unique_records(span_records, span_record_key))
     return {
         "bilibili_gold_count": len(read_jsonl(paths["bilibili_gold"])),
         "style_gold_count": len(read_jsonl(paths["style_gold"])),
+        "span_gold_count": len(read_jsonl(paths["span_gold"])),
         "bilibili_gold_path": str(paths["bilibili_gold"]),
         "style_gold_path": str(paths["style_gold"]),
+        "span_gold_path": str(paths["span_gold"]),
     }
 
 
@@ -756,6 +1075,7 @@ def summarize_learning(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
     paths = ensure_dataset_layout(dataset_dir)
     bilibili_records = read_jsonl(paths["bilibili_labels"])
     style_records = read_jsonl(paths["translation_edits"])
+    span_records = read_jsonl(paths["span_translation_examples"])
 
     learning_bili = [record for record in bilibili_records if record.get("use_for_learning") and not record.get("use_for_eval")]
     positive_bili = [record for record in learning_bili if record.get("label") == "duplicate"]
@@ -812,11 +1132,36 @@ def summarize_learning(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
     style_guidelines = build_style_guidelines(tag_counts, strategy_counts, feedback_type_counts, len(style_learning))
     paths["learned_style_guidelines"].write_text(style_guidelines, encoding="utf-8")
 
+    span_learning = [
+        record
+        for record in span_records
+        if record.get("accepted") is True and record.get("use_for_span_prompt") is True and record.get("use_for_eval") is not True
+        and not is_unsafe_span_learning_record(record)
+    ]
+    span_tag_counts: Counter[str] = Counter()
+    span_risk_reason_counts: Counter[str] = Counter()
+    span_strategy_counts: Counter[str] = Counter()
+    for record in span_learning:
+        span_tag_counts.update(str(item) for item in record.get("edit_tags") or [] if str(item).strip())
+        risk_reasons = record.get("risk_reasons") if isinstance(record.get("risk_reasons"), dict) else {}
+        span_risk_reason_counts.update({str(key): int(value) for key, value in risk_reasons.items() if int(value or 0) > 0})
+        if str(record.get("translation_strategy") or "").strip():
+            span_strategy_counts.update([str(record.get("translation_strategy"))])
+    span_guidelines = build_span_guidelines(
+        span_tag_counts,
+        span_risk_reason_counts,
+        span_strategy_counts,
+        len(span_learning),
+    )
+    paths["learned_span_guidelines"].write_text(span_guidelines, encoding="utf-8")
+
     summary_text = build_learning_summary(
         bilibili_records=bilibili_records,
         style_records=style_records,
+        span_records=span_records,
         learned_bili=learned_bili,
         style_learning_count=len(style_learning),
+        span_learning_count=len(span_learning),
         dataset_dir=paths["root"],
     )
     paths["learning_summary"].write_text(summary_text, encoding="utf-8")
@@ -824,10 +1169,13 @@ def summarize_learning(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
         "dataset_dir": str(paths["root"]),
         "bilibili_label_count": len(bilibili_records),
         "translation_edit_count": len(style_records),
+        "span_translation_example_count": len(span_records),
         "bilibili_learning_count": len(learning_bili),
         "style_learning_count": len(style_learning),
+        "span_style_learning_count": len(span_learning),
         "learned_bilibili_hints_path": str(paths["learned_bilibili_hints"]),
         "learned_style_guidelines_path": str(paths["learned_style_guidelines"]),
+        "learned_span_guidelines_path": str(paths["learned_span_guidelines"]),
         "learning_summary_path": str(paths["learning_summary"]),
     }
 
@@ -877,16 +1225,66 @@ def build_style_guidelines(
     return "\n".join(lines).strip() + "\n"
 
 
+def build_span_guidelines(
+    tag_counts: Counter[str],
+    risk_reason_counts: Counter[str],
+    strategy_counts: Counter[str],
+    sample_count: int,
+) -> str:
+    lines = [
+        "# Learned Span Guidelines",
+        "",
+        "Generated from accepted span pre-translation feedback samples only.",
+        "",
+    ]
+    if sample_count == 0:
+        lines.extend(
+            [
+                "No accepted span-learning samples are available yet.",
+                "",
+                "To create one, review `span_translation_examples.jsonl`, set `accepted=true`, set `use_for_span_prompt=true`, and keep `use_for_eval=false`.",
+            ]
+        )
+        return "\n".join(lines).strip() + "\n"
+    lines.extend(["## Observed Signals", ""])
+    lines.append(f"- Accepted span samples: {sample_count}")
+    for item in counter_items(tag_counts, limit=12):
+        lines.append(f"- Span edit tag `{item['value']}`: {item['count']}")
+    for item in counter_items(risk_reason_counts, limit=12):
+        lines.append(f"- Source risk `{item['value']}`: {item['count']}")
+    for item in counter_items(strategy_counts, limit=8):
+        lines.append(f"- Strategy `{item['value']}`: {item['count']}")
+    lines.extend(["", "## Suggested Guidelines", ""])
+    if tag_counts.get("semantic_reallocation"):
+        lines.append("- Read the whole source span first, then redistribute meaning so every subtitle ID carries useful content.")
+    if tag_counts.get("fragment_completion"):
+        lines.append("- Avoid tiny orphan Chinese fragments; make each span ID independently readable.")
+    if tag_counts.get("close_open_clause"):
+        lines.append("- Close dangling clauses inside the span instead of leaving function-word endings.")
+    if tag_counts.get("compress_span"):
+        lines.append("- Compress repeated or wordy span wording while preserving the complete idea.")
+    if tag_counts.get("expand_span"):
+        lines.append("- Add missing context when the machine span is too thin or literal.")
+    if tag_counts.get("preserve_term"):
+        lines.append("- Preserve established English terms and names consistently across the span.")
+    if not any(line.startswith("- ") for line in lines[-8:]):
+        lines.append("- Review accepted span examples directly; current tags are too sparse for a strong rule.")
+    return "\n".join(lines).strip() + "\n"
+
+
 def build_learning_summary(
     *,
     bilibili_records: list[dict],
     style_records: list[dict],
+    span_records: list[dict],
     learned_bili: dict,
     style_learning_count: int,
+    span_learning_count: int,
     dataset_dir: Path,
 ) -> str:
     eval_bili_count = sum(1 for record in bilibili_records if record.get("use_for_eval"))
     eval_style_count = sum(1 for record in style_records if record.get("use_for_eval"))
+    eval_span_count = sum(1 for record in span_records if record.get("use_for_eval"))
     lines = [
         "# Local Feedback Learning Summary",
         "",
@@ -900,6 +1298,9 @@ def build_learning_summary(
         f"- Translation edit records: {len(style_records)}",
         f"- Translation style-learning records: {style_learning_count}",
         f"- Translation eval-marked records: {eval_style_count}",
+        f"- Span translation example records: {len(span_records)}",
+        f"- Span style-learning records: {span_learning_count}",
+        f"- Span eval-marked records: {eval_span_count}",
         "",
         "## Guardrails",
         "",
@@ -1145,6 +1546,78 @@ def eval_style(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
     return report
 
 
+def eval_span_style(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
+    paths = ensure_dataset_layout(dataset_dir)
+    gold_records = read_jsonl(paths["span_gold"])
+
+    tag_counts: Counter[str] = Counter()
+    risk_reason_counts: Counter[str] = Counter()
+    strategy_counts: Counter[str] = Counter()
+    risk_counts: Counter[str] = Counter()
+    recommendation_counts: Counter[str] = Counter()
+    unsafe_cases: list[dict] = []
+    high_value_cases: list[dict] = []
+    semantic_reallocation_count = 0
+    fragment_completion_count = 0
+    close_open_clause_count = 0
+
+    for record in gold_records:
+        tags = [str(item) for item in record.get("edit_tags") or [] if str(item).strip()]
+        tag_counts.update(tags)
+        risk_counts.update([str(record.get("learning_risk") or "unknown")])
+        recommendation_counts.update([str(record.get("learning_recommendation") or "unknown")])
+        strategy = str(record.get("translation_strategy") or "")
+        if strategy:
+            strategy_counts.update([strategy])
+        risk_reasons = record.get("risk_reasons") if isinstance(record.get("risk_reasons"), dict) else {}
+        risk_reason_counts.update({str(key): int(value) for key, value in risk_reasons.items() if int(value or 0) > 0})
+        tag_set = set(tags)
+        semantic_reallocation_count += int("semantic_reallocation" in tag_set)
+        fragment_completion_count += int("fragment_completion" in tag_set)
+        close_open_clause_count += int("close_open_clause" in tag_set)
+        case = {
+            "project_id": record.get("project_id"),
+            "span_id": record.get("span_id"),
+            "segment_ids": record.get("segment_ids") or [],
+            "translation_strategy": strategy,
+            "edit_tags": tags,
+            "learning_risk": record.get("learning_risk") or "",
+        }
+        if is_unsafe_span_learning_record(record):
+            unsafe_cases.append(case)
+        elif tag_set & {"semantic_reallocation", "fragment_completion", "close_open_clause", "compress_span", "expand_span"}:
+            high_value_cases.append(case)
+
+    sample_count = len(gold_records)
+    metrics = {
+        "unsafe_sample_rate": safe_ratio(len(unsafe_cases), sample_count),
+        "semantic_reallocation_rate": safe_ratio(semantic_reallocation_count, sample_count),
+        "fragment_completion_rate": safe_ratio(fragment_completion_count, sample_count),
+        "close_open_clause_rate": safe_ratio(close_open_clause_count, sample_count),
+    }
+    report = {
+        "schema_version": SCHEMA_VERSION,
+        "created_at": utc_now(),
+        "sample_count": sample_count,
+        "sample_insufficient": sample_count < 20,
+        "sample_note": (
+            "Need at least 20 reviewed span feedback samples before judging span pre-translation trends."
+            if sample_count < 20
+            else "Span gold set is large enough for a first pre-translation trend check."
+        ),
+        "metrics": metrics,
+        "edit_tag_counts": counter_items(tag_counts),
+        "risk_reason_counts": counter_items(risk_reason_counts),
+        "strategy_counts": counter_items(strategy_counts),
+        "learning_risk_counts": counter_items(risk_counts),
+        "learning_recommendation_counts": counter_items(recommendation_counts),
+        "high_value_cases": high_value_cases[:20],
+        "unsafe_cases": unsafe_cases[:20],
+    }
+    write_json(paths["latest_span_eval"], report)
+    return report
+
+
 def print_result(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
@@ -1162,11 +1635,15 @@ def build_parser() -> argparse.ArgumentParser:
     collect_style = subparsers.add_parser("collect-style", help="Collect translation edit examples from one output project.")
     collect_style.add_argument("--project", required=True, help="Output project directory.")
 
+    collect_span_style = subparsers.add_parser("collect-span-style", help="Collect span pre-translation examples from one output project.")
+    collect_span_style.add_argument("--project", required=True, help="Output project directory.")
+
     subparsers.add_parser("validate", help="Validate JSONL schemas and train/eval separation.")
     subparsers.add_parser("dedupe", help="Deduplicate dataset JSONL files.")
     subparsers.add_parser("build-gold", help="Copy reviewed eval records into frozen gold-set files.")
     subparsers.add_parser("summarize", help="Generate explainable learned hint files.")
     subparsers.add_parser("eval-style", help="Run offline subtitle translation feedback eval from the gold set.")
+    subparsers.add_parser("eval-span-style", help="Run offline span pre-translation feedback eval from the gold set.")
     subparsers.add_parser("eval-bilibili", help="Run offline Bilibili replay eval from the gold set.")
     return parser
 
@@ -1186,6 +1663,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "collect-style":
             print_result(collect_style_project(Path(args.project), dataset_dir))
             return 0
+        if args.command == "collect-span-style":
+            print_result(collect_span_style_project(Path(args.project), dataset_dir))
+            return 0
         if args.command == "validate":
             result = validate_dataset(dataset_dir)
             print_result(result)
@@ -1201,6 +1681,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "eval-style":
             print_result(eval_style(dataset_dir))
+            return 0
+        if args.command == "eval-span-style":
+            print_result(eval_span_style(dataset_dir))
             return 0
         if args.command == "eval-bilibili":
             print_result(eval_bilibili(dataset_dir))

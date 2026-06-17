@@ -1233,6 +1233,37 @@ function renderLocalFeedbackSummary(payload) {
       }
     </div>
   `;
+  const spanEvalInfo = payload.span_eval || {};
+  const spanMetrics = spanEvalInfo.metrics || {};
+  const feedbackGrid = root.querySelector(".feedback-summary-grid");
+  if (feedbackGrid) {
+    feedbackGrid.insertAdjacentHTML(
+      "beforeend",
+      `
+      <div class="entity-metric"><span>Span samples</span><strong>${escapeHtml(counts.span_translation_example_count ?? 0)}</strong></div>
+      <div class="entity-metric"><span>Span learning</span><strong>${escapeHtml(counts.span_style_learning_count ?? 0)}</strong></div>
+      <div class="entity-metric"><span>Span eval</span><strong>${escapeHtml(counts.span_eval_count ?? 0)}</strong></div>
+      <div class="entity-metric"><span>Span reallocation</span><strong>${escapeHtml(formatPercent(spanMetrics.semantic_reallocation_rate ?? 0))}</strong></div>
+      <div class="entity-metric"><span>Span fragments</span><strong>${escapeHtml(formatPercent(spanMetrics.fragment_completion_rate ?? 0))}</strong></div>
+      <div class="entity-metric"><span>Span unsafe</span><strong>${escapeHtml(formatPercent(spanMetrics.unsafe_sample_rate ?? 0))}</strong></div>
+    `,
+    );
+  }
+  const spanGuidelines = Array.isArray(payload.span_guidelines) ? payload.span_guidelines.slice(0, 4) : [];
+  const availableSpanGuidelines = payload.available || {};
+  root.insertAdjacentHTML(
+    "beforeend",
+    `
+    <div class="local-feedback-guidelines">
+      <strong>Span learned rules preview</strong>
+      ${
+        spanGuidelines.length
+          ? `<ul>${spanGuidelines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+          : `<p>${availableSpanGuidelines.learned_span_guidelines ? "No span rules to preview yet." : "No learned_span_guidelines.md yet; collect span feedback first."}</p>`
+      }
+    </div>
+  `,
+  );
 }
 
 async function refreshLocalFeedbackSummary() {
@@ -1246,7 +1277,9 @@ async function refreshLocalFeedbackSummary() {
       ok: false,
       counts: {},
       eval: { metrics: {} },
+      span_eval: { metrics: {} },
       guidelines: [],
+      span_guidelines: [],
       available: {},
     };
   }

@@ -194,6 +194,20 @@ def test_local_feedback_summary_api_reads_counts_and_eval(monkeypatch, tmp_path:
         json.dumps({"accepted": True, "use_for_eval": True}) + "\n",
         encoding="utf-8",
     )
+    (dataset / "span_translation_examples.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"accepted": True, "use_for_span_prompt": True, "use_for_eval": False}),
+                json.dumps({"accepted": True, "use_for_span_prompt": False, "use_for_eval": True}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (dataset / "eval_sets" / "span_translation_gold.jsonl").write_text(
+        json.dumps({"accepted": True, "use_for_eval": True}) + "\n",
+        encoding="utf-8",
+    )
     (dataset / "eval_reports" / "latest_style_eval.json").write_text(
         json.dumps(
             {
@@ -205,8 +219,27 @@ def test_local_feedback_summary_api_reads_counts_and_eval(monkeypatch, tmp_path:
         ),
         encoding="utf-8",
     )
+    (dataset / "eval_reports" / "latest_span_translation_eval.json").write_text(
+        json.dumps(
+            {
+                "sample_count": 1,
+                "sample_insufficient": False,
+                "metrics": {
+                    "unsafe_sample_rate": 0.0,
+                    "semantic_reallocation_rate": 1.0,
+                    "fragment_completion_rate": 1.0,
+                },
+                "created_at": "2026-06-17T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
     (dataset / "learned_style_guidelines.md").write_text(
         "# Learned\n\n- Keep names in English.\n- Prefer natural subtitle wording.\n",
+        encoding="utf-8",
+    )
+    (dataset / "learned_span_guidelines.md").write_text(
+        "# Learned Span\n\n- Redistribute the full idea across IDs.\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
@@ -222,9 +255,14 @@ def test_local_feedback_summary_api_reads_counts_and_eval(monkeypatch, tmp_path:
     assert payload["counts"]["translation_edit_count"] == 2
     assert payload["counts"]["style_learning_count"] == 1
     assert payload["counts"]["style_gold_count"] == 1
+    assert payload["counts"]["span_translation_example_count"] == 2
+    assert payload["counts"]["span_style_learning_count"] == 1
+    assert payload["counts"]["span_eval_count"] == 1
     assert payload["eval"]["sample_count"] == 1
     assert payload["eval"]["metrics"]["semantic_or_style_signal_rate"] == 1.0
+    assert payload["span_eval"]["metrics"]["fragment_completion_rate"] == 1.0
     assert payload["guidelines"] == ["Keep names in English.", "Prefer natural subtitle wording."]
+    assert payload["span_guidelines"] == ["Redistribute the full idea across IDs."]
 
 
 def test_local_feedback_summary_api_handles_missing_files(monkeypatch, tmp_path: Path) -> None:
@@ -241,7 +279,11 @@ def test_local_feedback_summary_api_handles_missing_files(monkeypatch, tmp_path:
     assert payload["counts"]["translation_edit_count"] == 0
     assert payload["counts"]["style_learning_count"] == 0
     assert payload["counts"]["style_gold_count"] == 0
+    assert payload["counts"]["span_translation_example_count"] == 0
+    assert payload["counts"]["span_style_learning_count"] == 0
+    assert payload["counts"]["span_eval_count"] == 0
     assert payload["available"]["latest_style_eval"] is False
+    assert payload["available"]["latest_span_eval"] is False
 
 
 def test_local_feedback_summary_api_tolerates_invalid_eval_report(monkeypatch, tmp_path: Path) -> None:
