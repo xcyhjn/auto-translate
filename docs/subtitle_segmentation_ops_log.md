@@ -931,3 +931,42 @@ Guardrails:
 - The local feedback prompt hook is opt-in.
 - JSONL examples are not injected directly yet; only the summarized learned guidelines are used.
 - Sample-level RAG/few-shot retrieval should be a later controlled enhancement.
+
+## 2026-06-17 18:37 +08:00 - Frontend Information Architecture Refresh
+
+Goal:
+
+- Reduce the daily console surface by separating input/download controls and low-frequency advanced translation strategies from the core workflow/translation pages.
+- Add read-only visibility for local subtitle-translation feedback learning and per-project output health.
+
+What:
+
+- Added two parallel UI panels:
+  - `输入与下载`: YouTube URL, downloader, proxy, IDM, YouTube metadata, Bilibili duplicate search, input scanning, and MP3 attachment entry points.
+  - `高级策略`: cache/rerun flags, high-risk span repair, semantic allocation, display rewrite, and entity bootstrap settings.
+- Kept `翻译设置` focused on target language, translation model, prompt injection, chunk/retry controls, OpenAI Base URL runtime state, local translation feedback toggle, and attached audio path.
+- Added `GET /api/local-feedback-summary`:
+  - reads `datasets/local_feedback/translation_edit_examples.jsonl`;
+  - reads `eval_sets/translation_style_gold.jsonl`;
+  - reads `eval_reports/latest_style_eval.json`;
+  - reads the first learned bullets from `learned_style_guidelines.md`.
+- Added frontend renderers for local feedback summary, advanced strategy summary, input/download status, project health badges, and selected-project health summary.
+- Updated Bilibili duplicate-search display to separate real search state from manual review links.
+
+Verification:
+
+- `node --check web\app.js`
+- `python -m py_compile ui_server.py`
+- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py`
+- In-app browser smoke test on `http://127.0.0.1:8789/`:
+  - page title `Autosub Studio`;
+  - no console error/warn logs;
+  - `输入与下载` and `高级策略` tabs switch active state across top tabs, side nav, and panels;
+  - local feedback card reads real dataset counts;
+  - output panel shows project badges and health summary;
+  - mobile viewport `390x820` has no horizontal overflow and advanced/feedback grids collapse to one column.
+
+Follow-up:
+
+- When the learning review UI is ready, promote feedback learning from a summary card into a dedicated review workspace.
+- Consider adding a lightweight frontend regression test for tab/panel mapping if this UI keeps expanding.

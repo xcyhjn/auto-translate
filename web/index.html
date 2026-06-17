@@ -9,7 +9,7 @@
     <script>
       document.documentElement.classList.add("js-reveal-active");
     </script>
-    <link rel="stylesheet" href="./styles.css?v=20260617-bilibili" />
+    <link rel="stylesheet" href="./styles.css?v=20260617-frontend-ia" />
   </head>
   <body style="background:#090b10">
     <div class="app-shell">
@@ -24,9 +24,11 @@
 
         <nav class="nav-group" aria-label="工作区导航">
           <div class="nav-title">工作区</div>
+          <button class="nav-item" data-panel="input-download" type="button">输入与下载</button>
           <button class="nav-item" data-panel="workflow" type="button">工作流</button>
           <button class="nav-item active" data-panel="recognition" type="button" aria-current="page">识别设置</button>
           <button class="nav-item" data-panel="translation" type="button">翻译设置</button>
+          <button class="nav-item" data-panel="advanced" type="button">高级策略</button>
           <button class="nav-item" data-panel="subtitle" type="button">字幕样式</button>
           <button class="nav-item" data-panel="outputs" type="button">项目产物</button>
         </nav>
@@ -123,65 +125,14 @@
               <h3>输入视频</h3>
               <button id="toggleInputListBtn" class="mini-btn" type="button">展开全部 Input</button>
             </div>
-            <div class="download-block">
-              <input id="downloadUrlInput" type="text" placeholder="粘贴 YouTube 链接，例如 https://www.youtube.com/watch?v=..." />
-              <div class="download-settings">
-                <label>
-                  <span>下载方式</span>
-                  <select id="download_backend">
-                    <option value="auto">自动：yt-dlp → IDM → 手动</option>
-                    <option value="ytdlp">仅 yt-dlp</option>
-                    <option value="idm">仅 IDM 桥接</option>
-                    <option value="manual">手动导入</option>
-                  </select>
-                </label>
-                <label>
-                  <span>代理地址</span>
-                  <input id="proxy_url" type="text" placeholder="留空直连，或填 http://127.0.0.1:7890" />
-                </label>
-                <label>
-                  <span>IDM 路径</span>
-                  <input id="idm_exe_path" type="text" placeholder="C:\Program Files (x86)\Internet Download Manager\IDMan.exe" />
-                </label>
-                <label>
-                  <span>IDM 输出目录</span>
-                  <input id="idm_output_dir" type="text" />
-                </label>
-                <label>
-                  <span>IDM 等待秒数</span>
-                  <input id="idm_wait_timeout_seconds" type="number" min="30" />
-                </label>
-              </div>
-              <div class="download-actions">
-                <button id="downloadOnlyBtn" class="mini-btn">下载到队列</button>
-                <button id="downloadAndRunBtn" class="mini-btn">下载并开跑</button>
-                <button id="testProxyBtn" class="mini-btn">测试代理</button>
-                <button id="checkIdmBtn" class="mini-btn">检测 IDM</button>
-                <button id="fetchYoutubeInfoBtn" class="mini-btn">获取信息</button>
-                <button id="fetchYoutubeCoverBtn" class="mini-btn">获取封面</button>
-                <button id="bilibiliDuplicateSearchBtn" class="mini-btn" type="button">检测 B 站已有翻译</button>
-                <button id="rebuildPaddedCoverBtn" class="mini-btn">重建 1280x960 封面</button>
-                <button id="openInputBtn" class="mini-btn">打开 input</button>
-                <button id="scanInputBtn" class="mini-btn">扫描 input</button>
-              </div>
-            </div>
-            <div id="proxyStatusCard" class="proxy-status-card hidden"></div>
-            <div id="idmStatusCard" class="proxy-status-card hidden"></div>
-            <div id="youtubeMetaCard" class="proxy-status-card hidden"></div>
-            <div id="bilibiliDuplicateCard" class="proxy-status-card bilibili-duplicate-card hidden"></div>
             <div class="card-toolbar">
               <button id="pickInputInlineBtn" class="mini-btn">从文件管理器添加视频</button>
-            </div>
-            <div class="card-toolbar">
-              <button id="openYoutubeOutputBtn" class="mini-btn">打开信息输出</button>
+              <button id="openInputBtn" class="mini-btn">打开 input</button>
+              <button id="scanInputBtn" class="mini-btn">扫描 input</button>
             </div>
             <div class="input-ass-tools">
               <div id="inputAssStatus" class="input-ass-status idle">请先选择一个 input 视频</div>
               <button id="reburnFromInputBtn" class="mini-btn" type="button" disabled>按当前双语字幕 ASS 重新烧录</button>
-            </div>
-            <div class="preview-pane youtube-preview">
-              <img id="youtubeCoverPreview" class="video-preview hidden" alt="YouTube cover" />
-              <pre id="youtubeInfoPreview" class="text-preview"></pre>
             </div>
             <div id="videoList" class="video-list"></div>
           </section>
@@ -216,14 +167,74 @@
 
           <section class="workspace-card motion-enter" id="workspaceDetails">
             <div class="tabs" role="tablist" aria-label="工作区设置">
+              <button class="tab" data-panel="input-download" type="button" role="tab" aria-selected="false">输入与下载</button>
               <button class="tab" data-panel="workflow" type="button" role="tab" aria-selected="false">工作流</button>
               <button class="tab active" data-panel="recognition" type="button" role="tab" aria-selected="true" aria-current="page">识别设置</button>
               <button class="tab" data-panel="translation" type="button" role="tab" aria-selected="false">翻译设置</button>
+              <button class="tab" data-panel="advanced" type="button" role="tab" aria-selected="false">高级策略</button>
               <button class="tab" data-panel="subtitle" type="button" role="tab" aria-selected="false">字幕样式</button>
               <button class="tab" data-panel="outputs" type="button" role="tab" aria-selected="false">项目产物</button>
             </div>
 
             <div class="workspace-panels">
+              <section class="workspace-panel" data-panel="input-download">
+                <div class="section-head">
+                  <div>
+                    <h3>输入与下载</h3>
+                    <p>管理 YouTube 下载、代理、IDM、封面元信息、B 站查重与 input 目录。</p>
+                  </div>
+                </div>
+                <div class="download-block">
+                  <input id="downloadUrlInput" type="text" placeholder="粘贴 YouTube 链接，例如 https://www.youtube.com/watch?v=..." />
+                  <div class="download-settings">
+                    <label>
+                      <span>下载方式</span>
+                      <select id="download_backend">
+                        <option value="auto">自动：yt-dlp → IDM → 手动</option>
+                        <option value="ytdlp">仅 yt-dlp</option>
+                        <option value="idm">仅 IDM 桥接</option>
+                        <option value="manual">手动导入</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>代理地址</span>
+                      <input id="proxy_url" type="text" placeholder="留空直连，或填 http://127.0.0.1:7890" />
+                    </label>
+                    <label>
+                      <span>IDM 路径</span>
+                      <input id="idm_exe_path" type="text" placeholder="C:\Program Files (x86)\Internet Download Manager\IDMan.exe" />
+                    </label>
+                    <label>
+                      <span>IDM 输出目录</span>
+                      <input id="idm_output_dir" type="text" />
+                    </label>
+                    <label>
+                      <span>IDM 等待秒数</span>
+                      <input id="idm_wait_timeout_seconds" type="number" min="30" />
+                    </label>
+                  </div>
+                  <div class="download-actions">
+                    <button id="downloadOnlyBtn" class="mini-btn">下载到队列</button>
+                    <button id="downloadAndRunBtn" class="mini-btn">下载并开跑</button>
+                    <button id="testProxyBtn" class="mini-btn">测试代理</button>
+                    <button id="checkIdmBtn" class="mini-btn">检测 IDM</button>
+                    <button id="fetchYoutubeInfoBtn" class="mini-btn">获取信息</button>
+                    <button id="fetchYoutubeCoverBtn" class="mini-btn">获取封面</button>
+                    <button id="bilibiliDuplicateSearchBtn" class="mini-btn" type="button">检测 B 站已有翻译</button>
+                    <button id="rebuildPaddedCoverBtn" class="mini-btn">重建 1280x960 封面</button>
+                    <button id="openYoutubeOutputBtn" class="mini-btn">打开信息输出</button>
+                  </div>
+                </div>
+                <div id="proxyStatusCard" class="proxy-status-card hidden"></div>
+                <div id="idmStatusCard" class="proxy-status-card hidden"></div>
+                <div id="youtubeMetaCard" class="proxy-status-card hidden"></div>
+                <div id="bilibiliDuplicateCard" class="proxy-status-card bilibili-duplicate-card hidden"></div>
+                <div class="preview-pane youtube-preview">
+                  <img id="youtubeCoverPreview" class="video-preview hidden" alt="YouTube cover" />
+                  <pre id="youtubeInfoPreview" class="text-preview"></pre>
+                </div>
+              </section>
+
               <section class="workspace-panel" data-panel="workflow">
                 <div class="section-head">
                   <div>
@@ -261,7 +272,9 @@
                     <h4>字段说明与使用范例</h4>
                     <span>保留技术枚举值，避免保存时跑偏。</span>
                   </div>
-                  <div class="workflow-help-grid">
+                  <details class="workflow-help-details">
+                    <summary>展开字段说明</summary>
+                    <div class="workflow-help-grid">
                     <div><strong>工作流</strong><p>选择语言管线预设，会更新源语言、目标语言、ASR 模型、提示词、数据集和参考层样式。例：俄文视频选 ru_to_zh_default。</p></div>
                     <div><strong>字幕模式</strong><p>target_only 只输出中文；bilingual_source_reference 输出中文加源语参考层；source_review 用于源语校对。</p></div>
                     <div><strong>参考层标签</strong><p>用于源语文件名和参考层身份。俄文用 ru，英文用 en。</p></div>
@@ -269,7 +282,9 @@
                     <div><strong>数据集 Profile</strong><p>加载术语、QA 样例、ASR 易混词和风格例子。俄译中建议 ru_zh/general。</p></div>
                     <div><strong>俄文范例</strong><p>ru -> zh-Hans，large-v3，Huiwen-HKHei，32，80，4，1.2，full_split。</p></div>
                   </div>
+                  </details>
                 </div>
+                <div id="localFeedbackSummaryCard" class="local-feedback-card"></div>
                 <div class="workflow-summary-grid">
                   <div class="workflow-summary-card">
                     <h4>Profile 说明</h4>
@@ -345,22 +360,53 @@
                   <label><span>重试次数</span><input id="translation_retries" type="number" /></label>
                   <label class="wide"><span>OpenAI Base URL</span><input id="openai_base_url" type="text" /></label>
                   <div id="openaiRuntimeCard" class="openai-runtime-card wide"></div>
+                  <label class="toggle-row"><span>本地翻译反馈</span><input id="enable_local_translation_feedback" type="checkbox" /></label>
                   <label class="wide"><span>附加音频路径</span><input id="audio_override_path" type="text" readonly /></label>
-                  <label class="toggle-row"><span>复用已有分段</span><input id="load_existing_segments" type="checkbox" /></label>
+                </div>
+
+              </section>
+
+              <section class="workspace-panel" data-panel="advanced">
+                <div class="section-head">
+                  <div>
+                    <h3>高级策略</h3>
+                    <p>集中管理缓存重跑、难句修复、语义分配和实体策略；日常翻译通常不需要频繁调整。</p>
+                  </div>
+                </div>
+                <div id="advancedStrategySummary" class="advanced-summary-grid"></div>
+                <div class="advanced-groups">
+                  <section class="advanced-group">
+                    <h4>缓存与重跑</h4>
+                    <div class="form-grid compact">
                   <label class="toggle-row"><span>强制重翻译已有分段</span><input id="force_retranslate_existing_segments" type="checkbox" /></label>
                   <label class="toggle-row"><span>只输出到 ASS</span><input id="skip_burn" type="checkbox" /></label>
+                  <label class="toggle-row"><span>复用已有分段</span><input id="load_existing_segments" type="checkbox" /></label>
+                    </div>
+                  </section>
+                  <section class="advanced-group">
+                    <h4>难句修复</h4>
+                    <div class="form-grid compact">
                   <label class="toggle-row"><span>启用难句 AI 修复</span><input id="repair_high_risk_spans" type="checkbox" /></label>
-                  <label><span>最多 Span 预翻译</span><input id="span_translation_max_spans" type="number" min="0" /></label>
+                  <label><span>最大 Span 预翻译</span><input id="span_translation_max_spans" type="number" min="0" /></label>
                   <label><span>预翻译最多段数</span><input id="span_translation_max_segments" type="number" min="1" /></label>
                   <label><span>预翻译最长秒数</span><input id="span_translation_max_duration" type="number" min="0" step="0.1" /></label>
                   <label><span>预翻译最低风险</span><input id="span_translation_min_risk_score" type="number" min="0" /></label>
                   <label><span>最多修复 Span</span><input id="span_repair_max_spans" type="number" min="0" /></label>
+                    </div>
+                  </section>
+                  <section class="advanced-group">
+                    <h4>语义与显示</h4>
+                    <div class="form-grid compact">
                   <label class="toggle-row"><span>启用中文语义分配</span><input id="semantic_zh_allocation_enabled" type="checkbox" /></label>
                   <label><span>最多语义分配 Span</span><input id="semantic_zh_allocation_max_spans" type="number" min="0" /></label>
                   <label class="toggle-row"><span>短完整句合屏</span><input id="short_complete_sentence_display_grouping" type="checkbox" /></label>
-                  <label class="toggle-row"><span>本地翻译反馈</span><input id="enable_local_translation_feedback" type="checkbox" /></label>
                   <label class="toggle-row"><span>启用 AI 风格重写</span><input id="enable_ai_display_rewrite" type="checkbox" /></label>
                   <label><span>最多 AI 风格重写段数</span><input id="display_rewrite_max_ai_segments" type="number" min="0" /></label>
+                    </div>
+                  </section>
+                  <section class="advanced-group">
+                    <h4>实体策略</h4>
+                    <div class="form-grid compact">
                   <label><span>Entity Bootstrap Mode</span>
                     <select id="bootstrap_entity_decisions">
                       <option value="high_confidence_only">high_confidence_only</option>
@@ -368,6 +414,8 @@
                       <option value="off">off</option>
                     </select>
                   </label>
+                    </div>
+                  </section>
                 </div>
               </section>
 
@@ -460,6 +508,7 @@
                 </div>
                 <div id="segmentationReviewPanel" class="entity-panel"></div>
                 <div id="entityReviewPanel" class="entity-panel"></div>
+                <div id="projectHealthSummary" class="project-health-card"></div>
                 <div class="output-layout">
                   <div id="projectList" class="project-list"></div>
                   <div class="preview-pane">
@@ -489,6 +538,6 @@
 
     <div id="toast" class="toast hidden"></div>
 
-    <script src="./app.js?v=20260617-bilibili"></script>
+    <script src="./app.js?v=20260617-frontend-ia"></script>
   </body>
 </html>

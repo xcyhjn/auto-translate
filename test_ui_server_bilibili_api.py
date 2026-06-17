@@ -4,8 +4,20 @@ import json
 import threading
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 from autosub_zh import ui_server
+
+
+def _get_json(server: ThreadingHTTPServer, path: str) -> tuple[int, dict]:
+    conn = HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+    try:
+        conn.request("GET", path)
+        response = conn.getresponse()
+        data = response.read()
+        return response.status, json.loads(data.decode("utf-8"))
+    finally:
+        conn.close()
 
 
 def _post_json(server: ThreadingHTTPServer, path: str, payload: dict) -> tuple[int, dict]:
@@ -162,3 +174,89 @@ def test_collect_style_feedback_api_returns_summary(monkeypatch) -> None:
     assert payload["ok"] is True
     assert payload["added"] == 2
     assert payload["path"].endswith("translation_edit_examples.jsonl")
+
+
+def test_local_feedback_summary_api_reads_counts_and_eval(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    (dataset / "eval_sets").mkdir(parents=True)
+    (dataset / "eval_reports").mkdir(parents=True)
+    (dataset / "translation_edit_examples.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"accepted": True, "use_for_style_prompt": True, "use_for_eval": False}),
+                json.dumps({"accepted": True, "use_for_style_prompt": False, "use_for_eval": True}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (dataset / "eval_sets" / "translation_style_gold.jsonl").write_text(
+        json.dumps({"accepted": True, "use_for_eval": True}) + "\n",
+        encoding="utf-8",
+    )
+    (dataset / "eval_reports" / "latest_style_eval.json").write_text(
+        json.dumps(
+            {
+                "sample_count": 1,
+                "sample_insufficient": False,
+                "metrics": {"unsafe_sample_rate": 0.0, "semantic_or_style_signal_rate": 1.0},
+                "created_at": "2026-06-17T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (dataset / "learned_style_guidelines.md").write_text(
+        "# Learned\n\n- Keep names in English.\n- Prefer natural subtitle wording.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _get_json(server, "/api/local-feedback-summary")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["counts"]["translation_edit_count"] == 2
+    assert payload["counts"]["style_learning_count"] == 1
+    assert payload["counts"]["style_gold_count"] == 1
+    assert payload["eval"]["sample_count"] == 1
+    assert payload["eval"]["metrics"]["semantic_or_style_signal_rate"] == 1.0
+    assert payload["guidelines"] == ["Keep names in English.", "Prefer natural subtitle wording."]
+
+
+def test_local_feedback_summary_api_handles_missing_files(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", tmp_path / "missing_feedback")
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _get_json(server, "/api/local-feedback-summary")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["counts"]["translation_edit_count"] == 0
+    assert payload["counts"]["style_learning_count"] == 0
+    assert payload["counts"]["style_gold_count"] == 0
+    assert payload["available"]["latest_style_eval"] is False
+
+
+def test_local_feedback_summary_api_tolerates_invalid_eval_report(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    (dataset / "eval_reports").mkdir(parents=True)
+    (dataset / "eval_reports" / "latest_style_eval.json").write_text("{bad json", encoding="utf-8")
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _get_json(server, "/api/local-feedback-summary")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["eval"]["sample_count"] == 0
+    assert payload["eval"]["metrics"] == {}

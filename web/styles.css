@@ -244,10 +244,25 @@
   }
 
   .workflow-effective-grid,
-  .workflow-help-grid {
+  .workflow-help-grid,
+  .advanced-summary-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--space-3);
+  }
+
+  .advanced-groups {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+    margin-top: var(--space-4);
+  }
+
+  .feedback-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: var(--space-3);
+    margin-top: var(--space-4);
   }
 
   .workflow-summary-grid {
@@ -615,6 +630,9 @@
   .proxy-status-card,
   .workflow-effective-card,
   .workflow-help-panel,
+  .advanced-group,
+  .local-feedback-card,
+  .project-health-card,
   .openai-runtime-card,
   .style-card,
   .entity-panel,
@@ -634,6 +652,9 @@
   .proxy-status-card,
   .workflow-effective-card,
   .workflow-help-panel,
+  .advanced-group,
+  .local-feedback-card,
+  .project-health-card,
   .openai-runtime-card,
   .style-card,
   .entity-panel,
@@ -647,6 +668,35 @@
   .error-card,
   .proxy-status-card {
     margin-top: var(--space-4);
+  }
+
+  .advanced-group,
+  .local-feedback-card,
+  .project-health-card {
+    padding: var(--space-4);
+    margin-top: var(--space-4);
+  }
+
+  .advanced-groups .advanced-group {
+    margin-top: 0;
+  }
+
+  .advanced-group h4,
+  .local-feedback-head h4 {
+    margin-bottom: var(--space-2);
+  }
+
+  .local-feedback-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+
+  .local-feedback-head p {
+    margin-bottom: 0;
+    overflow-wrap: anywhere;
   }
 
   .alert-ok,
@@ -739,6 +789,50 @@
     flex-direction: column;
     gap: var(--space-3);
     min-width: 0;
+  }
+
+  .queue-summary,
+  .chunk-summary,
+  .project-badges,
+  .bilibili-state-row,
+  .bilibili-manual-review,
+  .local-feedback-guidelines {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    min-width: 0;
+    margin-top: var(--space-3);
+  }
+
+  .queue-summary span,
+  .chunk-summary span,
+  .project-badge,
+  .bilibili-state-row span,
+  .bilibili-state-row strong {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--muted);
+    font-size: var(--font-xs);
+    overflow-wrap: anywhere;
+  }
+
+  .bilibili-state-row strong {
+    color: var(--text);
+  }
+
+  .project-badge.ok {
+    border-color: rgba(92, 224, 162, 0.3);
+    background: var(--success-soft);
+    color: var(--success);
+  }
+
+  .project-badge.muted {
+    color: var(--muted-2);
   }
 
   .download-block {
@@ -1246,6 +1340,17 @@
     font-size: var(--font-xs);
   }
 
+  .bilibili-manual-review {
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--line);
+  }
+
+  .bilibili-manual-review > strong,
+  .local-feedback-guidelines > strong {
+    width: 100%;
+    font-size: var(--font-sm);
+  }
+
   .bilibili-reasons span,
   .bilibili-fallback a,
   .bilibili-candidate-actions a {
@@ -1278,6 +1383,27 @@
     background: rgba(255, 255, 255, 0.06);
     color: var(--text);
     padding: 0 var(--space-2);
+  }
+
+  .local-feedback-guidelines {
+    display: block;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--line);
+  }
+
+  .local-feedback-guidelines ul {
+    margin: var(--space-2) 0 0;
+    padding-left: var(--space-5);
+    color: var(--muted);
+  }
+
+  .local-feedback-guidelines li {
+    margin-top: var(--space-1);
+    overflow-wrap: anywhere;
+  }
+
+  .local-feedback-guidelines p {
+    margin: var(--space-2) 0 0;
   }
 
   .input-ass-tools {
@@ -1709,6 +1835,9 @@
     .status-rail,
     .download-settings,
     .form-grid,
+    .advanced-groups,
+    .advanced-summary-grid,
+    .feedback-summary-grid,
     .style-columns,
     .output-layout,
     .workflow-effective-grid,

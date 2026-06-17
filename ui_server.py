@@ -24,7 +24,7 @@ import httpx
 
 from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, check_idm
 from .bilibili_search import build_bilibili_duplicate_report, write_bilibili_duplicate_artifacts
-from .feedback_dataset import BILIBILI_LABELS, collect_style_project, save_bilibili_feedback_label
+from .feedback_dataset import BILIBILI_LABELS, DEFAULT_DATASET_DIR, collect_style_project, read_jsonl, save_bilibili_feedback_label
 from .job_store import JobStore, ACTIVE_STATUSES
 from .models import BilingualSubtitleStyle
 from .media import normalize_asr_audio_mode, normalize_asr_vad_mode, probe_media
@@ -56,6 +56,7 @@ WEB_DIR = BASE_DIR / "web"
 CONFIG_PATH = BASE_DIR / "ui_config.json"
 ERROR_LOG_PATH = BASE_DIR / "ui_server_error_trace.log"
 STATE_SNAPSHOT_PATH = BASE_DIR / "ui_server_state.json"
+LOCAL_FEEDBACK_DATASET_DIR = DEFAULT_DATASET_DIR
 SERVER_VERSION = "20260519-stability1"
 SERVER_PORT = int(os.environ.get("AUTOSUB_UI_PORT", "8777"))
 DEFAULT_HTTP_PROXY = "http://127.0.0.1:7890"
@@ -2480,6 +2481,64 @@ def collect_style_feedback_job(project_path: str) -> dict:
     return collect_style_project(project_dir)
 
 
+def build_local_feedback_summary(dataset_dir: Path | None = None) -> dict:
+    dataset_dir = Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR)
+    translation_edits_path = dataset_dir / "translation_edit_examples.jsonl"
+    style_gold_path = dataset_dir / "eval_sets" / "translation_style_gold.jsonl"
+    eval_report_path = dataset_dir / "eval_reports" / "latest_style_eval.json"
+    guidelines_path = dataset_dir / "learned_style_guidelines.md"
+    summary_path = dataset_dir / "learning_summary.md"
+
+    translation_records = read_jsonl(translation_edits_path)
+    style_gold_records = read_jsonl(style_gold_path)
+    style_learning_count = sum(
+        1
+        for record in translation_records
+        if record.get("accepted") is True
+        and record.get("use_for_style_prompt") is True
+        and record.get("use_for_eval") is not True
+    )
+    eval_report: dict = {}
+    if eval_report_path.exists():
+        try:
+            payload = json.loads(eval_report_path.read_text(encoding="utf-8"))
+            eval_report = payload if isinstance(payload, dict) else {}
+        except json.JSONDecodeError:
+            eval_report = {}
+    guidelines_text = guidelines_path.read_text(encoding="utf-8", errors="replace") if guidelines_path.exists() else ""
+    guideline_lines = [
+        line.strip("- ").strip()
+        for line in guidelines_text.splitlines()
+        if line.strip().startswith("- ")
+    ][:8]
+    return {
+        "ok": True,
+        "dataset_dir": str(dataset_dir),
+        "paths": {
+            "learning_summary": str(summary_path),
+            "latest_style_eval": str(eval_report_path),
+            "learned_style_guidelines": str(guidelines_path),
+        },
+        "counts": {
+            "translation_edit_count": len(translation_records),
+            "style_learning_count": style_learning_count,
+            "style_gold_count": len(style_gold_records),
+        },
+        "eval": {
+            "sample_count": eval_report.get("sample_count", 0),
+            "sample_insufficient": bool(eval_report.get("sample_insufficient", True)),
+            "metrics": eval_report.get("metrics") if isinstance(eval_report.get("metrics"), dict) else {},
+            "created_at": str(eval_report.get("created_at") or ""),
+        },
+        "guidelines": guideline_lines,
+        "available": {
+            "learning_summary": summary_path.exists(),
+            "latest_style_eval": eval_report_path.exists(),
+            "learned_style_guidelines": guidelines_path.exists(),
+        },
+    }
+
+
 def execute_pipeline_job(video_path: str, config: dict, task_id: str | None = None) -> None:
     task_id = task_id or current_task_id()
     ensure_openai_runtime_env_loaded()
@@ -2844,6 +2903,10 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                         "proxy": test_proxy_connection(),
                     }
                 )
+                return
+
+            if parsed.path == "/api/local-feedback-summary":
+                self._json_response(build_local_feedback_summary())
                 return
 
             if parsed.path == "/api/file":
