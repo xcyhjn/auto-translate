@@ -699,6 +699,35 @@
     overflow-wrap: anywhere;
   }
 
+  .local-feedback-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+  }
+
+  .local-feedback-action-status {
+    min-width: min(260px, 100%);
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  .local-feedback-action-status.ok {
+    color: var(--success);
+  }
+
+  .local-feedback-action-status.error {
+    color: var(--danger);
+  }
+
+  .local-feedback-note {
+    margin-top: var(--space-2);
+    margin-bottom: 0;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
   .alert-ok,
   .proxy-ok,
   .input-ass-status.saved,

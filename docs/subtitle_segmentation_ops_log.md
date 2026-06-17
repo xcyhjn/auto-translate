@@ -1095,3 +1095,35 @@ Verification:
 - `py -m autosub_zh.feedback_dataset build-gold`
 - `py -m autosub_zh.feedback_dataset eval-style`
 - `py -m autosub_zh.feedback_dataset summarize`
+
+## 2026-06-17 22:30 +08:00 - UI Buttons For Current ASS/Span Feedback
+
+User direction:
+
+- Add website buttons to learn the current span and current ASS.
+- Do not learn from the `05` file.
+
+What:
+
+- Added `/api/collect-span-feedback` for collecting current project span-learning records from final manual ASS alignment.
+- Kept `/api/collect-style-feedback` for ASS edit-learning and made both API responses explicit:
+  - `learning_source = manual_ass`
+  - `05` / `05a` translated segments are machine baselines only for diff alignment.
+- Added the same source contract to JSONL record `source` metadata:
+  - `learning_source = manual_ass`
+  - `machine_baseline_only = true`
+- Added two visible buttons in the frontend local feedback card:
+  - `学习本次 ASS`
+  - `学习本次 Span`
+- The buttons act on the selected output project and refresh the local feedback summary after collection.
+- Retained the existing file-preview `采集 ASS 反馈` button as a precise file/project-level shortcut.
+
+Verification:
+
+- `node --check web\app.js`
+- `python -m py_compile ui_server.py feedback_dataset.py span_translate.py pipeline_core.py`
+- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`
+
+Notes:
+
+- The collectors still read `05_translated_segments.json` or `05a_span_translated_segments.json` only to compare the machine output against final ASS edits. They are not accepted as target learning data.

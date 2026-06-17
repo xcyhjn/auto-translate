@@ -22,6 +22,7 @@ const state = {
   youtubeMeta: null,
   bilibiliDuplicate: null,
   localFeedbackSummary: null,
+  localFeedbackAction: null,
   selectedMediaInfo: null,
   mediaInspectToken: 0,
   lastErrorPayload: null,
@@ -1208,6 +1209,23 @@ function renderLocalFeedbackSummary(payload) {
   const guidelines = Array.isArray(payload.guidelines) ? payload.guidelines.slice(0, 5) : [];
   const available = payload.available || {};
   const statusChip = config.enable_local_translation_feedback ? "已接入 Prompt" : "未注入 Prompt";
+  const selectedProjectPath = currentFeedbackProjectPath() || "";
+  const selectedProject =
+    (state.projects || []).find((project) => project.path === selectedProjectPath) ||
+    (state.selectedProject?.path === selectedProjectPath ? state.selectedProject : null);
+  const selectedProjectName = selectedProject?.name || (selectedProjectPath ? selectedProjectPath.split(/[\\/]/).filter(Boolean).pop() : "");
+  const rawAction = state.localFeedbackAction || {};
+  const action = rawAction.projectPath === selectedProjectPath ? rawAction : {};
+  const actionBusy = action.status === "running";
+  const actionText =
+    action.status === "success"
+      ? action.message
+      : action.status === "error"
+        ? action.message
+        : selectedProjectName
+          ? `当前项目：${selectedProjectName}`
+          : "请先在产物页选择一个项目";
+  const actionClass = action.status === "error" ? " error" : action.status === "success" ? " ok" : "";
   root.innerHTML = `
     <div class="local-feedback-head">
       <div>
@@ -1233,6 +1251,18 @@ function renderLocalFeedbackSummary(payload) {
       }
     </div>
   `;
+  root.insertAdjacentHTML(
+    "beforeend",
+    `
+    <div class="local-feedback-actions">
+      <button id="collectCurrentAssFeedbackBtn" class="mini-btn" type="button" ${!selectedProjectPath || actionBusy ? "disabled" : ""}>学习本次 ASS</button>
+      <button id="collectCurrentSpanFeedbackBtn" class="mini-btn" type="button" ${!selectedProjectPath || actionBusy ? "disabled" : ""}>学习本次 Span</button>
+      <span class="local-feedback-action-status${actionClass}">${escapeHtml(actionBusy ? "正在采集学习样本..." : actionText || "")}</span>
+    </div>
+    <p class="local-feedback-note">学习来源只取最终人工 ASS；05/05a 只作为机器基线用于差异对齐，不作为学习目标。</p>
+  `,
+  );
+  wireLocalFeedbackActionButtons();
   const spanEvalInfo = payload.span_eval || {};
   const spanMetrics = spanEvalInfo.metrics || {};
   const feedbackGrid = root.querySelector(".feedback-summary-grid");
@@ -1264,6 +1294,68 @@ function renderLocalFeedbackSummary(payload) {
     </div>
   `,
   );
+}
+
+function currentFeedbackProjectPath() {
+  return state.selectedFileProjectPath || state.selectedProject?.path || null;
+}
+
+function localFeedbackResultMessage(kind, payload) {
+  const label = kind === "span" ? "Span" : "ASS";
+  const added = Number(payload?.added || 0);
+  const skipped = Number(payload?.skipped_existing || 0);
+  if (kind === "span") {
+    const collected = Number(payload?.added_span_record_count || 0);
+    const candidates = Number(payload?.candidate_span_count || 0);
+    return `${label} 学习样本已采集：新增 ${added} 条，生成 ${collected} 条，候选 span ${candidates} 个，跳过重复 ${skipped} 条`;
+  }
+  const changed = Number(payload?.changed_pair_count || 0);
+  return `${label} 学习样本已采集：新增 ${added} 条，人工修改 ${changed} 条，跳过重复 ${skipped} 条`;
+}
+
+async function collectLocalFeedback(kind) {
+  const projectPath = currentFeedbackProjectPath();
+  if (!projectPath) {
+    showToast("请先在产物页选择一个项目", "warn");
+    return;
+  }
+  const endpoint = kind === "span" ? "/api/collect-span-feedback" : "/api/collect-style-feedback";
+  state.localFeedbackAction = { status: "running", kind, projectPath };
+  renderLocalFeedbackSummary(state.localFeedbackSummary);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_path: projectPath }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || `${kind} feedback collection failed`);
+    const message = `${localFeedbackResultMessage(kind, payload)}；05/05a 仅作基线`;
+    state.localFeedbackAction = { status: "success", kind, projectPath, message };
+    showToast(message);
+    await refreshLocalFeedbackSummary();
+  } catch (error) {
+    const label = kind === "span" ? "Span" : "ASS";
+    const message = `${label} 学习采集失败：${error.message || error}`;
+    state.localFeedbackAction = { status: "error", kind, projectPath, message };
+    renderLocalFeedbackSummary(state.localFeedbackSummary);
+    showToast(message, "error");
+  }
+}
+
+function wireLocalFeedbackActionButtons() {
+  const assButton = el("collectCurrentAssFeedbackBtn");
+  const spanButton = el("collectCurrentSpanFeedbackBtn");
+  if (assButton) {
+    setButtonContent(assButton, "spark");
+    assButton.title = "从本项目最终 ASS 采集翻译编辑样本；05 只作机器基线。";
+    assButton.addEventListener("click", () => collectLocalFeedback("ass"));
+  }
+  if (spanButton) {
+    setButtonContent(spanButton, "spark");
+    spanButton.title = "从本项目最终 ASS 采集 span 预翻译样本；05/05a 只作机器基线。";
+    spanButton.addEventListener("click", () => collectLocalFeedback("span"));
+  }
 }
 
 async function refreshLocalFeedbackSummary() {
@@ -2489,6 +2581,7 @@ function renderProjects(projects) {
       renderProjectHealthSummary();
       refreshEntityArtifactsForSelectedProject();
       renderProjects(state.projects);
+      renderLocalFeedbackSummary(state.localFeedbackSummary);
       scrollToWorkspaceDetails();
     });
 
@@ -3514,23 +3607,7 @@ function bindActions() {
       });
   });
   el("collectStyleFeedbackBtn")?.addEventListener("click", () => {
-    const projectPath = state.selectedFileProjectPath || state.selectedProject?.path || null;
-    if (!projectPath) return;
-    fetch("/api/collect-style-feedback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_path: projectPath }),
-    })
-      .then((res) => res.json())
-      .then((payload) => {
-        if (!payload.ok) {
-          showToast(payload.error || "ASS 反馈采集失败");
-          return;
-        }
-        showToast(`ASS 反馈已采集：新增 ${payload.added || 0} 条`);
-        refreshLocalFeedbackSummary();
-      })
-      .catch((error) => showToast(`ASS 反馈采集失败：${error.message || error}`));
+    collectLocalFeedback("ass");
   });
   el("reburnFromInputBtn").addEventListener("click", () => {
     const projectPath = state.selectedVideoProjectPath || null;

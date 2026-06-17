@@ -156,6 +156,8 @@ def test_collect_style_feedback_api_returns_summary(monkeypatch) -> None:
             "added": 2,
             "skipped_existing": 1,
             "path": "D:/autosub_zh/datasets/local_feedback/translation_edit_examples.jsonl",
+            "learning_source": "manual_ass",
+            "baseline_role": "05_translated_segments.json is used only as the machine baseline for ASS diff alignment.",
         }
 
     monkeypatch.setattr(ui_server, "collect_style_feedback_job", fake_collect)
@@ -174,6 +176,41 @@ def test_collect_style_feedback_api_returns_summary(monkeypatch) -> None:
     assert payload["ok"] is True
     assert payload["added"] == 2
     assert payload["path"].endswith("translation_edit_examples.jsonl")
+    assert payload["learning_source"] == "manual_ass"
+    assert "baseline" in payload["baseline_role"]
+
+
+def test_collect_span_feedback_api_returns_summary(monkeypatch) -> None:
+    def fake_collect(project_path: str) -> dict:
+        return {
+            "project": project_path,
+            "added": 3,
+            "skipped_existing": 1,
+            "added_span_record_count": 4,
+            "path": "D:/autosub_zh/datasets/local_feedback/span_translation_examples.jsonl",
+            "learning_source": "manual_ass",
+            "baseline_role": "05a/05 translated segments are used only as the machine baseline for span diff alignment.",
+        }
+
+    monkeypatch.setattr(ui_server, "collect_span_feedback_job", fake_collect)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _post_json(
+            server,
+            "/api/collect-span-feedback",
+            {"project_path": "D:/autosub_zh/output/sample"},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["added"] == 3
+    assert payload["added_span_record_count"] == 4
+    assert payload["path"].endswith("span_translation_examples.jsonl")
+    assert payload["learning_source"] == "manual_ass"
+    assert "baseline" in payload["baseline_role"]
 
 
 def test_local_feedback_summary_api_reads_counts_and_eval(monkeypatch, tmp_path: Path) -> None:

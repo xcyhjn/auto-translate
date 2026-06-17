@@ -125,6 +125,8 @@ def test_collect_style_defaults_to_review_only_samples(tmp_path: Path) -> None:
 
     paths = dataset_paths(dataset_dir)
     record = read_jsonl(paths["translation_edits"])[0]
+    assert record["source"]["learning_source"] == "manual_ass"
+    assert record["source"]["machine_baseline_only"] is True
     assert record["accepted"] is False
     assert record["use_for_style_prompt"] is False
     assert record["use_for_eval"] is False
@@ -298,6 +300,8 @@ def test_collect_span_style_defaults_to_review_only_samples(tmp_path: Path) -> N
     assert result["added"] == 1
     paths = dataset_paths(dataset_dir)
     record = read_jsonl(paths["span_translation_examples"])[0]
+    assert record["source"]["learning_source"] == "manual_ass"
+    assert record["source"]["machine_baseline_only"] is True
     assert record["accepted"] is False
     assert record["use_for_span_prompt"] is False
     assert record["use_for_eval"] is False

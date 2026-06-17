@@ -24,7 +24,14 @@ import httpx
 
 from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, check_idm
 from .bilibili_search import build_bilibili_duplicate_report, write_bilibili_duplicate_artifacts
-from .feedback_dataset import BILIBILI_LABELS, DEFAULT_DATASET_DIR, collect_style_project, read_jsonl, save_bilibili_feedback_label
+from .feedback_dataset import (
+    BILIBILI_LABELS,
+    DEFAULT_DATASET_DIR,
+    collect_span_style_project,
+    collect_style_project,
+    read_jsonl,
+    save_bilibili_feedback_label,
+)
 from .job_store import JobStore, ACTIVE_STATUSES
 from .models import BilingualSubtitleStyle
 from .media import normalize_asr_audio_mode, normalize_asr_vad_mode, probe_media
@@ -2478,7 +2485,20 @@ def collect_style_feedback_job(project_path: str) -> dict:
     project_dir = Path(project_path)
     if not project_dir.exists():
         raise FileNotFoundError(f"Project folder not found: {project_dir}")
-    return collect_style_project(project_dir)
+    result = collect_style_project(project_dir)
+    result["learning_source"] = "manual_ass"
+    result["baseline_role"] = "05_translated_segments.json is used only as the machine baseline for ASS diff alignment."
+    return result
+
+
+def collect_span_feedback_job(project_path: str) -> dict:
+    project_dir = Path(project_path)
+    if not project_dir.exists():
+        raise FileNotFoundError(f"Project folder not found: {project_dir}")
+    result = collect_span_style_project(project_dir)
+    result["learning_source"] = "manual_ass"
+    result["baseline_role"] = "05a/05 translated segments are used only as the machine baseline for span diff alignment."
+    return result
 
 
 def build_local_feedback_summary(dataset_dir: Path | None = None) -> dict:
@@ -3312,6 +3332,29 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                             **build_error_payload(
                                 exc,
                                 operation="collect_style_feedback",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                self._json_response({"ok": True, **result})
+                return
+
+            if parsed.path == "/api/collect-span-feedback":
+                project_path = str(payload.get("project_path") or "").strip()
+                if not project_path:
+                    self._json_response({"ok": False, "error": "project_path required"}, status=400)
+                    return
+                try:
+                    result = collect_span_feedback_job(project_path)
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                operation="collect_span_feedback",
                             ),
                         },
                         status=400,
