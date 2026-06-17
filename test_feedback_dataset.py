@@ -19,7 +19,9 @@ from autosub_zh.feedback_dataset import (
     write_jsonl,
 )
 from autosub_zh.feedback_ab_eval import (
+    ab_eval_action_recommendation_codes,
     build_ab_eval_preview,
+    build_ab_eval_history_summary,
     read_latest_ab_eval_report,
     run_translation_ab_eval,
 )
@@ -384,6 +386,10 @@ def test_translation_ab_eval_preview_and_run_do_not_mutate_learning_jsonl(tmp_pa
     latest = read_latest_ab_eval_report(dataset_dir)
     assert latest["available"] is True
     assert latest["summary"]["recommendation"] in {"insufficient_samples", "local_feedback_helpful", "neutral"}
+    history = build_ab_eval_history_summary(dataset_dir)
+    assert history["total_recorded_runs"] == 1
+    assert history["latest_runs"][0]["summary"]["style_feedback_win_count"] >= 1
+    assert "increase_eval_sample_count" in ab_eval_action_recommendation_codes(preview, latest)
 
 
 def test_collect_span_style_defaults_to_review_only_samples(tmp_path: Path) -> None:

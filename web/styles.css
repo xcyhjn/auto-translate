@@ -1065,6 +1065,22 @@
     grid-column: 1 / -1;
   }
 
+  .ab-eval-controls {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) minmax(120px, 180px);
+    gap: var(--space-3);
+    min-width: 0;
+    margin-bottom: var(--space-3);
+  }
+
+  .ab-eval-controls label {
+    display: grid;
+    gap: var(--space-2);
+    min-width: 0;
+    color: var(--muted);
+    font-size: var(--font-sm);
+  }
+
   .feedback-comparison {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2361,6 +2377,7 @@
     .learning-quality-hero,
     .learning-quality-grid,
     .learning-quality-sections,
+    .ab-eval-controls,
     .style-columns,
     .output-layout,
     .workflow-effective-grid,

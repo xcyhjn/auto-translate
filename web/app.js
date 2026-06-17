@@ -46,6 +46,8 @@
     report: null,
     status: "idle",
     message: "",
+    sampleKind: "mixed",
+    sampleCount: 5,
   },
   localFeedbackImpact: null,
   learningGuidelinesExpanded: false,
@@ -2101,6 +2103,47 @@ function abEvalRecommendationLabel(value) {
   return labels[value] || "暂无结论";
 }
 
+function abEvalActionLabel(code) {
+  const labels = {
+    build_gold_or_review_eval: "先审核 Eval 样本并运行 build-gold，再做 A/B。",
+    run_first_small_eval: "可以先运行一次 5 条小样本 A/B，建立基线。",
+    keep_feedback_enabled_collect_more_gold: "本地学习有帮助：继续开启反馈，并补充更多 gold 样本验证稳定性。",
+    review_high_signal_samples: "效果接近：优先复核高信号样本，避免只增加数量。",
+    inspect_prompt_samples_before_more_runs: "学习可能变差：先检查 Prompt 样本质量，再继续评估。",
+    increase_eval_sample_count: "样本不足：增加 Eval 样本或提高本次样本数后再判断。",
+    add_span_eval_samples: "Span Eval 不足：审核一部分 Span 样本进入 Eval。",
+    add_style_eval_samples: "ASS Eval 不足：审核一部分 ASS 样本进入 Eval。",
+  };
+  return labels[code] || code;
+}
+
+function renderAbEvalHistory(history) {
+  const rows = Array.isArray(history?.latest_runs) ? history.latest_runs : [];
+  if (!rows.length) return `<div class="entity-empty">暂无 A/B 历史。运行一次后会显示最近趋势。</div>`;
+  return `
+    <div class="learning-history-table compact">
+      <div class="learning-history-row head">
+        <span>时间</span><span>样本</span><span>结论</span><span>Style Δ</span><span>Span Δ</span>
+      </div>
+      ${rows
+        .slice(0, 5)
+        .map((row) => {
+          const summary = row.summary || {};
+          return `
+            <div class="learning-history-row">
+              <span>${escapeHtml(row.created_at || "")}</span>
+              <strong>${escapeHtml(`${row.sample_kind || "mixed"} / ${row.sample_count ?? 0}`)}</strong>
+              <span>${escapeHtml(abEvalRecommendationLabel(summary.recommendation))}</span>
+              <span>${escapeHtml(summary.avg_style_feedback_delta ?? 0)}</span>
+              <span>${escapeHtml(summary.avg_style_span_feedback_delta ?? 0)}</span>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
 function renderAbEvalReportPreview(report) {
   if (!report || report.available === false) {
     return `<div class="entity-empty">${escapeHtml(report?.message || "暂无 A/B 小样本评估报告。")}</div>`;
@@ -2154,10 +2197,28 @@ function renderLocalFeedbackAbEvalCard() {
   const stateAb = state.localFeedbackAbEval || {};
   const preview = stateAb.preview || {};
   const report = stateAb.report || preview.latest_report || {};
+  const history = preview.history || {};
+  const recommendationCodes = Array.isArray(preview.recommendation_codes) ? preview.recommendation_codes : [];
+  const sampleKind = stateAb.sampleKind || preview.sample_kind || "mixed";
+  const sampleCount = Number(stateAb.sampleCount || preview.sample_count || 5);
   const actionClass = stateAb.status === "error" ? " error" : stateAb.status === "success" ? " ok" : "";
   return `
     <section class="entity-section wide">
       <div class="entity-section-head"><h5>小样本 A/B 评估</h5><span>手动模型调用 / 不跑完整流程</span></div>
+      <div class="ab-eval-controls">
+        <label>
+          <span>样本类型</span>
+          <select data-ab-eval-sample-kind ${stateAb.status === "running" ? "disabled" : ""}>
+            <option value="mixed" ${sampleKind === "mixed" ? "selected" : ""}>ASS + Span 混合</option>
+            <option value="style" ${sampleKind === "style" ? "selected" : ""}>只评估 ASS</option>
+            <option value="span" ${sampleKind === "span" ? "selected" : ""}>只评估 Span</option>
+          </select>
+        </label>
+        <label>
+          <span>样本数</span>
+          <input data-ab-eval-sample-count type="number" min="1" max="10" value="${escapeHtml(sampleCount)}" ${stateAb.status === "running" ? "disabled" : ""} />
+        </label>
+      </div>
       ${
         preview.ok === false
           ? `<div class="entity-alert">${escapeHtml(preview.error || "A/B 预估读取失败")}</div>`
@@ -2173,13 +2234,19 @@ function renderLocalFeedbackAbEvalCard() {
             </div>`
       }
       ${(preview.warnings || []).length ? `<div class="learning-quality-reasons">${preview.warnings.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : ""}
+      ${
+        recommendationCodes.length
+          ? `<div class="learning-quality-reasons">${recommendationCodes.map((code) => `<span>${escapeHtml(abEvalActionLabel(code))}</span>`).join("")}</div>`
+          : ""
+      }
       <p class="local-feedback-note">此操作会调用翻译模型，但不会启动完整字幕流程，不会修改学习 JSONL。05/05a 只作为机器基线，不作为人工学习目标。</p>
       <div class="learning-action-buttons">
         <button class="mini-btn" type="button" data-ab-eval-refresh ${stateAb.status === "running" ? "disabled" : ""}>刷新预估</button>
-        <button class="mini-btn" type="button" data-ab-eval-run ${stateAb.status === "running" || preview.can_run === false ? "disabled" : ""}>运行 5 条小样本 A/B</button>
+        <button class="mini-btn" type="button" data-ab-eval-run ${stateAb.status === "running" || preview.can_run === false ? "disabled" : ""}>运行 ${escapeHtml(sampleCount)} 条小样本 A/B</button>
         <button class="mini-btn" type="button" data-ab-eval-report ${stateAb.status === "running" ? "disabled" : ""}>查看最新报告</button>
       </div>
       <span class="local-feedback-action-status${actionClass}">${escapeHtml(stateAb.message || "等待手动运行。")}</span>
+      ${renderAbEvalHistory(history)}
       ${renderAbEvalReportPreview(report)}
     </section>
   `;
@@ -2199,7 +2266,11 @@ async function refreshLocalFeedbackImpactPreview() {
 
 async function refreshLocalFeedbackAbEvalPreview() {
   try {
-    const response = await fetch("/api/local-feedback-ab-eval-preview");
+    const params = new URLSearchParams({
+      sample_kind: state.localFeedbackAbEval.sampleKind || "mixed",
+      sample_count: String(Math.max(1, Math.min(10, Number(state.localFeedbackAbEval.sampleCount || 5)))),
+    });
+    const response = await fetch(`/api/local-feedback-ab-eval-preview?${params.toString()}`);
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload) throw new Error(payload?.error || "A/B 预估读取失败");
     state.localFeedbackAbEval.preview = payload;
@@ -2232,16 +2303,18 @@ async function loadLocalFeedbackAbEvalReport() {
 }
 
 async function runLocalFeedbackAbEval() {
+  const sampleCount = Math.max(1, Math.min(10, Number(state.localFeedbackAbEval.sampleCount || 5)));
+  const sampleKind = state.localFeedbackAbEval.sampleKind || "mixed";
   state.localFeedbackAbEval.status = "running";
-  state.localFeedbackAbEval.message = "正在运行 5 条小样本 A/B；这会调用翻译模型，但不会启动完整字幕流程。";
+  state.localFeedbackAbEval.message = `正在运行 ${sampleCount} 条小样本 A/B；这会调用翻译模型，但不会启动完整字幕流程。`;
   renderLearningQualityPanel();
   try {
     const response = await fetch("/api/local-feedback-ab-eval", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sample_kind: "mixed",
-        sample_count: 5,
+        sample_kind: sampleKind,
+        sample_count: sampleCount,
         variants: ["baseline", "style_feedback", "style_span_feedback"],
         config: readFormConfig(),
       }),
@@ -2545,6 +2618,20 @@ function renderLearningQualityPanel() {
   });
   root.querySelectorAll("[data-learning-impact-refresh]").forEach((button) => {
     button.addEventListener("click", () => refreshLocalFeedbackImpactPreview());
+  });
+  root.querySelectorAll("[data-ab-eval-sample-kind]").forEach((select) => {
+    select.addEventListener("change", () => {
+      state.localFeedbackAbEval.sampleKind = select.value || "mixed";
+      refreshLocalFeedbackAbEvalPreview();
+    });
+  });
+  root.querySelectorAll("[data-ab-eval-sample-count]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const value = Math.max(1, Math.min(10, Number(input.value || 5)));
+      state.localFeedbackAbEval.sampleCount = value;
+      input.value = String(value);
+      refreshLocalFeedbackAbEvalPreview();
+    });
   });
   root.querySelectorAll("[data-ab-eval-refresh]").forEach((button) => {
     button.addEventListener("click", () => refreshLocalFeedbackAbEvalPreview());

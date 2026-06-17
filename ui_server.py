@@ -46,7 +46,9 @@ from .feedback_dataset import (
     write_jsonl,
 )
 from .feedback_ab_eval import (
+    ab_eval_action_recommendation_codes,
     build_ab_eval_preview,
+    build_ab_eval_history_summary,
     read_latest_ab_eval_report,
     run_translation_ab_eval,
 )
@@ -3747,11 +3749,14 @@ def build_local_feedback_ab_eval_preview(payload: dict | None = None, dataset_di
         translation_prompt=str(config.get("translation_prompt") or ""),
     )
     latest_report = read_latest_ab_eval_report(dataset_dir)
+    history = build_ab_eval_history_summary(dataset_dir)
     preview["latest_report"] = {
         "available": bool(latest_report.get("available")),
         "created_at": latest_report.get("created_at", ""),
         "summary": latest_report.get("summary") if isinstance(latest_report.get("summary"), dict) else {},
     }
+    preview["history"] = history
+    preview["recommendation_codes"] = ab_eval_action_recommendation_codes(preview, latest_report)
     preview["cost_note"] = "此操作会调用翻译模型，但不会启动完整字幕流程，也不会修改学习 JSONL。"
     return preview
 
@@ -4199,7 +4204,19 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/local-feedback-ab-eval-preview":
-                self._json_response(build_local_feedback_ab_eval_preview())
+                qs = parse_qs(parsed.query)
+                sample_count_raw = qs.get("sample_count", ["5"])[0]
+                try:
+                    sample_count_value: int | str = int(sample_count_raw)
+                except (TypeError, ValueError):
+                    sample_count_value = sample_count_raw
+                variants_raw = qs.get("variants", [""])[0]
+                preview_payload = {
+                    "sample_kind": qs.get("sample_kind", ["mixed"])[0],
+                    "sample_count": sample_count_value,
+                    "variants": [item for item in variants_raw.split(",") if item] if variants_raw else None,
+                }
+                self._json_response(build_local_feedback_ab_eval_preview(preview_payload))
                 return
 
             if parsed.path == "/api/local-feedback-ab-eval-report":

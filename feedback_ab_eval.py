@@ -244,6 +244,77 @@ def build_ab_eval_preview(
     }
 
 
+def read_ab_eval_history(dataset_dir: Path, *, limit: int = 10) -> list[dict]:
+    paths = dataset_paths(Path(dataset_dir))
+    try:
+        rows = read_jsonl(paths["translation_ab_eval_history"])
+    except Exception:
+        return []
+    return rows[-max(1, limit) :][::-1]
+
+
+def build_ab_eval_history_summary(dataset_dir: Path, *, limit: int = 10) -> dict:
+    paths = dataset_paths(Path(dataset_dir))
+    try:
+        rows = read_jsonl(paths["translation_ab_eval_history"])
+    except Exception:
+        rows = []
+    latest_rows = rows[-max(1, limit) :][::-1]
+    recommendation_counts: Counter[str] = Counter()
+    style_deltas: list[float] = []
+    span_deltas: list[float] = []
+    for row in rows:
+        summary = row.get("summary") if isinstance(row.get("summary"), dict) else {}
+        recommendation_counts.update([str(summary.get("recommendation") or "unknown")])
+        try:
+            style_deltas.append(float(summary.get("avg_style_feedback_delta") or 0.0))
+        except (TypeError, ValueError):
+            pass
+        try:
+            span_deltas.append(float(summary.get("avg_style_span_feedback_delta") or 0.0))
+        except (TypeError, ValueError):
+            pass
+    return {
+        "total_recorded_runs": len(rows),
+        "latest_runs": latest_rows,
+        "recommendation_counts": dict(recommendation_counts),
+        "avg_style_feedback_delta": round(sum(style_deltas) / len(style_deltas), 4) if style_deltas else 0.0,
+        "avg_style_span_feedback_delta": round(sum(span_deltas) / len(span_deltas), 4) if span_deltas else 0.0,
+        "history_path": str(paths["translation_ab_eval_history"]),
+    }
+
+
+def ab_eval_action_recommendation_codes(preview: dict, latest_report: dict | None = None) -> list[str]:
+    latest_report = latest_report or {}
+    codes: list[str] = []
+    if not preview.get("can_run"):
+        codes.append("build_gold_or_review_eval")
+    elif not latest_report.get("available"):
+        codes.append("run_first_small_eval")
+
+    summary = latest_report.get("summary") if isinstance(latest_report.get("summary"), dict) else {}
+    recommendation = str(summary.get("recommendation") or "")
+    if recommendation == "local_feedback_helpful":
+        codes.append("keep_feedback_enabled_collect_more_gold")
+    elif recommendation == "neutral":
+        codes.append("review_high_signal_samples")
+    elif recommendation == "possibly_harmful":
+        codes.append("inspect_prompt_samples_before_more_runs")
+    elif recommendation == "insufficient_samples":
+        codes.append("increase_eval_sample_count")
+
+    if int(preview.get("eligible_span_count") or 0) <= 0:
+        codes.append("add_span_eval_samples")
+    if int(preview.get("eligible_style_count") or 0) <= 0:
+        codes.append("add_style_eval_samples")
+
+    result: list[str] = []
+    for code in codes:
+        if code not in result:
+            result.append(code)
+    return result
+
+
 def contains_cjk(text: str) -> bool:
     return bool(re.search(r"[\u3400-\u9fff]", text or ""))
 

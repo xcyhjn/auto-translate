@@ -954,7 +954,7 @@ def test_local_feedback_ab_eval_preview_handles_empty_gold(monkeypatch, tmp_path
     monkeypatch.setattr(ui_server, "read_config", lambda: {"translation_prompt": "Base prompt", "translation_model": "fake-model"})
     server, thread = _serve_once(monkeypatch)
     try:
-        status, payload = _get_json(server, "/api/local-feedback-ab-eval-preview")
+        status, payload = _get_json(server, "/api/local-feedback-ab-eval-preview?sample_kind=span&sample_count=3")
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -963,6 +963,10 @@ def test_local_feedback_ab_eval_preview_handles_empty_gold(monkeypatch, tmp_path
     assert payload["ok"] is True
     assert payload["can_run"] is False
     assert payload["eligible_style_count"] == 0
+    assert payload["sample_kind"] == "span"
+    assert payload["sample_count"] == 3
+    assert payload["history"]["total_recorded_runs"] == 0
+    assert "build_gold_or_review_eval" in payload["recommendation_codes"]
     assert payload["latest_report"]["available"] is False
 
 
