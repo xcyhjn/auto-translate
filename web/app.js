@@ -41,6 +41,12 @@
     action: "",
     message: "",
   },
+  localFeedbackAbEval: {
+    preview: null,
+    report: null,
+    status: "idle",
+    message: "",
+  },
   localFeedbackImpact: null,
   learningGuidelinesExpanded: false,
   organizePreview: null,
@@ -2085,6 +2091,100 @@ function renderLocalFeedbackImpactPreviewCard() {
   `;
 }
 
+function abEvalRecommendationLabel(value) {
+  const labels = {
+    local_feedback_helpful: "本地学习有效",
+    neutral: "效果接近",
+    possibly_harmful: "可能变差",
+    insufficient_samples: "样本不足",
+  };
+  return labels[value] || "暂无结论";
+}
+
+function renderAbEvalReportPreview(report) {
+  if (!report || report.available === false) {
+    return `<div class="entity-empty">${escapeHtml(report?.message || "暂无 A/B 小样本评估报告。")}</div>`;
+  }
+  const summary = report.summary || {};
+  const wins = summary.variant_wins || {};
+  const samples = Array.isArray(report.samples) ? report.samples : [];
+  return `
+    <div class="learning-ratio-list">
+      <div><span>最近时间</span><strong>${escapeHtml(report.created_at || "暂无")}</strong></div>
+      <div><span>结论</span><strong>${escapeHtml(abEvalRecommendationLabel(summary.recommendation))}</strong></div>
+      <div><span>Baseline 胜出</span><strong>${escapeHtml(wins.baseline ?? summary.baseline_win_count ?? 0)}</strong></div>
+      <div><span>Style 胜出</span><strong>${escapeHtml(wins.style_feedback ?? summary.style_feedback_win_count ?? 0)}</strong></div>
+      <div><span>Span 胜出</span><strong>${escapeHtml(wins.style_span_feedback ?? summary.style_span_feedback_win_count ?? 0)}</strong></div>
+      <div><span>Style 平均变化</span><strong>${escapeHtml(summary.avg_style_feedback_delta ?? 0)}</strong></div>
+      <div><span>Span 平均变化</span><strong>${escapeHtml(summary.avg_style_span_feedback_delta ?? 0)}</strong></div>
+      <div><span>异常输出率</span><strong>${escapeHtml(formatPercent(summary.unsafe_output_rate ?? 0))}</strong></div>
+    </div>
+    ${
+      samples.length
+        ? `<div class="prompt-preview-grid">
+            ${samples
+              .slice(0, 3)
+              .map(
+                (sample) => `
+                  <div>
+                    <span>${escapeHtml(sample.kind || "sample")} · ${escapeHtml(sample.project_id || "")}</span>
+                    <pre class="feedback-json-preview">${escapeHtml(
+                      JSON.stringify(
+                        {
+                          source: sample.source,
+                          manual_target: sample.manual_target,
+                          best_variant: sample.best_variant,
+                          metrics: sample.metrics,
+                        },
+                        null,
+                        2
+                      )
+                    )}</pre>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>`
+        : ""
+    }
+  `;
+}
+
+function renderLocalFeedbackAbEvalCard() {
+  const stateAb = state.localFeedbackAbEval || {};
+  const preview = stateAb.preview || {};
+  const report = stateAb.report || preview.latest_report || {};
+  const actionClass = stateAb.status === "error" ? " error" : stateAb.status === "success" ? " ok" : "";
+  return `
+    <section class="entity-section wide">
+      <div class="entity-section-head"><h5>小样本 A/B 评估</h5><span>手动模型调用 / 不跑完整流程</span></div>
+      ${
+        preview.ok === false
+          ? `<div class="entity-alert">${escapeHtml(preview.error || "A/B 预估读取失败")}</div>`
+          : `<div class="learning-ratio-list">
+              <div><span>ASS gold</span><strong>${escapeHtml(preview.eligible_style_count ?? 0)}</strong></div>
+              <div><span>Span gold</span><strong>${escapeHtml(preview.eligible_span_count ?? 0)}</strong></div>
+              <div><span>默认样本</span><strong>${escapeHtml(preview.default_sample_count ?? 5)}</strong></div>
+              <div><span>本次样本</span><strong>${escapeHtml(preview.selected_sample_count ?? 0)}</strong></div>
+              <div><span>预计请求</span><strong>${escapeHtml(preview.estimated_request_count ?? 0)} / ${escapeHtml(preview.max_request_count ?? 30)}</strong></div>
+              <div><span>Prompt 估算</span><strong>${escapeHtml(preview.estimated_prompt_tokens ?? 0)} tokens</strong></div>
+              <div><span>可运行</span><strong>${preview.can_run ? "可以" : "暂不可"}</strong></div>
+              <div><span>变体</span><strong>${escapeHtml((preview.variants || []).join(" / ") || "baseline / style / span")}</strong></div>
+            </div>`
+      }
+      ${(preview.warnings || []).length ? `<div class="learning-quality-reasons">${preview.warnings.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</div>` : ""}
+      <p class="local-feedback-note">此操作会调用翻译模型，但不会启动完整字幕流程，不会修改学习 JSONL。05/05a 只作为机器基线，不作为人工学习目标。</p>
+      <div class="learning-action-buttons">
+        <button class="mini-btn" type="button" data-ab-eval-refresh ${stateAb.status === "running" ? "disabled" : ""}>刷新预估</button>
+        <button class="mini-btn" type="button" data-ab-eval-run ${stateAb.status === "running" || preview.can_run === false ? "disabled" : ""}>运行 5 条小样本 A/B</button>
+        <button class="mini-btn" type="button" data-ab-eval-report ${stateAb.status === "running" ? "disabled" : ""}>查看最新报告</button>
+      </div>
+      <span class="local-feedback-action-status${actionClass}">${escapeHtml(stateAb.message || "等待手动运行。")}</span>
+      ${renderAbEvalReportPreview(report)}
+    </section>
+  `;
+}
+
 async function refreshLocalFeedbackImpactPreview() {
   try {
     const response = await fetch("/api/local-feedback-impact-preview");
@@ -2093,6 +2193,72 @@ async function refreshLocalFeedbackImpactPreview() {
     state.localFeedbackImpact = payload;
   } catch (error) {
     state.localFeedbackImpact = { ok: false, error: error.message || String(error) };
+  }
+  renderLearningQualityPanel();
+}
+
+async function refreshLocalFeedbackAbEvalPreview() {
+  try {
+    const response = await fetch("/api/local-feedback-ab-eval-preview");
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload) throw new Error(payload?.error || "A/B 预估读取失败");
+    state.localFeedbackAbEval.preview = payload;
+    if (payload.latest_report) state.localFeedbackAbEval.report = payload.latest_report;
+    if (!state.localFeedbackAbEval.message) state.localFeedbackAbEval.message = "A/B 预估已刷新。";
+  } catch (error) {
+    state.localFeedbackAbEval.preview = { ok: false, error: error.message || String(error) };
+    state.localFeedbackAbEval.message = `A/B 预估读取失败：${error.message || error}`;
+  }
+  renderLearningQualityPanel();
+}
+
+async function loadLocalFeedbackAbEvalReport() {
+  state.localFeedbackAbEval.status = "loading";
+  state.localFeedbackAbEval.message = "正在读取最新 A/B 报告...";
+  renderLearningQualityPanel();
+  try {
+    const response = await fetch("/api/local-feedback-ab-eval-report");
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload) throw new Error(payload?.error || "A/B 报告读取失败");
+    state.localFeedbackAbEval.report = payload;
+    state.localFeedbackAbEval.status = "success";
+    state.localFeedbackAbEval.message = payload.available ? "已读取最新 A/B 报告。" : "暂无 A/B 报告。";
+  } catch (error) {
+    state.localFeedbackAbEval.status = "error";
+    state.localFeedbackAbEval.message = `A/B 报告读取失败：${error.message || error}`;
+    showToast(state.localFeedbackAbEval.message, "error");
+  }
+  renderLearningQualityPanel();
+}
+
+async function runLocalFeedbackAbEval() {
+  state.localFeedbackAbEval.status = "running";
+  state.localFeedbackAbEval.message = "正在运行 5 条小样本 A/B；这会调用翻译模型，但不会启动完整字幕流程。";
+  renderLearningQualityPanel();
+  try {
+    const response = await fetch("/api/local-feedback-ab-eval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sample_kind: "mixed",
+        sample_count: 5,
+        variants: ["baseline", "style_feedback", "style_span_feedback"],
+        config: readFormConfig(),
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "A/B 小样本评估失败");
+    state.localFeedbackAbEval.report = payload.report || null;
+    state.localFeedbackAbEval.preview = payload.preview || state.localFeedbackAbEval.preview;
+    if (payload.summary) state.learningQuality = payload.summary;
+    state.localFeedbackAbEval.status = "success";
+    const recommendation = payload.report?.summary?.recommendation || "";
+    state.localFeedbackAbEval.message = `A/B 小样本评估完成：${abEvalRecommendationLabel(recommendation)}。`;
+    showToast(state.localFeedbackAbEval.message);
+  } catch (error) {
+    state.localFeedbackAbEval.status = "error";
+    state.localFeedbackAbEval.message = `A/B 小样本评估失败：${error.message || error}`;
+    showToast(state.localFeedbackAbEval.message, "error");
   }
   renderLearningQualityPanel();
 }
@@ -2253,6 +2419,7 @@ function renderLearningQualityPanel() {
         </div>
       </section>
       ${renderLocalFeedbackImpactPreviewCard()}
+      ${renderLocalFeedbackAbEvalCard()}
       ${renderLearningDatasetDiagnostics(payload.dataset_diagnostics)}
       <section class="entity-section">
         <div class="entity-section-head"><h5>样本覆盖</h5><span>Prompt / Eval / Pending</span></div>
@@ -2379,6 +2546,15 @@ function renderLearningQualityPanel() {
   root.querySelectorAll("[data-learning-impact-refresh]").forEach((button) => {
     button.addEventListener("click", () => refreshLocalFeedbackImpactPreview());
   });
+  root.querySelectorAll("[data-ab-eval-refresh]").forEach((button) => {
+    button.addEventListener("click", () => refreshLocalFeedbackAbEvalPreview());
+  });
+  root.querySelectorAll("[data-ab-eval-run]").forEach((button) => {
+    button.addEventListener("click", () => runLocalFeedbackAbEval());
+  });
+  root.querySelectorAll("[data-ab-eval-report]").forEach((button) => {
+    button.addEventListener("click", () => loadLocalFeedbackAbEvalReport());
+  });
   root.querySelectorAll("[data-diagnostic-record-id]").forEach((button) => {
     button.addEventListener("click", () => {
       openDiagnosticFeedbackRecord(
@@ -2403,6 +2579,7 @@ async function refreshLearningQualitySummary() {
     state.learningQuality = { ok: false, error: error.message || String(error) };
   }
   renderLearningQualityPanel();
+  refreshLocalFeedbackAbEvalPreview();
 }
 
 function humanRunStateLabel(stageKey, title) {

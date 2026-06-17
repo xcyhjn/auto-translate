@@ -946,3 +946,77 @@ def test_local_feedback_action_runs_and_writes_snapshot(monkeypatch, tmp_path: P
     assert payload["summary"]["history"]
     snapshot_path = dataset / "eval_reports" / "learning_quality_snapshots.jsonl"
     assert snapshot_path.exists()
+
+
+def test_local_feedback_ab_eval_preview_handles_empty_gold(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    monkeypatch.setattr(ui_server, "read_config", lambda: {"translation_prompt": "Base prompt", "translation_model": "fake-model"})
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _get_json(server, "/api/local-feedback-ab-eval-preview")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["can_run"] is False
+    assert payload["eligible_style_count"] == 0
+    assert payload["latest_report"]["available"] is False
+
+
+def test_local_feedback_ab_eval_api_runs_with_mocked_report(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    (dataset / "eval_reports").mkdir(parents=True)
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+    monkeypatch.setattr(ui_server, "ensure_openai_runtime_env_loaded", lambda: {"api_key": {"available": True}})
+    monkeypatch.setattr(
+        ui_server,
+        "read_config",
+        lambda: {
+            "translation_prompt": "Base prompt",
+            "translation_model": "fake-model",
+            "src_lang": "en",
+            "dst_lang": "zh-Hans",
+            "openai_base_url": "",
+        },
+    )
+
+    def fake_ab_eval(dataset_dir, **kwargs):
+        report = {
+            "ok": True,
+            "schema_version": 1,
+            "created_at": "2026-06-18T00:00:00+00:00",
+            "dataset_dir": str(dataset_dir),
+            "sample_kind": kwargs["sample_kind"],
+            "sample_count": 1,
+            "variants": ["baseline", "style_feedback"],
+            "summary": {
+                "variant_wins": {"baseline": 0, "style_feedback": 1},
+                "recommendation": "local_feedback_helpful",
+                "avg_style_feedback_delta": 0.2,
+                "avg_style_span_feedback_delta": 0,
+                "unsafe_output_rate": 0,
+            },
+            "samples": [],
+        }
+        ui_server.write_json(dataset / "eval_reports" / "latest_translation_ab_eval.json", report)
+        return report
+
+    monkeypatch.setattr(ui_server, "run_translation_ab_eval", fake_ab_eval)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _post_json(server, "/api/local-feedback-ab-eval", {"sample_count": 5})
+        report_status, report_payload = _get_json(server, "/api/local-feedback-ab-eval-report")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["report"]["summary"]["recommendation"] == "local_feedback_helpful"
+    assert payload["summary"]["ok"] is True
+    assert report_status == 200
+    assert report_payload["available"] is True
+    assert report_payload["summary"]["variant_wins"]["style_feedback"] == 1

@@ -18,6 +18,11 @@ from autosub_zh.feedback_dataset import (
     validate_dataset,
     write_jsonl,
 )
+from autosub_zh.feedback_ab_eval import (
+    build_ab_eval_preview,
+    read_latest_ab_eval_report,
+    run_translation_ab_eval,
+)
 
 
 YOUTUBE_META = {
@@ -317,6 +322,68 @@ def test_style_gold_eval_reports_feedback_health(tmp_path: Path) -> None:
     assert report["sample_insufficient"] is True
     assert report["metrics"]["semantic_or_style_signal_rate"] > 0
     assert paths["latest_style_eval"].exists()
+
+
+def test_translation_ab_eval_preview_and_run_do_not_mutate_learning_jsonl(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    paths = dataset_paths(dataset_dir)
+    paths["root"].mkdir(parents=True, exist_ok=True)
+    style_record = {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "project_id": "style_project",
+        "segment_id": 1,
+        "start": 1.0,
+        "end": 2.0,
+        "source_text": "This line should sound natural.",
+        "machine_target_text": "这行应该自然。",
+        "manual_target_text": "这句要说得自然一点。",
+        "edit_tags": ["compressed"],
+        "features": {},
+        "operation_summary": {"strategies": ["compress"]},
+        "quality_flags": [],
+        "feedback_types": ["style_edit"],
+        "learning_risk": "low",
+        "learning_recommendation": "eval_candidate",
+        "classification_reasons": [],
+        "accepted": True,
+        "use_for_style_prompt": False,
+        "use_for_eval": True,
+    }
+    write_jsonl(paths["translation_edits"], [style_record])
+    paths["learned_style_guidelines"].parent.mkdir(parents=True, exist_ok=True)
+    paths["learned_style_guidelines"].write_text("# Learned Style Guidelines\n\n- Prefer natural edited Chinese.\n", encoding="utf-8")
+    build_gold_sets(dataset_dir)
+    before_learning_jsonl = paths["translation_edits"].read_text(encoding="utf-8")
+
+    preview = build_ab_eval_preview(dataset_dir, sample_count=5, sample_kind="mixed", translation_prompt="Base prompt")
+    assert preview["can_run"] is True
+    assert preview["estimated_request_count"] == 3
+
+    def fake_translator(chunk, kwargs):
+        style_prompt = kwargs.get("style_prompt_text", "")
+        if "Learned Style" in style_prompt:
+            return {chunk[0].id: "这句要说得自然一点。"}
+        return {chunk[0].id: "这行应该自然。"}
+
+    report = run_translation_ab_eval(
+        dataset_dir,
+        sample_kind="mixed",
+        sample_count=5,
+        model="fake-model",
+        translation_prompt="Base prompt",
+        translator=fake_translator,
+    )
+
+    assert report["ok"] is True
+    assert report["sample_count"] == 1
+    assert report["summary"]["style_feedback_win_count"] >= 1
+    assert paths["latest_translation_ab_eval"].exists()
+    assert paths["translation_ab_eval_history"].exists()
+    assert paths["translation_edits"].read_text(encoding="utf-8") == before_learning_jsonl
+    latest = read_latest_ab_eval_report(dataset_dir)
+    assert latest["available"] is True
+    assert latest["summary"]["recommendation"] in {"insufficient_samples", "local_feedback_helpful", "neutral"}
 
 
 def test_collect_span_style_defaults_to_review_only_samples(tmp_path: Path) -> None:

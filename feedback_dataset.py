@@ -143,6 +143,8 @@ def dataset_paths(dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict[str, Path]:
         "latest_bilibili_eval": dataset_dir / "eval_reports" / "latest_bilibili_eval.json",
         "latest_style_eval": dataset_dir / "eval_reports" / "latest_style_eval.json",
         "latest_span_eval": dataset_dir / "eval_reports" / "latest_span_translation_eval.json",
+        "latest_translation_ab_eval": dataset_dir / "eval_reports" / "latest_translation_ab_eval.json",
+        "translation_ab_eval_history": dataset_dir / "eval_reports" / "translation_ab_eval_history.jsonl",
         "learned_bilibili_hints": dataset_dir / "learned_bilibili_hints.json",
         "learned_style_guidelines": dataset_dir / "learned_style_guidelines.md",
         "learned_span_guidelines": dataset_dir / "learned_span_guidelines.md",

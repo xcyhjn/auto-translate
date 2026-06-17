@@ -45,6 +45,11 @@ from .feedback_dataset import (
     validate_style_record,
     write_jsonl,
 )
+from .feedback_ab_eval import (
+    build_ab_eval_preview,
+    read_latest_ab_eval_report,
+    run_translation_ab_eval,
+)
 from .job_store import JobStore, ACTIVE_STATUSES
 from .models import BilingualSubtitleStyle
 from .media import normalize_asr_audio_mode, normalize_asr_vad_mode, probe_media
@@ -3728,6 +3733,54 @@ def build_local_feedback_impact_preview(dataset_dir: Path | None = None) -> dict
     }
 
 
+def build_local_feedback_ab_eval_preview(payload: dict | None = None, dataset_dir: Path | None = None) -> dict:
+    dataset_dir = Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR)
+    config = normalize_config({**read_config(), **((payload or {}).get("config", {}) if isinstance((payload or {}).get("config"), dict) else {})})
+    sample_count = (payload or {}).get("sample_count", 5)
+    sample_kind = (payload or {}).get("sample_kind", "mixed")
+    variants = (payload or {}).get("variants")
+    preview = build_ab_eval_preview(
+        dataset_dir,
+        sample_count=sample_count,
+        sample_kind=sample_kind,
+        variants=variants if isinstance(variants, list) else None,
+        translation_prompt=str(config.get("translation_prompt") or ""),
+    )
+    latest_report = read_latest_ab_eval_report(dataset_dir)
+    preview["latest_report"] = {
+        "available": bool(latest_report.get("available")),
+        "created_at": latest_report.get("created_at", ""),
+        "summary": latest_report.get("summary") if isinstance(latest_report.get("summary"), dict) else {},
+    }
+    preview["cost_note"] = "此操作会调用翻译模型，但不会启动完整字幕流程，也不会修改学习 JSONL。"
+    return preview
+
+
+def run_local_feedback_ab_eval(payload: dict, dataset_dir: Path | None = None) -> dict:
+    dataset_dir = Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR)
+    ensure_openai_runtime_env_loaded()
+    config_payload = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    config = normalize_config({**read_config(), **config_payload})
+    report = run_translation_ab_eval(
+        dataset_dir,
+        sample_kind=str(payload.get("sample_kind") or "mixed"),
+        sample_count=payload.get("sample_count", 5),
+        variants=payload.get("variants") if isinstance(payload.get("variants"), list) else None,
+        model=str(payload.get("model") or config.get("translation_model") or ""),
+        translation_prompt=str(config.get("translation_prompt") or ""),
+        src_lang=str(config.get("src_lang") or "en"),
+        dst_lang=str(config.get("dst_lang") or "zh-Hans"),
+        glossary_text="",
+        base_url=str(config.get("openai_base_url") or "") or None,
+    )
+    return {
+        "ok": True,
+        "report": report,
+        "summary": build_learning_quality_summary(dataset_dir),
+        "preview": build_local_feedback_ab_eval_preview(payload, dataset_dir),
+    }
+
+
 def run_local_feedback_action(payload: dict, dataset_dir: Path | None = None) -> dict:
     dataset_dir = Path(dataset_dir or LOCAL_FEEDBACK_DATASET_DIR)
     action = str(payload.get("action") or "").strip().lower().replace("-", "_")
@@ -4145,6 +4198,14 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 self._json_response(build_local_feedback_impact_preview())
                 return
 
+            if parsed.path == "/api/local-feedback-ab-eval-preview":
+                self._json_response(build_local_feedback_ab_eval_preview())
+                return
+
+            if parsed.path == "/api/local-feedback-ab-eval-report":
+                self._json_response(read_latest_ab_eval_report(LOCAL_FEEDBACK_DATASET_DIR))
+                return
+
             if parsed.path == "/api/file":
                 qs = parse_qs(parsed.query)
                 path = qs.get("path", [""])[0]
@@ -4421,6 +4482,25 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                             **build_error_payload(
                                 exc,
                                 operation="local_feedback_action",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                self._json_response(result)
+                return
+
+            if parsed.path == "/api/local-feedback-ab-eval":
+                try:
+                    result = run_local_feedback_ab_eval(payload)
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                operation="local_feedback_ab_eval",
                             ),
                         },
                         status=400,
