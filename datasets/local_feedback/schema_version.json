@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "dataset": "local_feedback",
+  "created_at": "2026-06-17T08:33:49.002885+00:00",
+  "separation_rule": "Do not mark the same sample for learning and eval.",
+  "label_values": [
+    "duplicate",
+    "manual_review",
+    "not_duplicate",
+    "same_topic"
+  ]
+}

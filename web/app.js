@@ -358,6 +358,7 @@ function decorateStaticButtons() {
     ["rebuildPaddedCoverBtn", "refresh"],
     ["copyErrorBtn", "copy"],
     ["applyRussianWorkflowBtn", "spark"],
+    ["collectStyleFeedbackBtn", "spark"],
     ["learnStyleBtn", "spark"],
     ["reburnFromInputBtn", "refresh"],
     ["reburnFromAssBtn", "refresh"],
@@ -515,6 +516,10 @@ function updateFileActionButtons() {
   const reburnFromAssBtn = el("reburnFromAssBtn");
   if (reburnFromAssBtn) {
     reburnFromAssBtn.disabled = !isAss || taskIsBusy(state.runtime);
+  }
+  const collectStyleFeedbackBtn = el("collectStyleFeedbackBtn");
+  if (collectStyleFeedbackBtn) {
+    collectStyleFeedbackBtn.disabled = !isAss;
   }
   el("learnStyleBtn").disabled = !isAss;
   renderInputAssStatus();
@@ -2427,14 +2432,22 @@ function renderBilibiliDuplicate() {
     : "";
 
   const rows = candidates
-    .map((candidate) => {
+    .map((candidate, index) => {
       const url = candidate.url || "";
       const searchUrl = candidate.source_search_url || query.search_url || "";
+      const noteId = `bilibiliFeedbackNote-${index}`;
       return `<div class="bilibili-candidate">
         <div class="bilibili-candidate-main">
           <strong>${escapeHtml(candidate.title || "未命名候选")}</strong>
           <div class="bilibili-meta">${escapeHtml(candidate.uploader || "未知 UP")} · ${escapeHtml(candidate.duration || seconds(candidate.duration_seconds || 0))} · ${escapeHtml(candidate.published_at || "未知发布时间")}</div>
           <div class="bilibili-reasons">${(candidate.reason_codes || []).slice(0, 5).map((code) => `<span>${escapeHtml(code)}</span>`).join("")}</div>
+          <div class="bilibili-feedback">
+            <input id="${noteId}" type="text" placeholder="备注" />
+            <button class="mini-btn" type="button" data-bilibili-feedback="${index}" data-label="duplicate">重复</button>
+            <button class="mini-btn" type="button" data-bilibili-feedback="${index}" data-label="not_duplicate">不重复</button>
+            <button class="mini-btn" type="button" data-bilibili-feedback="${index}" data-label="same_topic">同主题</button>
+            <button class="mini-btn" type="button" data-bilibili-feedback="${index}" data-label="manual_review">复核</button>
+          </div>
         </div>
         <div class="bilibili-candidate-actions">
           <span class="bilibili-score-small">${escapeHtml(candidate.score ?? 0)}</span>
@@ -2465,7 +2478,46 @@ function renderBilibiliDuplicate() {
     ${stateValue.report_path ? `<div class="path-note">${escapeHtml(stateValue.report_path)}</div>` : ""}
   `;
   card.classList.remove("hidden");
+  card.querySelectorAll("[data-bilibili-feedback]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.bilibiliFeedback);
+      const label = button.dataset.label || "";
+      const note = card.querySelector(`#bilibiliFeedbackNote-${index}`)?.value || "";
+      saveBilibiliFeedback(index, label, note);
+    });
+  });
   revealNewNode("statusCards", `bilibili:${status}:${decision}:${report.created_at || stateValue.error || ""}`, card);
+}
+
+function saveBilibiliFeedback(candidateIndex, label, humanNote) {
+  const current = state.bilibiliDuplicate || {};
+  const report = current.report || {};
+  const candidates = Array.isArray(report.candidates) ? report.candidates : [];
+  const candidate = candidates[candidateIndex];
+  if (!candidate) return;
+  fetch("/api/bilibili-duplicate-feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      report,
+      candidate,
+      label,
+      human_note: humanNote,
+      report_path: current.report_path || "",
+      output_dir: current.output_dir || "",
+    }),
+  })
+    .then((res) => res.json())
+    .then((payload) => {
+      if (!payload.ok) {
+        showToast(payload.error || "反馈保存失败");
+        return;
+      }
+      showToast(`反馈已保存：${label}`);
+    })
+    .catch((error) => {
+      showToast(`反馈保存失败：${error.message || error}`);
+    });
 }
 
 function runBilibiliDuplicateSearch() {
@@ -3161,6 +3213,24 @@ function bindActions() {
         renderProjects(state.projects);
         showToast(payload.message || "风格样例已生成");
       });
+  });
+  el("collectStyleFeedbackBtn")?.addEventListener("click", () => {
+    const projectPath = state.selectedFileProjectPath || state.selectedProject?.path || null;
+    if (!projectPath) return;
+    fetch("/api/collect-style-feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_path: projectPath }),
+    })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!payload.ok) {
+          showToast(payload.error || "ASS 反馈采集失败");
+          return;
+        }
+        showToast(`ASS 反馈已采集：新增 ${payload.added || 0} 条`);
+      })
+      .catch((error) => showToast(`ASS 反馈采集失败：${error.message || error}`));
   });
   el("reburnFromInputBtn").addEventListener("click", () => {
     const projectPath = state.selectedVideoProjectPath || null;

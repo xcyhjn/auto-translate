@@ -100,3 +100,65 @@ def test_bilibili_duplicate_api_rejects_invalid_proxy(monkeypatch) -> None:
     assert payload["operation"] == "bilibili_duplicate_search_proxy_validation"
     assert payload["mode"] == "proxy"
     assert "not a proxy endpoint" in payload["error"]
+
+
+def test_bilibili_duplicate_feedback_api_saves_label(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_feedback_job(payload: dict) -> dict:
+        calls.append(payload)
+        return {
+            "path": "D:/autosub_zh/datasets/local_feedback/bilibili_duplicate_labels.jsonl",
+            "updated": False,
+            "added": True,
+            "label": payload["label"],
+        }
+
+    monkeypatch.setattr(ui_server, "bilibili_duplicate_feedback_job", fake_feedback_job)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _post_json(
+            server,
+            "/api/bilibili-duplicate-feedback",
+            {
+                "report": {"youtube_meta": {"title": "The Russian book about a dying god"}, "query_plan": []},
+                "candidate": {"title": "垂死的神", "url": "https://www.bilibili.com/video/BV1mock411c7mD"},
+                "label": "duplicate",
+                "human_note": "confirmed",
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["label"] == "duplicate"
+    assert calls[0]["human_note"] == "confirmed"
+
+
+def test_collect_style_feedback_api_returns_summary(monkeypatch) -> None:
+    def fake_collect(project_path: str) -> dict:
+        return {
+            "project": project_path,
+            "added": 2,
+            "skipped_existing": 1,
+            "path": "D:/autosub_zh/datasets/local_feedback/translation_edit_examples.jsonl",
+        }
+
+    monkeypatch.setattr(ui_server, "collect_style_feedback_job", fake_collect)
+    server, thread = _serve_once(monkeypatch)
+    try:
+        status, payload = _post_json(
+            server,
+            "/api/collect-style-feedback",
+            {"project_path": "D:/autosub_zh/output/sample"},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["added"] == 2
+    assert payload["path"].endswith("translation_edit_examples.jsonl")

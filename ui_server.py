@@ -24,6 +24,7 @@ import httpx
 
 from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, check_idm
 from .bilibili_search import build_bilibili_duplicate_report, write_bilibili_duplicate_artifacts
+from .feedback_dataset import BILIBILI_LABELS, collect_style_project, save_bilibili_feedback_label
 from .job_store import JobStore, ACTIVE_STATUSES
 from .models import BilingualSubtitleStyle
 from .media import normalize_asr_audio_mode, normalize_asr_vad_mode, probe_media
@@ -2406,6 +2407,29 @@ def bilibili_duplicate_search_job(url: str, config: dict, youtube_meta: dict | N
     }
 
 
+def bilibili_duplicate_feedback_job(payload: dict) -> dict:
+    label = str(payload.get("label") or "").strip()
+    if label not in BILIBILI_LABELS:
+        raise ValueError(f"Unsupported label: {label}")
+    report = payload.get("report")
+    candidate = payload.get("candidate")
+    if not isinstance(report, dict):
+        raise ValueError("report required")
+    if not isinstance(candidate, dict):
+        raise ValueError("candidate required")
+    return save_bilibili_feedback_label(
+        report=report,
+        candidate=candidate,
+        label=label,
+        human_note=str(payload.get("human_note") or ""),
+        source={
+            "kind": "manual_ui_feedback",
+            "output_dir": str(payload.get("output_dir") or ""),
+            "report_path": str(payload.get("report_path") or ""),
+        },
+    )
+
+
 def rebuild_padded_cover_job(project_path: str) -> dict:
     output_dir = Path(project_path)
     padded_path = ensure_padded_cover(output_dir)
@@ -2445,6 +2469,13 @@ def learn_style_job(project_path: str) -> dict:
         "project_path": str(project_dir),
         **result,
     }
+
+
+def collect_style_feedback_job(project_path: str) -> dict:
+    project_dir = Path(project_path)
+    if not project_dir.exists():
+        raise FileNotFoundError(f"Project folder not found: {project_dir}")
+    return collect_style_project(project_dir)
 
 
 def execute_pipeline_job(video_path: str, config: dict, task_id: str | None = None) -> None:
@@ -3017,6 +3048,25 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                 self._json_response({"ok": True, **manifest})
                 return
 
+            if parsed.path == "/api/bilibili-duplicate-feedback":
+                try:
+                    result = bilibili_duplicate_feedback_job(payload)
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                operation="bilibili_duplicate_feedback",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                self._json_response({"ok": True, **result})
+                return
+
             if parsed.path == "/api/rebuild-youtube-cover-1280x960":
                 project_path = str(payload.get("project_path") or "").strip()
                 if not project_path:
@@ -3139,6 +3189,29 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                     return
                 manifest = learn_style_job(project_path)
                 self._json_response({"ok": True, **manifest})
+                return
+
+            if parsed.path == "/api/collect-style-feedback":
+                project_path = str(payload.get("project_path") or "").strip()
+                if not project_path:
+                    self._json_response({"ok": False, "error": "project_path required"}, status=400)
+                    return
+                try:
+                    result = collect_style_feedback_job(project_path)
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                operation="collect_style_feedback",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                self._json_response({"ok": True, **result})
                 return
 
             if parsed.path == "/api/video-inspect":

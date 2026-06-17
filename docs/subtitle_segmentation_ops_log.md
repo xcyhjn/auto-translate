@@ -808,3 +808,66 @@ Validation:
   - `decision = medium_confidence_review`
   - all 6 selected queries succeeded through the API
   - top candidate: `BV1MWJK6SE4X`, score `76`, title `哲学 的 世界令人惊叹 - Xandros - 中配`
+
+## 2026-06-17 17:00 +08:00 - Local Feedback Dataset Loop MVP
+
+User direction:
+
+- Prioritize subtitle ASS feedback over Bilibili feedback.
+- Treat `05_translated_segments.json` only as the machine baseline for alignment; the manual feedback source is the ASS file.
+- Bilibili duplicate-search labels are `duplicate`, `not_duplicate`, `same_topic`, and `manual_review`.
+- Missing duplicates are more costly than false positives; high-confidence duplicates may block, lower confidence goes to manual review.
+- Feedback should be versionable JSONL and also have small UI click entry points.
+- External APIs and lightweight dependencies are allowed; `scikit-learn` was added for future lightweight ranking/active learning.
+
+What:
+
+- Added `feedback_dataset.py` with commands:
+  - `init`
+  - `collect-bilibili`
+  - `collect-style`
+  - `validate`
+  - `dedupe`
+  - `build-gold`
+  - `eval-bilibili`
+  - `summarize`
+- Added `datasets/local_feedback/` schema and starter files.
+- Added Bilibili candidate UI feedback buttons and `/api/bilibili-duplicate-feedback`.
+- Added ASS feedback collection button in project outputs and `/api/collect-style-feedback`.
+- Added offline Bilibili replay eval writing `datasets/local_feedback/eval_reports/latest_bilibili_eval.json`.
+- Added learned suggestion files:
+  - `learned_bilibili_hints.json`
+  - `learned_style_guidelines.md`
+  - `learning_summary.md`
+- Added `docs/local_feedback_learning_handoff.md`.
+
+Important guardrails:
+
+- Small sample counts are not suitable for deep-learning fine-tuning.
+- High-quality labels and a stable gold set come before model training.
+- Learning and eval samples must stay separated.
+- Automatic learning remains a suggestion layer until it is explicitly wired behind a feature flag.
+
+Validation:
+
+- `python -m autosub_zh.feedback_dataset init`
+- `python -m autosub_zh.feedback_dataset validate`
+  - `ok = true`
+- `python -m autosub_zh.feedback_dataset build-gold`
+  - zero samples, files created
+- `python -m autosub_zh.feedback_dataset eval-bilibili`
+  - `sample_insufficient = true`
+  - framework runnable with empty gold set
+- `python -m autosub_zh.feedback_dataset summarize`
+- `pytest test_feedback_dataset.py test_ui_server_bilibili_api.py`
+  - `8 passed`
+- `python -m py_compile feedback_dataset.py ui_server.py`
+- `node --check web\app.js`
+
+Known unrelated dirty files left untouched:
+
+- `asr.py`
+- `ui_server_error_trace.log`
+- `ui_server_live_stderr.log`
+- `ui_server_live_stdout.log`
+- `test_asr_gpu_fallback.py`
