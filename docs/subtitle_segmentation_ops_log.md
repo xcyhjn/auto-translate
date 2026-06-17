@@ -1220,3 +1220,39 @@ Verification:
 
 - `python -m py_compile pipeline_core.py workflow_profiles.py ui_server.py feedback_dataset.py`
 - `pytest test_subtitle_output_modes.py test_feedback_dataset.py test_ui_server_bilibili_api.py test_span_translation_flow.py`
+
+## 2026-06-17 23:55 +08:00 - Bilibili Check Decoupling and Release Artifact Health
+
+User direction:
+
+- First decouple Bilibili duplicate checking from the translation workflow.
+- Then add project artifact archiving and health scoring.
+- Show the necessary release artifacts: description, two covers, ASS file, and burned video; move other files into a child folder.
+- Review UI comes later.
+
+What:
+
+- Added a stable Bilibili workflow policy payload:
+  - `workflow_decoupled=true`
+  - `blocks_translation=false`
+  - `blocks_download=false`
+  - `manual_review_only=true`
+- Bilibili duplicate API now returns this policy on success and failure, so search channel failures are visible but do not look like translation blockers.
+- Project scanning now returns `release_artifacts` and `health` for each output project.
+- Release artifacts track:
+  - `00_youtube_info.txt`
+  - `00_youtube_cover.jpg`
+  - `00_youtube_cover_1280x960.jpg`
+  - final `00_ASS_*` / compatible legacy ASS
+  - burned `09_*.mp4`
+- Added health score, readiness, missing release artifact list, QA blocker/warning counts, and internal artifact count.
+- Added `/api/organize-project-artifacts`, which keeps release artifacts in the project root and moves other root files into `99_internal_artifacts`.
+- Updated project health UI to show the release checklist, health score, internal file count, and a `整理发布产物` action.
+- Made manifest/segment lookup tolerate files moved into `99_internal_artifacts` for UI scan, reburn, cover rebuild, and feedback collection.
+
+Verification:
+
+- `python -m py_compile ui_server.py feedback_dataset.py pipeline_core.py span_translate.py`
+- `node --check web\app.js`
+- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`
+- `pytest test_subtitle_output_modes.py`

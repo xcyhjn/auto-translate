@@ -864,6 +864,58 @@
     color: var(--muted-2);
   }
 
+  .project-health-section {
+    margin-top: var(--space-4);
+    min-width: 0;
+  }
+
+  .project-health-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .project-release-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .project-release-item {
+    display: grid;
+    grid-template-columns: minmax(72px, 0.36fr) minmax(0, 1fr);
+    gap: var(--space-2);
+    align-items: center;
+    min-width: 0;
+    padding: var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  .project-release-item.ok {
+    border-color: rgba(92, 224, 162, 0.28);
+  }
+
+  .project-release-item.missing {
+    border-color: rgba(255, 193, 120, 0.34);
+  }
+
+  .project-release-item span {
+    color: var(--muted);
+    font-size: var(--font-xs);
+  }
+
+  .project-release-item strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: var(--font-xs);
+    color: var(--text);
+  }
+
   .download-block {
     margin-bottom: var(--space-4);
   }

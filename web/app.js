@@ -1781,20 +1781,7 @@ function isFinalAssFileName(name) {
   );
 }
 
-function renderProjectHealthBadges(project) {
-  const badges = [
-    ["05 translated", Boolean(getProjectFile(project, "05_translated_segments.json"))],
-    ["ASS", Boolean(findProjectFile(project, isFinalAssFileName))],
-    ["09 video", Boolean(findProjectFile(project, (name) => /^09_.*\.mp4$/i.test(name)))],
-    ["QA", Boolean(getProjectFile(project, "07g_final_ass_qa.json") || getProjectFile(project, "07_qa_report.json") || getProjectFile(project, "07j_segmentation_qa_metrics.json"))],
-    ["feedback", Boolean(getProjectFile(project, "00_style_examples.jsonl"))],
-  ];
-  return `<div class="project-badges">${badges
-    .map(([label, ok]) => `<span class="project-badge ${ok ? "ok" : "muted"}">${escapeHtml(label)}</span>`)
-    .join("")}</div>`;
-}
-
-function renderProjectHealthSummary() {
+function renderLegacyProjectHealthSummary() {
   const root = el("projectHealthSummary");
   if (!root) return;
   const project = state.selectedProject;
@@ -1812,8 +1799,15 @@ function renderProjectHealthSummary() {
 
   const segSummary = state.segmentationArtifacts.projectPath === project.path ? state.segmentationArtifacts.metrics?.summary || {} : {};
   const entitySummary = state.entityArtifacts.projectPath === project.path ? state.entityArtifacts.metrics?.summary || {} : {};
-  const blockingCount = Number(segSummary.blocking_issue_count ?? 0) + Number(segSummary.english_residue_blocking_count ?? 0);
-  const warningCount = Number(segSummary.warning_count ?? 0) + Number(segSummary.english_residue_review_count ?? 0);
+  const health = project.health || {};
+  const blockingCount = Math.max(
+    Number(health.qa_blocking_count ?? 0),
+    Number(segSummary.blocking_issue_count ?? 0) + Number(segSummary.english_residue_blocking_count ?? 0),
+  );
+  const warningCount = Math.max(
+    Number(health.qa_warning_count ?? 0),
+    Number(segSummary.warning_count ?? 0) + Number(segSummary.english_residue_review_count ?? 0),
+  );
   const entityIssueCount =
     Number(entitySummary.ass_issue_count ?? 0) +
     Number(entitySummary.target_entity_residue_count ?? 0) +
@@ -1835,6 +1829,117 @@ function renderProjectHealthSummary() {
     </div>
     ${renderProjectHealthBadges(project)}
   `;
+}
+
+function renderProjectHealthBadges(project) {
+  const health = project?.health || {};
+  const badges = [
+    ["05 translated", Boolean(getProjectFile(project, "05_translated_segments.json"))],
+    ["ASS", Boolean(findProjectFile(project, isFinalAssFileName))],
+    ["09 video", Boolean(findProjectFile(project, (name) => /^09_.*\.mp4$/i.test(name)))],
+    ["QA", Boolean(getProjectFile(project, "07g_final_ass_qa.json") || getProjectFile(project, "07_qa_report.json") || getProjectFile(project, "07j_segmentation_qa_metrics.json"))],
+    ["feedback", Boolean(getProjectFile(project, "00_style_examples.jsonl"))],
+    [`health ${health.score ?? 0}`, Boolean(health.ready)],
+  ];
+  return `<div class="project-badges">${badges
+    .map(([label, ok]) => `<span class="project-badge ${ok ? "ok" : "muted"}">${escapeHtml(label)}</span>`)
+    .join("")}</div>`;
+}
+
+function renderReleaseArtifacts(project) {
+  const artifacts = Array.isArray(project?.release_artifacts) ? project.release_artifacts : [];
+  if (!artifacts.length) return `<div class="entity-empty">暂无发布必需品清单</div>`;
+  return `<div class="project-release-list">${artifacts
+    .map((artifact) => {
+      const present = Boolean(artifact.present);
+      return `<div class="project-release-item ${present ? "ok" : "missing"}">
+        <span>${escapeHtml(artifact.label || artifact.key || "")}</span>
+        <strong>${escapeHtml(artifact.name || "缺失")}</strong>
+      </div>`;
+    })
+    .join("")}</div>`;
+}
+
+async function organizeSelectedProjectArtifacts(projectPath) {
+  if (!projectPath) return;
+  const button = el("organizeProjectArtifactsBtn");
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch("/api/organize-project-artifacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_path: projectPath }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "整理项目产物失败");
+    if (Array.isArray(payload.projects)) {
+      state.projects = payload.projects;
+      state.selectedProject = payload.projects.find((project) => project.path === projectPath) || payload.project || state.selectedProject;
+      renderProjects(state.projects);
+    }
+    renderProjectHealthSummary();
+    showToast(`发布产物已整理：移动 ${payload.moved_count || 0} 个内部文件`);
+  } catch (error) {
+    showToast(`发布产物整理失败：${error.message || error}`, "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function renderProjectHealthSummary() {
+  const root = el("projectHealthSummary");
+  if (!root) return;
+  const project = state.selectedProject;
+  if (!project) {
+    root.innerHTML = `
+      <div class="local-feedback-head">
+        <div>
+          <h4>项目健康摘要</h4>
+          <p>选择一个输出项目后展示 QA、实体、反馈采集和发布必需品状态。</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const segSummary = state.segmentationArtifacts.projectPath === project.path ? state.segmentationArtifacts.metrics?.summary || {} : {};
+  const entitySummary = state.entityArtifacts.projectPath === project.path ? state.entityArtifacts.metrics?.summary || {} : {};
+  const blockingCount = Number(segSummary.blocking_issue_count ?? 0) + Number(segSummary.english_residue_blocking_count ?? 0);
+  const warningCount = Number(segSummary.warning_count ?? 0) + Number(segSummary.english_residue_review_count ?? 0);
+  const entityIssueCount =
+    Number(entitySummary.ass_issue_count ?? 0) +
+    Number(entitySummary.target_entity_residue_count ?? 0) +
+    Number(entitySummary.english_residue_count ?? 0);
+  const hasFeedback = Boolean(getProjectFile(project, "00_style_examples.jsonl"));
+  const missing = Array.isArray(health.missing_release_artifacts) ? health.missing_release_artifacts : [];
+  const healthLabel = health.ready ? "可发布" : missing.length ? `缺少 ${missing.join(" / ")}` : "待复核";
+  root.innerHTML = `
+    <div class="local-feedback-head">
+      <div>
+        <h4>项目健康摘要</h4>
+        <p>${escapeHtml(project.name)} · ${escapeHtml(healthLabel)}</p>
+      </div>
+      <span class="entity-chip ${health.ready ? "" : "muted"}">Health ${escapeHtml(health.score ?? 0)}</span>
+    </div>
+    <div class="feedback-summary-grid">
+      <div class="entity-metric"><span>发布必需品</span><strong>${escapeHtml(`${health.release_artifact_count ?? 0}/${health.release_artifact_total ?? 5}`)}</strong></div>
+      <div class="entity-metric"><span>QA Blocking</span><strong>${escapeHtml(blockingCount)}</strong></div>
+      <div class="entity-metric"><span>Warnings</span><strong>${escapeHtml(warningCount)}</strong></div>
+      <div class="entity-metric"><span>实体问题</span><strong>${escapeHtml(entityIssueCount)}</strong></div>
+      <div class="entity-metric"><span>ASS 反馈</span><strong>${hasFeedback ? "有" : "无"}</strong></div>
+      <div class="entity-metric"><span>内部文件</span><strong>${escapeHtml(health.internal_file_count ?? 0)}</strong></div>
+    </div>
+    <div class="project-health-section">
+      <div class="project-health-section-head">
+        <strong>发布必需品</strong>
+        <button id="organizeProjectArtifactsBtn" class="mini-btn" type="button">整理发布产物</button>
+      </div>
+      ${renderReleaseArtifacts(project)}
+      <p class="local-feedback-note">保留简介、两个封面、最终 ASS 和烤制视频；其他根目录文件移动到 99_internal_artifacts。</p>
+    </div>
+    ${renderProjectHealthBadges(project)}
+  `;
+  el("organizeProjectArtifactsBtn")?.addEventListener("click", () => organizeSelectedProjectArtifacts(project.path));
 }
 
 const ENTITY_ARTIFACT_FILES = {
@@ -2790,6 +2895,11 @@ function renderBilibiliDuplicate() {
   const query = (report.queries || report.query_plan || [])[0] || {};
   const best = report.best_candidate || candidates[0] || null;
   const searchSummary = report.search_summary || {};
+  const policy = stateValue.workflow_policy || report.workflow_policy || {};
+  const policyText =
+    policy.blocks_translation === false
+      ? "独立复核：不阻塞下载、翻译、烤制或反馈学习"
+      : "查重状态仅作复核参考";
   const isFailure = status === "error";
   const isRunning = status === "running";
   const high = decision === "high_confidence_possible_duplicate";
@@ -2886,6 +2996,7 @@ function renderBilibiliDuplicate() {
       <span>${escapeHtml(report.created_at || "")}</span>
     </div>
     <div class="proxy-status-meta">${meta}</div>
+    <div class="bilibili-state-row"><span>工作流关系</span><strong>${escapeHtml(policyText)}</strong></div>
     ${stateHtml}
     ${bestHtml}
     ${rows ? `<div class="bilibili-candidates">${rows}</div>` : emptyCandidateHtml}
@@ -2958,6 +3069,7 @@ function runBilibiliDuplicateSearch() {
           status: "error",
           error: payload.error || "Bilibili 检测失败",
           report: null,
+          workflow_policy: payload.workflow_policy || null,
         };
         renderBilibiliDuplicate();
         showToast(payload.error || "Bilibili 检测失败");
@@ -2966,6 +3078,7 @@ function runBilibiliDuplicateSearch() {
       state.bilibiliDuplicate = {
         status: "done",
         report: payload.report || {},
+        workflow_policy: payload.workflow_policy || null,
         report_path: payload.report_path || "",
         candidates_tsv_path: payload.candidates_tsv_path || "",
         output_dir: payload.output_dir || "",

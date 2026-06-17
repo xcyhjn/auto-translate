@@ -69,6 +69,7 @@ LOCAL_FEEDBACK_DATASET_DIR = DEFAULT_DATASET_DIR
 SERVER_VERSION = "20260519-stability1"
 SERVER_PORT = int(os.environ.get("AUTOSUB_UI_PORT", "8777"))
 DEFAULT_HTTP_PROXY = "http://127.0.0.1:7890"
+INTERNAL_ARTIFACTS_DIR_NAME = "99_internal_artifacts"
 JOB_STORE = JobStore()
 STATE_SNAPSHOT_VERSION = 1
 STATE_STALE_TIMEOUT_SECONDS = 30 * 60
@@ -1260,19 +1261,177 @@ def scan_input_queue() -> list[dict]:
     return videos
 
 
+def internal_artifacts_dir(project_dir: Path) -> Path:
+    return project_dir / INTERNAL_ARTIFACTS_DIR_NAME
+
+
+def project_file_path(project_dir: Path, name: str) -> Path:
+    root_path = project_dir / name
+    if root_path.exists():
+        return root_path
+    internal_path = internal_artifacts_dir(project_dir) / name
+    if internal_path.exists():
+        return internal_path
+    return root_path
+
+
+def read_project_json_file(project_dir: Path, name: str) -> dict:
+    path = project_file_path(project_dir, name)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def file_entry(path: Path) -> dict:
+    stat = path.stat()
+    return {
+        "name": path.name,
+        "path": str(path),
+        "size": stat.st_size,
+        "mtime_ts": stat.st_mtime,
+    }
+
+
+def project_file_entry(project_dir: Path, file_index: dict[str, dict], name: str) -> dict | None:
+    entry = file_index.get(name)
+    if entry:
+        return entry
+    path = internal_artifacts_dir(project_dir) / name
+    if path.exists() and path.is_file():
+        return file_entry(path)
+    return None
+
+
+def resolve_project_file_entry(project_dir: Path, file_index: dict[str, dict], path_or_name: str) -> dict | None:
+    raw = str(path_or_name or "").strip()
+    if not raw:
+        return None
+    name = Path(raw).name
+    if not name:
+        return None
+    return project_file_entry(project_dir, file_index, name)
+
+
+def find_project_burned_file(project_dir: Path, file_index: dict[str, dict], manifest_payload: dict) -> dict | None:
+    burn_plan = manifest_payload.get("burn_plan") if isinstance(manifest_payload.get("burn_plan"), dict) else {}
+    burned_file = resolve_project_file_entry(project_dir, file_index, str(burn_plan.get("output_path") or ""))
+    if burned_file:
+        return burned_file
+    for name, entry in file_index.items():
+        if re.match(r"^09_.*\.mp4$", name, flags=re.IGNORECASE):
+            return entry
+    internal = internal_artifacts_dir(project_dir)
+    if internal.exists():
+        for item in sorted(internal.iterdir()):
+            if item.is_file() and re.match(r"^09_.*\.mp4$", item.name, flags=re.IGNORECASE):
+                return file_entry(item)
+    return None
+
+
+def build_release_artifacts(project_dir: Path, file_index: dict[str, dict], ass_file: dict | None, burned_file: dict | None) -> list[dict]:
+    specs = [
+        ("description", "简介", project_file_entry(project_dir, file_index, "00_youtube_info.txt")),
+        ("cover", "封面", project_file_entry(project_dir, file_index, "00_youtube_cover.jpg")),
+        ("cover_1280x960", "1280x960 封面", project_file_entry(project_dir, file_index, "00_youtube_cover_1280x960.jpg")),
+        ("ass", "ASS 字幕", ass_file),
+        ("burned_video", "烤制视频", burned_file),
+    ]
+    artifacts = []
+    for key, label, entry in specs:
+        artifacts.append(
+            {
+                "key": key,
+                "label": label,
+                "required": True,
+                "present": bool(entry),
+                "name": entry.get("name") if entry else "",
+                "path": entry.get("path") if entry else "",
+                "size": entry.get("size") if entry else 0,
+                "mtime_ts": entry.get("mtime_ts") if entry else 0,
+            }
+        )
+    return artifacts
+
+
+def read_project_qa_summary(project_dir: Path) -> dict:
+    qa_payload = read_project_json_file(project_dir, "07g_final_ass_qa.json") or read_project_json_file(project_dir, "07_qa_report.json")
+    metrics_payload = read_project_json_file(project_dir, "07j_segmentation_qa_metrics.json")
+    summary = qa_payload.get("summary") if isinstance(qa_payload.get("summary"), dict) else qa_payload
+    metrics_summary = metrics_payload.get("summary") if isinstance(metrics_payload.get("summary"), dict) else metrics_payload
+    blocking = 0
+    warnings = 0
+    for payload in (summary, metrics_summary):
+        if not isinstance(payload, dict):
+            continue
+        blocking += int(payload.get("blocking_count") or payload.get("blocking_issue_count") or payload.get("english_residue_blocking_count") or 0)
+        warnings += int(payload.get("warning_count") or payload.get("english_residue_review_count") or 0)
+    return {"blocking_count": blocking, "warning_count": warnings}
+
+
+def build_project_health(project_dir: Path, release_artifacts: list[dict]) -> dict:
+    present = sum(1 for item in release_artifacts if item.get("present"))
+    total = len(release_artifacts)
+    missing = [str(item.get("label") or item.get("key")) for item in release_artifacts if not item.get("present")]
+    qa = read_project_qa_summary(project_dir)
+    blocking_count = int(qa.get("blocking_count") or 0)
+    warning_count = int(qa.get("warning_count") or 0)
+    score = int(round((present / total) * 100)) if total else 0
+    if blocking_count > 0:
+        score = max(0, score - min(30, blocking_count * 10))
+    internal = internal_artifacts_dir(project_dir)
+    internal_file_count = 0
+    if internal.exists():
+        internal_file_count = sum(1 for item in internal.iterdir() if item.is_file())
+    return {
+        "score": score,
+        "ready": not missing and blocking_count == 0,
+        "missing_release_artifacts": missing,
+        "release_artifact_count": present,
+        "release_artifact_total": total,
+        "qa_blocking_count": blocking_count,
+        "qa_warning_count": warning_count,
+        "internal_dir": str(internal),
+        "internal_file_count": internal_file_count,
+        "organized": internal.exists() and internal_file_count > 0,
+    }
+
+
+def project_public_release_paths(project: dict) -> set[Path]:
+    paths: set[Path] = set()
+    for artifact in project.get("release_artifacts") or []:
+        if artifact.get("present") and artifact.get("path"):
+            try:
+                paths.add(Path(str(artifact["path"])).resolve())
+            except OSError:
+                continue
+    return paths
+
+
+def collision_safe_destination(destination: Path) -> Path:
+    if not destination.exists():
+        return destination
+    stem = destination.stem
+    suffix = destination.suffix
+    parent = destination.parent
+    index = 1
+    while True:
+        candidate = parent / f"{stem}.{index}{suffix}"
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
 def read_output_tree() -> list[dict]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     projects = []
     for folder in sorted(OUTPUT_DIR.iterdir()):
         if not folder.is_dir():
             continue
-        manifest_payload: dict = {}
-        manifest_path = folder / "10_manifest_bilingual.json"
-        if manifest_path.exists():
-            try:
-                manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-            except Exception:
-                manifest_payload = {}
+        manifest_payload = read_project_json_file(folder, "10_manifest_bilingual.json")
         subtitle_output = manifest_payload.get("subtitle_output") if isinstance(manifest_payload.get("subtitle_output"), dict) else {}
         manifest_ass_name = str(subtitle_output.get("ass_name") or "").strip()
         ensure_top_ass_alias(folder, manifest_ass_name)
@@ -1280,23 +1439,16 @@ def read_output_tree() -> list[dict]:
         file_index: dict[str, dict] = {}
         for item in sorted(folder.iterdir()):
             if item.is_file():
-                stat = item.stat()
-                entry = {
-                    "name": item.name,
-                    "path": str(item),
-                    "size": stat.st_size,
-                    "mtime_ts": stat.st_mtime,
-                }
+                entry = file_entry(item)
                 files.append(entry)
                 file_index[item.name] = entry
-        manifest_file = file_index.get("10_manifest_bilingual.json")
+        manifest_file = project_file_entry(folder, file_index, "10_manifest_bilingual.json")
         manifest_ass_name = str(subtitle_output.get("ass_name") or "").strip()
         ass_path = find_existing_ass_path(folder, manifest_ass_name)
         ass_file = file_index.get(ass_path.name) if ass_path else None
-        burn_plan = manifest_payload.get("burn_plan") if isinstance(manifest_payload.get("burn_plan"), dict) else {}
-        burned_path = str(burn_plan.get("output_path") or "").strip()
-        burned_file = file_index.get(Path(burned_path).name) if burned_path else None
-        burned_file = burned_file or file_index.get("09_burned_bilingual_video.mp4")
+        burned_file = find_project_burned_file(folder, file_index, manifest_payload)
+        release_artifacts = build_release_artifacts(folder, file_index, ass_file, burned_file)
+        health = build_project_health(folder, release_artifacts)
         input_video = str(manifest_payload.get("input_video") or "").strip()
         projects.append(
             {
@@ -1311,6 +1463,8 @@ def read_output_tree() -> list[dict]:
                 "subtitle_mode": str(manifest_payload.get("subtitle_mode") or subtitle_output.get("mode") or ""),
                 "input_video": input_video,
                 "input_video_name": Path(input_video).name if input_video else "",
+                "release_artifacts": release_artifacts,
+                "health": health,
             }
         )
     return projects
@@ -2392,6 +2546,16 @@ def youtube_info_job(url: str, *, proxy_url: str | None = None) -> dict:
     return manifest
 
 
+def bilibili_duplicate_workflow_policy() -> dict:
+    return {
+        "workflow_decoupled": True,
+        "blocks_translation": False,
+        "blocks_download": False,
+        "manual_review_only": True,
+        "message": "Bilibili duplicate search is advisory. Search failures or no parsed candidates do not block download, translation, burn, or feedback learning.",
+    }
+
+
 def bilibili_duplicate_search_job(url: str, config: dict, youtube_meta: dict | None = None) -> dict:
     normalized_config = normalize_config({**read_config(), **config})
     configured_raw_proxy_url = normalize_proxy_url(normalized_config.get("proxy_url"))
@@ -2417,6 +2581,7 @@ def bilibili_duplicate_search_job(url: str, config: dict, youtube_meta: dict | N
     return {
         "input_youtube_url": url,
         "output_dir": str(output_dir),
+        "workflow_policy": bilibili_duplicate_workflow_policy(),
         **artifacts,
         "report": report,
     }
@@ -2445,10 +2610,52 @@ def bilibili_duplicate_feedback_job(payload: dict) -> dict:
     )
 
 
+def organize_project_artifacts_job(project_path: str) -> dict:
+    project_dir = Path(project_path)
+    if not project_dir.exists() or not project_dir.is_dir():
+        raise FileNotFoundError(f"Project folder not found: {project_dir}")
+
+    project_snapshot = next((project for project in read_output_tree() if Path(project["path"]).resolve() == project_dir.resolve()), None)
+    if not project_snapshot:
+        raise FileNotFoundError(f"Project is not under output directory: {project_dir}")
+    keep_paths = project_public_release_paths(project_snapshot)
+    internal_dir = internal_artifacts_dir(project_dir)
+    internal_dir.mkdir(exist_ok=True)
+
+    moved = []
+    kept = []
+    for item in sorted(project_dir.iterdir()):
+        if item.name == INTERNAL_ARTIFACTS_DIR_NAME:
+            continue
+        if not item.is_file():
+            continue
+        try:
+            resolved = item.resolve()
+        except OSError:
+            continue
+        if resolved in keep_paths:
+            kept.append(str(item))
+            continue
+        destination = collision_safe_destination(internal_dir / item.name)
+        shutil.move(str(item), str(destination))
+        moved.append({"from": str(item), "to": str(destination)})
+
+    refreshed = next((project for project in read_output_tree() if Path(project["path"]).resolve() == project_dir.resolve()), None)
+    return {
+        "project_path": str(project_dir),
+        "internal_dir": str(internal_dir),
+        "moved_count": len(moved),
+        "moved": moved,
+        "kept": kept,
+        "project": refreshed or project_snapshot,
+        "projects": read_output_tree(),
+    }
+
+
 def rebuild_padded_cover_job(project_path: str) -> dict:
     output_dir = Path(project_path)
     padded_path = ensure_padded_cover(output_dir)
-    manifest_path = output_dir / "10_youtube_manifest.json"
+    manifest_path = project_file_path(output_dir, "10_youtube_manifest.json")
     manifest = {}
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -2467,7 +2674,7 @@ def rebuild_padded_cover_job(project_path: str) -> dict:
 
 def learn_style_job(project_path: str) -> dict:
     project_dir = Path(project_path)
-    segments_path = project_dir / "05_translated_segments.json"
+    segments_path = project_file_path(project_dir, "05_translated_segments.json")
     ass_path = find_existing_ass_path(project_dir)
     if not project_dir.exists():
         raise FileNotFoundError(f"Project folder not found: {project_dir}")
@@ -2717,8 +2924,8 @@ def run_pipeline_job(video_path: str, config: dict) -> None:
 def reburn_from_ass_job(project_path: str, task_id: str | None = None) -> dict:
     task_id = task_id or current_task_id()
     project_dir = Path(project_path)
-    manifest_path = project_dir / "10_manifest_bilingual.json"
-    translated_segments_path = project_dir / "05_translated_segments.json"
+    manifest_path = project_file_path(project_dir, "10_manifest_bilingual.json")
+    translated_segments_path = project_file_path(project_dir, "05_translated_segments.json")
     if not project_dir.exists():
         raise FileNotFoundError(f"Project folder not found: {project_dir}")
     if not manifest_path.exists():
@@ -3149,6 +3356,7 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                     self._json_response(
                         {
                             "ok": False,
+                            "workflow_policy": bilibili_duplicate_workflow_policy(),
                             **build_error_payload(
                                 exc,
                                 proxy_url=configured_raw_proxy_url,
@@ -3167,6 +3375,7 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                     self._json_response(
                         {
                             "ok": False,
+                            "workflow_policy": bilibili_duplicate_workflow_policy(),
                             **build_error_payload(
                                 exc,
                                 proxy_url=proxy_url,
@@ -3176,6 +3385,7 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                         status=502,
                     )
                     return
+                manifest.setdefault("workflow_policy", bilibili_duplicate_workflow_policy())
                 self._json_response({"ok": True, **manifest})
                 return
 
@@ -3205,6 +3415,29 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                     return
                 manifest = rebuild_padded_cover_job(project_path)
                 self._json_response({"ok": True, **manifest})
+                return
+
+            if parsed.path == "/api/organize-project-artifacts":
+                project_path = str(payload.get("project_path") or "").strip()
+                if not project_path:
+                    self._json_response({"ok": False, "error": "project_path required"}, status=400)
+                    return
+                try:
+                    result = organize_project_artifacts_job(project_path)
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                operation="organize_project_artifacts",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                self._json_response({"ok": True, **result})
                 return
 
             if parsed.path == "/api/queue/clear":

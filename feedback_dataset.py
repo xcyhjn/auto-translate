@@ -27,6 +27,7 @@ from .workflow_profiles import ass_candidate_paths
 SCHEMA_VERSION = 1
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DATASET_DIR = BASE_DIR / "datasets" / "local_feedback"
+INTERNAL_ARTIFACTS_DIR_NAME = "99_internal_artifacts"
 BILIBILI_LABELS = {"duplicate", "not_duplicate", "same_topic", "manual_review"}
 STYLE_FEEDBACK_TYPES = {
     "bad_example",
@@ -62,6 +63,16 @@ def read_json(path: Path) -> Any:
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def project_file_path(project: Path, name: str) -> Path:
+    root_path = project / name
+    if root_path.exists():
+        return root_path
+    internal_path = project / INTERNAL_ARTIFACTS_DIR_NAME / name
+    if internal_path.exists():
+        return internal_path
+    return root_path
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -535,7 +546,7 @@ def is_unsafe_style_learning_record(record: dict) -> bool:
 def collect_style_project(project: Path, dataset_dir: Path = DEFAULT_DATASET_DIR) -> dict:
     paths = ensure_dataset_layout(dataset_dir)
     project = project.resolve()
-    segments_path = project / "05_translated_segments.json"
+    segments_path = project_file_path(project, "05_translated_segments.json")
     if not segments_path.exists():
         raise FileNotFoundError(f"Translated segments not found: {segments_path}")
     ass_path = find_manual_ass_path(project)
@@ -592,7 +603,7 @@ def collect_style_project(project: Path, dataset_dir: Path = DEFAULT_DATASET_DIR
 
 
 def load_source_spans_for_project(project: Path, segments_path: Path) -> dict:
-    source_spans_path = project / "04a_source_spans.json"
+    source_spans_path = project_file_path(project, "04a_source_spans.json")
     if source_spans_path.exists():
         payload = read_json(source_spans_path)
         if isinstance(payload, dict):
@@ -601,10 +612,10 @@ def load_source_spans_for_project(project: Path, segments_path: Path) -> dict:
 
 
 def span_machine_segments_path(project: Path) -> Path:
-    span_segments_path = project / "05a_span_translated_segments.json"
+    span_segments_path = project_file_path(project, "05a_span_translated_segments.json")
     if span_segments_path.exists():
         return span_segments_path
-    translated_path = project / "05_translated_segments.json"
+    translated_path = project_file_path(project, "05_translated_segments.json")
     if translated_path.exists():
         return translated_path
     raise FileNotFoundError(f"Translated segments not found in {project}")

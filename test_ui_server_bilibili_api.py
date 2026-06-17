@@ -86,6 +86,8 @@ def test_bilibili_duplicate_api_returns_stable_schema(monkeypatch) -> None:
 
     assert status == 200
     assert payload["ok"] is True
+    assert payload["workflow_policy"]["blocks_translation"] is False
+    assert payload["workflow_policy"]["workflow_decoupled"] is True
     assert payload["report"]["decision"] == "no_candidates_manual_review"
     assert payload["report_path"].endswith("00b_bilibili_duplicate_search.json")
     assert payload["candidates_tsv_path"].endswith("00b_bilibili_duplicate_candidates.tsv")
@@ -109,6 +111,7 @@ def test_bilibili_duplicate_api_rejects_invalid_proxy(monkeypatch) -> None:
 
     assert status == 400
     assert payload["ok"] is False
+    assert payload["workflow_policy"]["blocks_translation"] is False
     assert payload["operation"] == "bilibili_duplicate_search_proxy_validation"
     assert payload["mode"] == "proxy"
     assert "not a proxy endpoint" in payload["error"]
@@ -250,6 +253,78 @@ def test_read_output_tree_creates_top_ass_alias_for_legacy_project(monkeypatch, 
     assert top.exists()
     assert top.read_text(encoding="utf-8") == "legacy"
     assert projects[0]["ass_path"].endswith(top.name)
+
+
+def test_read_output_tree_returns_release_artifacts_and_health(monkeypatch, tmp_path: Path) -> None:
+    output_root = tmp_path / "output"
+    project = output_root / "sample"
+    project.mkdir(parents=True)
+    (project / "00_youtube_info.txt").write_text("description", encoding="utf-8")
+    (project / "00_youtube_cover.jpg").write_bytes(b"cover")
+    (project / "00_youtube_cover_1280x960.jpg").write_bytes(b"cover-large")
+    (project / "00_ASS_bilingual_zh_en.ass").write_text("[Events]\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Hi", encoding="utf-8")
+    (project / "09_burned_bilingual_video.mp4").write_bytes(b"video")
+    (project / "10_manifest_bilingual.json").write_text(
+        json.dumps(
+            {
+                "subtitle_output": {"ass_name": "00_ASS_bilingual_zh_en.ass"},
+                "burn_plan": {"output_path": str(project / "09_burned_bilingual_video.mp4")},
+                "input_video": "D:/videos/sample.mp4",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "OUTPUT_DIR", output_root)
+
+    projects = ui_server.read_output_tree()
+
+    release = {item["key"]: item for item in projects[0]["release_artifacts"]}
+    assert all(item["present"] for item in release.values())
+    assert release["description"]["name"] == "00_youtube_info.txt"
+    assert release["cover"]["name"] == "00_youtube_cover.jpg"
+    assert release["cover_1280x960"]["name"] == "00_youtube_cover_1280x960.jpg"
+    assert release["ass"]["name"] == "00_ASS_bilingual_zh_en.ass"
+    assert release["burned_video"]["name"] == "09_burned_bilingual_video.mp4"
+    assert projects[0]["health"]["score"] == 100
+    assert projects[0]["health"]["ready"] is True
+
+
+def test_organize_project_artifacts_moves_non_release_files(monkeypatch, tmp_path: Path) -> None:
+    output_root = tmp_path / "output"
+    project = output_root / "sample"
+    project.mkdir(parents=True)
+    essentials = [
+        "00_youtube_info.txt",
+        "00_youtube_cover.jpg",
+        "00_youtube_cover_1280x960.jpg",
+        "00_ASS_bilingual_zh_en.ass",
+        "09_burned_bilingual_video.mp4",
+    ]
+    for name in essentials:
+        (project / name).write_text("essential", encoding="utf-8")
+    (project / "05_translated_segments.json").write_text("[]", encoding="utf-8")
+    (project / "10_manifest_bilingual.json").write_text(
+        json.dumps(
+            {
+                "subtitle_output": {"ass_name": "00_ASS_bilingual_zh_en.ass"},
+                "burn_plan": {"output_path": str(project / "09_burned_bilingual_video.mp4")},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "OUTPUT_DIR", output_root)
+
+    result = ui_server.organize_project_artifacts_job(str(project))
+
+    internal = project / ui_server.INTERNAL_ARTIFACTS_DIR_NAME
+    assert result["moved_count"] == 2
+    assert (internal / "05_translated_segments.json").exists()
+    assert (internal / "10_manifest_bilingual.json").exists()
+    for name in essentials:
+        assert (project / name).exists()
+    refreshed = result["project"]
+    assert refreshed["manifest_path"].endswith("10_manifest_bilingual.json")
+    assert refreshed["health"]["internal_file_count"] == 2
 
 
 def test_local_feedback_summary_api_reads_counts_and_eval(monkeypatch, tmp_path: Path) -> None:
