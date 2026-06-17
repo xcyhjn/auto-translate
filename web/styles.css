@@ -1116,6 +1116,7 @@
   }
 
   .organize-preview-list,
+  .learning-diagnostic-list,
   .learning-count-list {
     display: grid;
     gap: var(--space-2);
@@ -1123,6 +1124,7 @@
   }
 
   .organize-preview-list div,
+  .learning-diagnostic-list div,
   .learning-count-list div {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -1137,6 +1139,8 @@
 
   .organize-preview-list span,
   .organize-preview-list strong,
+  .learning-diagnostic-list span,
+  .learning-diagnostic-list strong,
   .learning-count-list span,
   .learning-count-list strong {
     min-width: 0;
@@ -1145,8 +1149,18 @@
   }
 
   .organize-preview-list strong,
+  .learning-diagnostic-list strong,
   .learning-count-list strong {
     color: var(--text);
+  }
+
+  .learning-diagnostic-list div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .learning-diagnostic-list strong {
+    color: var(--muted);
+    font-weight: 620;
   }
 
   .learning-quality-grid {

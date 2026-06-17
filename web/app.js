@@ -1891,6 +1891,64 @@ function renderValueCountList(rows, emptyText) {
     .join("")}</div>`;
 }
 
+function renderDiagnosticGroupList(groups, emptyText, titleKey = "source") {
+  if (!Array.isArray(groups) || !groups.length) return `<div class="entity-empty">${escapeHtml(emptyText)}</div>`;
+  return `<div class="learning-diagnostic-list">${groups
+    .slice(0, 5)
+    .map((group) => {
+      const label = group[titleKey] || group.source || group.manual || "unknown";
+      const recordText = (group.records || [])
+        .slice(0, 4)
+        .map((record) => `${record.project_id || "unknown"} #${record.segment_id ?? record.span_id ?? record.index}`)
+        .join(" / ");
+      return `
+        <div>
+          <span>${escapeHtml(label || "空文本")}</span>
+          <strong>${escapeHtml(group.count ?? 0)} 条 · ${escapeHtml(recordText || "无记录")}</strong>
+        </div>
+      `;
+    })
+    .join("")}</div>`;
+}
+
+function renderLearningDatasetDiagnostics(diagnostics) {
+  const style = diagnostics?.style || {};
+  const span = diagnostics?.span || {};
+  const conflictCount = (style.conflict_group_count || 0) + (span.conflict_group_count || 0);
+  const duplicateCount = (style.duplicate_group_count || 0) + (span.duplicate_group_count || 0);
+  const mergeCount = (style.merge_candidate_group_count || 0) + (span.merge_candidate_group_count || 0);
+  return `
+    <section class="entity-section wide">
+      <div class="entity-section-head"><h5>重复与冲突诊断</h5><span>本地只读检查</span></div>
+      <div class="learning-ratio-list">
+        <div><span>冲突组</span><strong>${escapeHtml(conflictCount)}</strong></div>
+        <div><span>重复组</span><strong>${escapeHtml(duplicateCount)}</strong></div>
+        <div><span>合并候选</span><strong>${escapeHtml(mergeCount)}</strong></div>
+        <div><span>说明</span><strong>同源同机器基线但人工译法不同，需要优先复核。</strong></div>
+      </div>
+      <div class="prompt-preview-grid">
+        <div>
+          <span>ASS 冲突</span>
+          ${renderDiagnosticGroupList(style.conflict_groups, "暂无 ASS 冲突。")}
+        </div>
+        <div>
+          <span>Span 冲突</span>
+          ${renderDiagnosticGroupList(span.conflict_groups, "暂无 Span 冲突。")}
+        </div>
+        <div>
+          <span>ASS 重复</span>
+          ${renderDiagnosticGroupList(style.duplicate_groups, "暂无 ASS 重复。")}
+        </div>
+        <div>
+          <span>Span 重复</span>
+          ${renderDiagnosticGroupList(span.duplicate_groups, "暂无 Span 重复。")}
+        </div>
+      </div>
+      <p class="local-feedback-note">这些诊断不会修改 JSONL，也不会触发翻译请求。处理原则：冲突先人工复核，重复只保留质量最高、最稳定的一条进入 Prompt/Eval。</p>
+    </section>
+  `;
+}
+
 function learningStatusLabel(status) {
   const labels = {
     healthy: "健康",
@@ -2171,6 +2229,7 @@ function renderLearningQualityPanel() {
         </div>
       </section>
       ${renderLocalFeedbackImpactPreviewCard()}
+      ${renderLearningDatasetDiagnostics(payload.dataset_diagnostics)}
       <section class="entity-section">
         <div class="entity-section-head"><h5>样本覆盖</h5><span>Prompt / Eval / Pending</span></div>
         <div class="learning-ratio-list">

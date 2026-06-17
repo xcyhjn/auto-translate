@@ -872,6 +872,40 @@ def test_learning_quality_summary_returns_diagnostics_and_history(monkeypatch, t
     assert payload["history"][0]["score"] == 55
 
 
+def test_learning_quality_summary_reports_duplicate_and_conflict_groups(monkeypatch, tmp_path: Path) -> None:
+    dataset = tmp_path / "local_feedback"
+    dataset.mkdir(parents=True)
+    duplicate_a = _style_feedback_record(1, accepted=True, prompt=True)
+    duplicate_b = dict(duplicate_a)
+    duplicate_b["project_id"] = "other-project"
+    conflict_a = _style_feedback_record(10, accepted=True, prompt=True)
+    conflict_b = dict(conflict_a)
+    conflict_b["segment_id"] = 11
+    conflict_b["manual_target_text"] = "另一种人工译法"
+    span_a = _span_feedback_record(20, accepted=True, prompt=True)
+    span_b = dict(span_a)
+    span_b["span_id"] = "span-21"
+    span_b["manual_target_by_id"] = {"20": "另一种 span 译法"}
+    (dataset / "translation_edit_examples.jsonl").write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in [duplicate_a, duplicate_b, conflict_a, conflict_b]) + "\n",
+        encoding="utf-8",
+    )
+    (dataset / "span_translation_examples.jsonl").write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in [span_a, span_b]) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "LOCAL_FEEDBACK_DATASET_DIR", dataset)
+
+    payload = ui_server.build_learning_quality_summary()
+
+    diagnostics = payload["dataset_diagnostics"]
+    assert diagnostics["style"]["duplicate_group_count"] == 1
+    assert diagnostics["style"]["conflict_group_count"] == 1
+    assert diagnostics["span"]["conflict_group_count"] == 1
+    assert diagnostics["style"]["duplicate_groups"][0]["count"] == 2
+    assert any("冲突" in reason for reason in payload["quality"]["reasons"])
+
+
 def test_learning_quality_summary_prioritizes_unsafe(monkeypatch, tmp_path: Path) -> None:
     dataset = tmp_path / "local_feedback"
     (dataset / "eval_reports").mkdir(parents=True)

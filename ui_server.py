@@ -3266,6 +3266,124 @@ def count_by_field(records: list[dict], field: str) -> list[dict]:
     return [{"value": key, "count": value} for key, value in sorted(counts.items(), key=lambda item: item[1], reverse=True)]
 
 
+def normalize_feedback_text(value: object) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def compact_record_ref(kind: str, record: dict, index: int) -> dict:
+    if kind == "span":
+        return {
+            "index": index,
+            "project_id": str(record.get("project_id") or ""),
+            "span_id": str(record.get("span_id") or ""),
+            "segment_ids": record.get("segment_ids") if isinstance(record.get("segment_ids"), list) else [],
+            "accepted": bool(record.get("accepted")),
+            "use_for_prompt": bool(record.get("use_for_span_prompt")),
+            "use_for_eval": bool(record.get("use_for_eval")),
+            "learning_risk": str(record.get("learning_risk") or ""),
+            "edit_tags": record.get("edit_tags") if isinstance(record.get("edit_tags"), list) else [],
+        }
+    return {
+        "index": index,
+        "project_id": str(record.get("project_id") or ""),
+        "segment_id": record.get("segment_id"),
+        "accepted": bool(record.get("accepted")),
+        "use_for_prompt": bool(record.get("use_for_style_prompt")),
+        "use_for_eval": bool(record.get("use_for_eval")),
+        "learning_risk": str(record.get("learning_risk") or ""),
+        "edit_tags": record.get("edit_tags") if isinstance(record.get("edit_tags"), list) else [],
+        "feedback_types": record.get("feedback_types") if isinstance(record.get("feedback_types"), list) else [],
+    }
+
+
+def feedback_diagnostic_texts(kind: str, record: dict) -> tuple[str, str, str]:
+    if kind == "span":
+        machine_by_id = record.get("machine_target_by_id") if isinstance(record.get("machine_target_by_id"), dict) else {}
+        manual_by_id = record.get("manual_target_by_id") if isinstance(record.get("manual_target_by_id"), dict) else {}
+        machine_text = " ".join(str(machine_by_id[key]) for key in sorted(machine_by_id))
+        manual_text = " ".join(str(manual_by_id[key]) for key in sorted(manual_by_id))
+        return (
+            normalize_feedback_text(record.get("source_joined")),
+            normalize_feedback_text(machine_text),
+            normalize_feedback_text(manual_text),
+        )
+    return (
+        normalize_feedback_text(record.get("source_text")),
+        normalize_feedback_text(record.get("machine_target_text")),
+        normalize_feedback_text(record.get("manual_target_text")),
+    )
+
+
+def grouped_feedback_diagnostics(kind: str, records: list[dict], *, limit: int = 8) -> dict:
+    duplicate_groups: dict[tuple[str, str, str], list[tuple[int, dict]]] = {}
+    machine_conflicts: dict[tuple[str, str], list[tuple[int, dict, str]]] = {}
+    manual_merge_groups: dict[tuple[str, str], list[tuple[int, dict, str]]] = {}
+    for index, record in enumerate(records):
+        source_text, machine_text, manual_text = feedback_diagnostic_texts(kind, record)
+        if not source_text and not machine_text and not manual_text:
+            continue
+        duplicate_groups.setdefault((source_text, machine_text, manual_text), []).append((index, record))
+        machine_conflicts.setdefault((source_text, machine_text), []).append((index, record, manual_text))
+        manual_merge_groups.setdefault((source_text, manual_text), []).append((index, record, machine_text))
+
+    duplicates = [
+        {
+            "source": key[0][:220],
+            "machine": key[1][:220],
+            "manual": key[2][:220],
+            "count": len(items),
+            "records": [compact_record_ref(kind, record, index) for index, record in items[:5]],
+        }
+        for key, items in duplicate_groups.items()
+        if len(items) > 1
+    ]
+    conflicts = [
+        {
+            "source": key[0][:220],
+            "machine": key[1][:220],
+            "manual_variant_count": len({manual for _, _, manual in items}),
+            "count": len(items),
+            "records": [compact_record_ref(kind, record, index) for index, record, _ in items[:6]],
+        }
+        for key, items in machine_conflicts.items()
+        if len({manual for _, _, manual in items}) > 1
+    ]
+    merge_candidates = [
+        {
+            "source": key[0][:220],
+            "manual": key[1][:220],
+            "machine_variant_count": len({machine for _, _, machine in items}),
+            "count": len(items),
+            "records": [compact_record_ref(kind, record, index) for index, record, _ in items[:6]],
+        }
+        for key, items in manual_merge_groups.items()
+        if len({machine for _, _, machine in items}) > 1
+    ]
+    duplicates.sort(key=lambda item: item["count"], reverse=True)
+    conflicts.sort(key=lambda item: (item["manual_variant_count"], item["count"]), reverse=True)
+    merge_candidates.sort(key=lambda item: (item["machine_variant_count"], item["count"]), reverse=True)
+    return {
+        "duplicate_group_count": len(duplicates),
+        "duplicate_record_count": sum(item["count"] for item in duplicates),
+        "conflict_group_count": len(conflicts),
+        "conflict_record_count": sum(item["count"] for item in conflicts),
+        "merge_candidate_group_count": len(merge_candidates),
+        "merge_candidate_record_count": sum(item["count"] for item in merge_candidates),
+        "duplicate_groups": duplicates[:limit],
+        "conflict_groups": conflicts[:limit],
+        "merge_candidate_groups": merge_candidates[:limit],
+    }
+
+
+def build_learning_dataset_diagnostics(style_records: list[dict], span_records: list[dict]) -> dict:
+    return {
+        "style": grouped_feedback_diagnostics("style", style_records),
+        "span": grouped_feedback_diagnostics("span", span_records),
+    }
+
+
 def read_learning_quality_snapshots(dataset_dir: Path, limit: int = 10) -> list[dict]:
     path = local_feedback_snapshot_path(dataset_dir)
     try:
@@ -3335,6 +3453,15 @@ def build_learning_quality_details(
     span_medium = sum(1 for record in span_records if record.get("learning_risk") == "medium")
     bad_example = sum(1 for record in style_records if "bad_example" in (record.get("edit_tags") or record.get("feedback_types") or []))
     bad_alignment = sum(1 for record in span_records if "bad_alignment" in (record.get("edit_tags") or []))
+    dataset_diagnostics = build_learning_dataset_diagnostics(style_records, span_records)
+    conflict_total = (
+        dataset_diagnostics["style"]["conflict_group_count"]
+        + dataset_diagnostics["span"]["conflict_group_count"]
+    )
+    duplicate_total = (
+        dataset_diagnostics["style"]["duplicate_group_count"]
+        + dataset_diagnostics["span"]["duplicate_group_count"]
+    )
 
     style_unsafe = safe_number(eval_metrics.get("unsafe_sample_rate"), 0.0)
     span_unsafe = safe_number(span_metrics.get("unsafe_sample_rate"), 0.0)
@@ -3381,6 +3508,11 @@ def build_learning_quality_details(
         score += 10
     else:
         reasons.append(f"待审样本过多：当前 {pending_total} 条。")
+    if conflict_total:
+        reasons.append(f"学习样本存在翻译冲突：当前 {conflict_total} 组同源/同机器基线对应不同人工译法。")
+        recommendations["style"].append("先复核样本冲突，避免把互相矛盾的译法同时注入 Prompt 或 Eval。")
+    if duplicate_total:
+        recommendations["style"].append(f"发现 {duplicate_total} 组重复学习样本，可先去重或仅保留质量最高的一条。")
 
     latest_times = [
         str(item.get("created_at") or "")
@@ -3437,6 +3569,7 @@ def build_learning_quality_details(
             "style_recommendation": count_by_field(style_records, "learning_recommendation"),
             "span_recommendation": count_by_field(span_records, "learning_recommendation"),
         },
+        "dataset_diagnostics": dataset_diagnostics,
         "recommendations": recommendations,
         "history": read_learning_quality_snapshots(dataset_dir),
     }

@@ -205,3 +205,10 @@ If there are fewer than three positive sources, the report is marked `sample_ins
 - The feedback review UI now has a detail drawer with full source/machine/manual comparison, tags, recommendation, classification reasons, and Span compact prompt-example preview.
 - Expanded `/api/local-feedback-impact-preview` with `prompt_injection_preview`, including style prompt excerpt, rough token estimates, learned rules, and compact Span examples.
 - The learning quality panel now shows what local feedback would actually inject into future translation prompts. This remains read-only and does not run translation or call a model.
+
+## 2026-06-17 Dataset Diagnostics v1
+
+- Added duplicate/conflict diagnostics to `/api/learning-quality-summary` under `dataset_diagnostics`.
+- A conflict means the same normalized source plus machine baseline maps to different manual ASS translations. These should be reviewed before both variants enter Prompt/Eval.
+- A duplicate means source, machine baseline, and manual ASS are all identical after normalization. Duplicates are review signals only; the system does not delete or mutate JSONL automatically.
+- The learning quality panel now shows ASS/Span conflicts, duplicates, and merge candidates as read-only local diagnostics. No translation request or model call is made.
