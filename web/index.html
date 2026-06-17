@@ -9,7 +9,7 @@
     <script>
       document.documentElement.classList.add("js-reveal-active");
     </script>
-    <link rel="stylesheet" href="./styles.css?v=20260617-workbench" />
+    <link rel="stylesheet" href="./styles.css?v=20260617-bilibili" />
   </head>
   <body style="background:#090b10">
     <div class="app-shell">
@@ -159,6 +159,7 @@
                 <button id="checkIdmBtn" class="mini-btn">检测 IDM</button>
                 <button id="fetchYoutubeInfoBtn" class="mini-btn">获取信息</button>
                 <button id="fetchYoutubeCoverBtn" class="mini-btn">获取封面</button>
+                <button id="bilibiliDuplicateSearchBtn" class="mini-btn" type="button">检测 B 站已有翻译</button>
                 <button id="rebuildPaddedCoverBtn" class="mini-btn">重建 1280x960 封面</button>
                 <button id="openInputBtn" class="mini-btn">打开 input</button>
                 <button id="scanInputBtn" class="mini-btn">扫描 input</button>
@@ -167,6 +168,7 @@
             <div id="proxyStatusCard" class="proxy-status-card hidden"></div>
             <div id="idmStatusCard" class="proxy-status-card hidden"></div>
             <div id="youtubeMetaCard" class="proxy-status-card hidden"></div>
+            <div id="bilibiliDuplicateCard" class="proxy-status-card bilibili-duplicate-card hidden"></div>
             <div class="card-toolbar">
               <button id="pickInputInlineBtn" class="mini-btn">从文件管理器添加视频</button>
             </div>
@@ -485,6 +487,6 @@
 
     <div id="toast" class="toast hidden"></div>
 
-    <script src="./app.js?v=20260617-workbench"></script>
+    <script src="./app.js?v=20260617-bilibili"></script>
   </body>
 </html>

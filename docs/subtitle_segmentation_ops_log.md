@@ -669,3 +669,68 @@ Rollback:
 Next:
 
 - In the UI, replace the proxy field value with an actual proxy endpoint such as `http://127.0.0.1:7890`.
+
+## 2026-06-17 09:35 +08:00 - Bilibili Duplicate Search
+
+Hypothesis:
+
+- Before translating a YouTube video, the user needs a non-blocking way to check whether a Chinese translation or repost already exists on Bilibili.
+- Searching only the original English title is too brittle because Bilibili titles are often translated, shortened, or rewritten.
+
+What:
+
+- Audited the current YouTube metadata path:
+  - `/api/youtube-meta` and `/api/youtube-cover` call `youtube_info_job()` / `youtube_assets_job()`.
+  - `youtube_meta.py` reads metadata through `yt-dlp`, writes `00_youtube_meta.json` and `00_youtube_info.txt`.
+  - `ui_server.py` writes `10_youtube_manifest.json`; the frontend stores the response in `state.youtubeMeta` and renders `youtubeMetaCard`.
+- Audited proxy flow:
+  - `proxy_url` is normalized and validated in `ui_server.py`.
+  - valid proxies flow into `yt-dlp` as `options["proxy"]`.
+  - `httpx.Client` receives `proxy=proxy_url` and disables `trust_env` when a proxy is explicitly set.
+- Audited output tree flow:
+  - `read_output_tree()` scans `output/*`, reads `10_manifest_bilingual.json` when present, and sends projects to the frontend bootstrap/state payloads.
+  - YouTube metadata assets use a separate `10_youtube_manifest.json` in the same output tree.
+- Checked for existing Bilibili search/download code:
+  - no existing Bilibili search module was found; the new boundary is isolated in `bilibili_search.py`.
+- Added rule-based Bilibili duplicate search:
+  - query plan generation
+  - lightweight search page requests
+  - HTML/embedded JSON parser with manual search URL fallback
+  - explainable scoring
+  - JSON/TSV/query artifacts
+- Added `POST /api/bilibili-duplicate-search`.
+- Added frontend button and status card near the YouTube metadata area.
+- Added tests for query generation, scoring, parsing fallback, and API schema/proxy validation.
+
+Self-correction:
+
+- First test pass exposed that `Russian book dying god` was deduped away by the earlier lowercase core English query.
+- Reordered semantic variants before the generic core English query so the intended mixed query survives.
+- First duration boundary used `< 90s`; changed it to `<= 90s` so a 1:30 clip is treated as too short for a 20-minute source.
+
+Validation:
+
+- `pytest test_bilibili_query_plan.py test_bilibili_candidate_scoring.py test_bilibili_search_parsing.py test_ui_server_bilibili_api.py`
+  - first pass: 2 failures, then corrected query ordering and duration boundary
+  - final pass: `9 passed`
+- final rerun: `9 passed in 1.29s`
+- `python -m py_compile bilibili_search.py ui_server.py`
+- `node --check web\app.js`
+- Live API request through `POST /api/bilibili-duplicate-search` with fixed YouTube metadata:
+  - `ok = true`
+  - `decision = no_candidates_manual_review`
+  - wrote `00b_bilibili_duplicate_search.json`, `00b_bilibili_duplicate_candidates.tsv`, and `00b_bilibili_search_queries.json`
+- Browser UI verification:
+  - button exists and is unique.
+  - real click at 1280x720 triggered the API and rendered the Bilibili status card.
+  - current saved config still has a bad proxy URL, so the card correctly showed the structured proxy validation error.
+  - locator clickability checked at 375, 768, 1280, and 1920 px widths with no horizontal overflow.
+- Fixed an existing sticky topbar overlap at medium widths, where the command bar could cover the YouTube/Bilibili controls at 1280x720.
+
+Rollback:
+
+- Remove `bilibili_search.py`, the `/api/bilibili-duplicate-search` branch, frontend Bilibili card/button code, and the `00b_*` artifacts.
+
+Next:
+
+- Optional: replace the saved proxy field with a real proxy endpoint, or leave it blank for direct Bilibili checks.

@@ -20,6 +20,7 @@ const state = {
   proxyStatus: null,
   idmStatus: null,
   youtubeMeta: null,
+  bilibiliDuplicate: null,
   selectedMediaInfo: null,
   mediaInspectToken: 0,
   lastErrorPayload: null,
@@ -353,6 +354,7 @@ function decorateStaticButtons() {
     ["checkIdmBtn", "scan"],
     ["fetchYoutubeInfoBtn", "download"],
     ["fetchYoutubeCoverBtn", "image"],
+    ["bilibiliDuplicateSearchBtn", "scan"],
     ["rebuildPaddedCoverBtn", "refresh"],
     ["copyErrorBtn", "copy"],
     ["applyRussianWorkflowBtn", "spark"],
@@ -2347,6 +2349,166 @@ function renderYoutubeMeta() {
   revealNewNode("statusCards", `youtube:ok:${meta.title || meta.cover_path || meta.cover_url || ""}`, card);
 }
 
+function bilibiliDecisionLabel(decision) {
+  const labels = {
+    high_confidence_possible_duplicate: "发现高置信候选",
+    medium_confidence_review: "发现中置信候选",
+    low_confidence_related: "仅发现低置信相关",
+    no_clear_duplicate_found: "未发现明确重复",
+    no_candidates_manual_review: "未解析到候选，可手动复核",
+    search_unavailable_manual_review: "检测失败，可手动复核",
+  };
+  return labels[decision] || "未检测";
+}
+
+function renderBilibiliDuplicate() {
+  const card = el("bilibiliDuplicateCard");
+  const stateValue = state.bilibiliDuplicate;
+  if (!card) return;
+  if (!stateValue) {
+    card.classList.add("hidden");
+    card.innerHTML = "";
+    return;
+  }
+
+  const status = stateValue.status || "idle";
+  const report = stateValue.report || {};
+  const decision = report.decision || "";
+  const candidates = Array.isArray(report.candidates) ? report.candidates.slice(0, 5) : [];
+  const query = (report.queries || report.query_plan || [])[0] || {};
+  const best = report.best_candidate || candidates[0] || null;
+  const isFailure = status === "error";
+  const isRunning = status === "running";
+  const high = decision === "high_confidence_possible_duplicate";
+  const medium = decision === "medium_confidence_review";
+  const low = decision === "low_confidence_related" || decision === "no_clear_duplicate_found";
+  card.className = `proxy-status-card bilibili-duplicate-card ${
+    isFailure ? "proxy-bad" : high || medium ? "proxy-ok" : low ? "alert-warn" : ""
+  }`;
+
+  const title = isFailure
+    ? "Bilibili 检测失败"
+    : isRunning
+      ? "Bilibili 检测中"
+      : bilibiliDecisionLabel(decision);
+  const meta = isRunning
+    ? "正在生成查询并轻量搜索 B 站"
+    : isFailure
+      ? escapeHtml(stateValue.error || "检测失败")
+      : `候选 ${candidates.length} 个 · Top score ${report.scoring_summary?.top_score ?? 0}`;
+
+  const bestHtml = best
+    ? `<div class="bilibili-best">
+        <div class="bilibili-score">${escapeHtml(best.score ?? 0)}</div>
+        <div>
+          <strong>${escapeHtml(best.title || "未命名候选")}</strong>
+          <div class="bilibili-meta">${escapeHtml(best.uploader || "未知 UP")} · ${escapeHtml(best.duration || seconds(best.duration_seconds || 0))} · ${escapeHtml(best.published_at || "未知发布时间")}</div>
+          <div class="bilibili-reasons">${(best.reason_codes || []).map((code) => `<span>${escapeHtml(code)}</span>`).join("")}</div>
+        </div>
+      </div>`
+    : "";
+
+  const rows = candidates
+    .map((candidate) => {
+      const url = candidate.url || "";
+      const searchUrl = candidate.source_search_url || query.search_url || "";
+      return `<div class="bilibili-candidate">
+        <div class="bilibili-candidate-main">
+          <strong>${escapeHtml(candidate.title || "未命名候选")}</strong>
+          <div class="bilibili-meta">${escapeHtml(candidate.uploader || "未知 UP")} · ${escapeHtml(candidate.duration || seconds(candidate.duration_seconds || 0))} · ${escapeHtml(candidate.published_at || "未知发布时间")}</div>
+          <div class="bilibili-reasons">${(candidate.reason_codes || []).slice(0, 5).map((code) => `<span>${escapeHtml(code)}</span>`).join("")}</div>
+        </div>
+        <div class="bilibili-candidate-actions">
+          <span class="bilibili-score-small">${escapeHtml(candidate.score ?? 0)}</span>
+          ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">打开视频</a>` : ""}
+          ${searchUrl ? `<a href="${escapeHtml(searchUrl)}" target="_blank" rel="noreferrer">打开搜索</a>` : ""}
+        </div>
+      </div>`;
+    })
+    .join("");
+
+  const fallbackLinks = (report.queries || report.query_plan || [])
+    .slice(0, 5)
+    .map((item) => item.search_url)
+    .filter(Boolean);
+  const fallbackHtml =
+    !candidates.length && fallbackLinks.length
+      ? `<div class="bilibili-fallback">${fallbackLinks.map((url, index) => `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">手动搜索 ${index + 1}</a>`).join("")}</div>`
+      : "";
+
+  card.innerHTML = `
+    <div class="proxy-status-head">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(report.created_at || "")}</span>
+    </div>
+    <div class="proxy-status-meta">${meta}</div>
+    ${bestHtml}
+    ${rows ? `<div class="bilibili-candidates">${rows}</div>` : fallbackHtml}
+    ${stateValue.report_path ? `<div class="path-note">${escapeHtml(stateValue.report_path)}</div>` : ""}
+  `;
+  card.classList.remove("hidden");
+  revealNewNode("statusCards", `bilibili:${status}:${decision}:${report.created_at || stateValue.error || ""}`, card);
+}
+
+function runBilibiliDuplicateSearch() {
+  const url = el("downloadUrlInput").value.trim();
+  if (!url) return;
+  const button = el("bilibiliDuplicateSearchBtn");
+  if (button) button.disabled = true;
+  state.bilibiliDuplicate = { status: "running" };
+  renderBilibiliDuplicate();
+  fetch("/api/bilibili-duplicate-search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      url,
+      config: readFormConfig(),
+      youtube_meta: state.youtubeMeta && !state.youtubeMeta.error ? state.youtubeMeta : null,
+    }),
+  })
+    .then((res) => res.json())
+    .then((payload) => {
+      if (!payload.ok) {
+        state.bilibiliDuplicate = {
+          status: "error",
+          error: payload.error || "Bilibili 检测失败",
+          report: null,
+        };
+        renderBilibiliDuplicate();
+        showToast(payload.error || "Bilibili 检测失败");
+        return;
+      }
+      state.bilibiliDuplicate = {
+        status: "done",
+        report: payload.report || {},
+        report_path: payload.report_path || "",
+        candidates_tsv_path: payload.candidates_tsv_path || "",
+        output_dir: payload.output_dir || "",
+      };
+      renderBilibiliDuplicate();
+      showToast("Bilibili 检测完成");
+    })
+    .catch((error) => {
+      state.bilibiliDuplicate = {
+        status: "error",
+        error: error.message || String(error),
+        report: null,
+      };
+      renderBilibiliDuplicate();
+      showToast(`Bilibili 检测失败：${error.message || error}`);
+    })
+    .finally(() => {
+      if (button) button.disabled = false;
+    });
+}
+
+window.__autosubRunBilibiliDuplicateSearch = runBilibiliDuplicateSearch;
+
+const bilibiliDuplicateButton = el("bilibiliDuplicateSearchBtn");
+if (bilibiliDuplicateButton) {
+  bilibiliDuplicateButton.addEventListener("click", runBilibiliDuplicateSearch);
+}
+
 function renderRuntime(runtime, lastError) {
   const title = humanRunStateLabel(runtime?.stage_key, runtime?.title);
   const progress = Math.max(0, Math.min(100, Number(runtime?.overall_progress || 0)));
@@ -2420,6 +2582,7 @@ function renderState(payload) {
   renderProxyStatus();
   renderIdmStatus();
   renderYoutubeMeta();
+  renderBilibiliDuplicate();
   renderWorkflowSummary();
   renderOpenAiRuntimeStatus();
 }

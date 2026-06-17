@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import httpx
 
 from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, check_idm
+from .bilibili_search import build_bilibili_duplicate_report, write_bilibili_duplicate_artifacts
 from .job_store import JobStore, ACTIVE_STATUSES
 from .models import BilingualSubtitleStyle
 from .media import normalize_asr_audio_mode, normalize_asr_vad_mode, probe_media
@@ -2375,6 +2376,36 @@ def youtube_info_job(url: str, *, proxy_url: str | None = None) -> dict:
     return manifest
 
 
+def bilibili_duplicate_search_job(url: str, config: dict, youtube_meta: dict | None = None) -> dict:
+    normalized_config = normalize_config({**read_config(), **config})
+    configured_raw_proxy_url = normalize_proxy_url(normalized_config.get("proxy_url"))
+    proxy_validation_error = validate_proxy_url(configured_raw_proxy_url)
+    if proxy_validation_error:
+        raise ValueError(proxy_validation_error)
+    proxy_url = configured_proxy_url(normalized_config)
+
+    meta = youtube_meta if isinstance(youtube_meta, dict) else None
+    if not meta:
+        meta_result = youtube_info_job(url, proxy_url=proxy_url)
+        meta = meta_result.get("meta") if isinstance(meta_result.get("meta"), dict) else {}
+    if not isinstance(meta, dict):
+        raise RuntimeError("YouTube metadata is required to build Bilibili queries.")
+
+    output_dir = resolve_youtube_output_dir(str(meta.get("title") or "youtube-video"))
+    report = build_bilibili_duplicate_report(
+        url,
+        meta,
+        proxy_url=proxy_url,
+    )
+    artifacts = write_bilibili_duplicate_artifacts(output_dir, report)
+    return {
+        "input_youtube_url": url,
+        "output_dir": str(output_dir),
+        **artifacts,
+        "report": report,
+    }
+
+
 def rebuild_padded_cover_job(project_path: str) -> dict:
     output_dir = Path(project_path)
     padded_path = ensure_padded_cover(output_dir)
@@ -2937,6 +2968,49 @@ class UIServerHandler(SimpleHTTPRequestHandler):
                     append_error_log(traceback.format_exc())
                     self._json_response(
                         {"ok": False, **build_error_payload(exc, proxy_url=proxy_url, operation="youtube_cover")},
+                        status=502,
+                    )
+                    return
+                self._json_response({"ok": True, **manifest})
+                return
+
+            if parsed.path == "/api/bilibili-duplicate-search":
+                url = str(payload.get("url") or "").strip()
+                if not url:
+                    self._json_response({"ok": False, "error": "url required"}, status=400)
+                    return
+                config = normalize_config({**read_config(), **payload.get("config", {})})
+                configured_raw_proxy_url = normalize_proxy_url(config.get("proxy_url"))
+                proxy_validation_error = validate_proxy_url(configured_raw_proxy_url)
+                if proxy_validation_error:
+                    exc = ValueError(proxy_validation_error)
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                proxy_url=configured_raw_proxy_url,
+                                operation="bilibili_duplicate_search_proxy_validation",
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
+                proxy_url = configured_proxy_url(config)
+                youtube_meta = payload.get("youtube_meta")
+                try:
+                    manifest = bilibili_duplicate_search_job(url, config, youtube_meta if isinstance(youtube_meta, dict) else None)
+                except Exception as exc:
+                    append_error_log(traceback.format_exc())
+                    self._json_response(
+                        {
+                            "ok": False,
+                            **build_error_payload(
+                                exc,
+                                proxy_url=proxy_url,
+                                operation="bilibili_duplicate_search",
+                            ),
+                        },
                         status=502,
                     )
                     return

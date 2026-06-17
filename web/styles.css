@@ -1177,6 +1177,90 @@
     color: var(--muted);
   }
 
+  .bilibili-duplicate-card {
+    color: var(--text);
+  }
+
+  .bilibili-best,
+  .bilibili-candidate {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-3);
+    align-items: start;
+    padding: var(--space-3) 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .bilibili-score,
+  .bilibili-score-small {
+    min-width: 3.2rem;
+    border-radius: var(--radius-sm);
+    background: rgba(91, 216, 255, 0.12);
+    color: var(--accent);
+    font-weight: 780;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bilibili-score {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--font-lg);
+  }
+
+  .bilibili-score-small {
+    display: inline-flex;
+    min-height: 32px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 var(--space-2);
+    font-size: var(--font-sm);
+  }
+
+  .bilibili-candidates {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .bilibili-candidate {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .bilibili-candidate-main {
+    min-width: 0;
+  }
+
+  .bilibili-meta {
+    margin-top: var(--space-1);
+    color: var(--muted);
+    font-size: var(--font-xs);
+    overflow-wrap: anywhere;
+  }
+
+  .bilibili-reasons,
+  .bilibili-fallback,
+  .bilibili-candidate-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    font-size: var(--font-xs);
+  }
+
+  .bilibili-reasons span,
+  .bilibili-fallback a,
+  .bilibili-candidate-actions a {
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+
   .input-ass-tools {
     align-items: center;
     justify-content: space-between;
@@ -1558,6 +1642,13 @@
       grid-template-columns: 1fr;
     }
 
+    .topbar,
+    .command-bar {
+      position: static;
+      top: auto;
+      z-index: auto;
+    }
+
     .segmented-actions {
       justify-content: flex-start;
       max-width: none;
@@ -1591,7 +1682,9 @@
 
     .topbar,
     .command-bar {
-      top: var(--space-2);
+      position: static;
+      top: auto;
+      z-index: auto;
     }
 
     .status-rail,
@@ -1677,6 +1770,8 @@
 
     .openai-runtime-row,
     .proxy-status-row,
+    .bilibili-best,
+    .bilibili-candidate,
     .range-row,
     .color-control-head {
       grid-template-columns: 1fr;

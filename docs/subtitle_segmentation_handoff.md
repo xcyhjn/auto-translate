@@ -554,3 +554,59 @@ The web proxy test and YouTube info/cover fetch were failing without actionable 
 ### Known Remaining Issue
 
 - The frontend still needs the proxy input corrected in the saved config. The code now blocks bad proxy values and shows a concrete error, but it will not silently fix the stored config for the user.
+
+## Phase 3.3 Update - Bilibili Duplicate Search - 2026-06-17
+
+### New Module
+
+- `bilibili_search.py`
+  - `build_bilibili_query_plan()` creates rule-based English, Chinese, mixed, and semantic Bilibili search queries.
+  - `search_bilibili()` performs lightweight Bilibili search page requests with proxy support, timeout, User-Agent, and low request volume.
+  - `parse_bilibili_search_results()` extracts candidates from embedded JSON or HTML anchors.
+  - `score_bilibili_candidate()` emits `score`, `confidence`, `reason_codes`, `evidence`, and score parts.
+  - `build_bilibili_duplicate_report()` and `write_bilibili_duplicate_artifacts()` create stable `00b_*` outputs.
+
+### New API
+
+- `POST /api/bilibili-duplicate-search`
+  - Input: `url`, `config`, optional `youtube_meta`.
+  - Output: `ok`, `report`, `output_dir`, `report_path`, `candidates_tsv_path`, `queries_path`.
+  - Proxy validation errors reuse the YouTube diagnostics shape with `operation`, `proxy_url`, `mode`, `error_detail`, and `traceback`.
+
+### New Artifacts
+
+- `00b_bilibili_duplicate_search.json`
+- `00b_bilibili_duplicate_candidates.tsv`
+- `00b_bilibili_search_queries.json`
+
+### Frontend
+
+- Added `检测 B 站已有翻译` near the YouTube metadata controls.
+- Added a Bilibili status card showing best candidate, top 5 candidates, scores, reason codes, video links, and manual search links.
+- Detection is advisory only; it does not block download or translation.
+- Added a medium-width layout fix so the sticky command bar no longer covers the YouTube/Bilibili controls at 1280x720.
+
+### Validation Results
+
+- `pytest test_bilibili_query_plan.py test_bilibili_candidate_scoring.py test_bilibili_search_parsing.py test_ui_server_bilibili_api.py`
+  - `9 passed`
+  - final rerun: `9 passed in 1.29s`
+- `python -m py_compile bilibili_search.py ui_server.py`
+- `node --check web\app.js`
+- Live local API request:
+  - `POST /api/bilibili-duplicate-search`
+  - `ok = true`
+  - `decision = no_candidates_manual_review`
+  - artifact paths existed for JSON, TSV, and query-plan JSON.
+- Browser UI verification:
+  - button count was `1`.
+  - real click at 1280x720 rendered the Bilibili card.
+  - current saved proxy field is still invalid, so the UI correctly surfaced the structured proxy validation error.
+  - clickability checked at 375, 768, 1280, and 1920 px widths with no horizontal overflow.
+
+### Known Remaining Issues
+
+- Bilibili search HTML may change; fallback search URLs are therefore part of the normal contract.
+- Query generation is rule-based. It handles common local mappings and mixed terms but is not a full translation system.
+- Candidate scoring is conservative and should be treated as review guidance, not an automatic blocker.
+- The saved proxy field should be blank or a real endpoint such as `http://127.0.0.1:7890`; a YouTube URL in that field is rejected by design.
