@@ -24,7 +24,7 @@ output\example_video\
 - `05_translated_segments.json`
 - `06_translated_zh.srt`
 - `07_qa_report.json`
-- `08_bilingual_zh_en.ass`
+- `00_ASS_bilingual_zh_en.ass`
 - `09_burned_bilingual_video.mp4`
 - `10_manifest_bilingual.json`
 

@@ -1173,3 +1173,31 @@ Verification:
 
 - `node --check web\app.js`
 - `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`
+
+## 2026-06-17 23:15 +08:00 - Top-Pinned ASS Artifact Naming
+
+User direction:
+
+- Make ASS artifacts appear at the top in Windows Explorer and in the website project artifact list.
+- Update all filename dependencies.
+
+What:
+
+- Changed new generated final ASS names from `08_*` to `00_ASS_*`:
+  - `00_ASS_bilingual_<dst>_<src>.ass`
+  - `00_ASS_subtitle_<dst>.ass`
+  - `00_ASS_source_<src>.ass`
+- Kept legacy `08_*` ASS copies for compatibility when the pipeline writes new outputs.
+- Added shared ASS filename helpers in `workflow_profiles.py`:
+  - `is_final_ass_filename`
+  - `ass_candidate_paths`
+  - `find_existing_ass_path`
+- Updated UI server project scanning, reburn, style learning, feedback learning, CLI defaults, and frontend badges/artifact links to prefer `00_ASS_*` while still accepting existing `08_*` projects.
+- Excluded safe/segmentation-preview ASS files from "final ASS" detection.
+- Updated docs and tests for the new naming.
+
+Verification:
+
+- `python -m py_compile workflow_profiles.py pipeline_core.py ui_server.py feedback_dataset.py cli.py style_learning_cli.py fix_ru_xiu_xiu_title.py`
+- `node --check web\app.js`
+- `pytest test_subtitle_output_modes.py test_feedback_dataset.py test_ui_server_bilibili_api.py test_span_translation_flow.py`

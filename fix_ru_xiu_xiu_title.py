@@ -36,7 +36,7 @@ def main() -> None:
     write_srt(segments, BASE / "06_translated_zh.srt")
 
     style = BilingualSubtitleStyle(en_font_name="Huiwen-HKHei", en_max_single_line_chars=58, reference_mode="compact")
-    write_bilingual_ass(segments, BASE / "08_bilingual_zh_ru_huiwenhkhei.ass", style=style)
+    write_bilingual_ass(segments, BASE / "00_ASS_bilingual_zh_ru_huiwenhkhei.ass", style=style)
 
 
 if __name__ == "__main__":

@@ -1769,10 +1769,22 @@ function findProjectFile(project, predicate) {
   return (project?.files || []).find((file) => predicate(file.name || "", file)) || null;
 }
 
+function isFinalAssFileName(name) {
+  const normalized = String(name || "").toLowerCase();
+  if (!normalized.endsWith(".ass")) return false;
+  if (normalized.includes("safe") || normalized.includes("segmentation_preview")) return false;
+  return (
+    normalized.startsWith("00_ass_") ||
+    normalized.startsWith("08_bilingual_") ||
+    normalized.startsWith("08_subtitle_") ||
+    normalized.startsWith("08_source_")
+  );
+}
+
 function renderProjectHealthBadges(project) {
   const badges = [
     ["05 translated", Boolean(getProjectFile(project, "05_translated_segments.json"))],
-    ["08 ASS", Boolean(findProjectFile(project, (name) => /^08_.*\.ass$/i.test(name)))],
+    ["ASS", Boolean(findProjectFile(project, isFinalAssFileName))],
     ["09 video", Boolean(findProjectFile(project, (name) => /^09_.*\.mp4$/i.test(name)))],
     ["QA", Boolean(getProjectFile(project, "07g_final_ass_qa.json") || getProjectFile(project, "07_qa_report.json") || getProjectFile(project, "07j_segmentation_qa_metrics.json"))],
     ["feedback", Boolean(getProjectFile(project, "00_style_examples.jsonl"))],
@@ -2294,14 +2306,15 @@ function renderSegmentationReviewPanel() {
             SEGMENTATION_ARTIFACT_FILES.residueTsv,
             SEGMENTATION_ARTIFACT_FILES.allocation,
             SEGMENTATION_ARTIFACT_FILES.repair,
-            "08_bilingual_zh_en.ass",
+            "00_ASS_bilingual_zh_en.ass",
             "08_bilingual_zh_en.segmentation_preview.ass",
             "segmentation_preview_metrics.json",
           ]
             .map((name) => {
-              const file = getProjectFile(project, name);
+              const file = name === "00_ASS_bilingual_zh_en.ass" ? findProjectFile(project, isFinalAssFileName) : getProjectFile(project, name);
               if (!file) return `<span class="entity-chip muted">${escapeHtml(name)}</span>`;
-              return `<button class="entity-chip qa-link" data-file-path="${escapeHtml(file.path)}" data-file-name="${escapeHtml(file.name)}" type="button">${escapeHtml(name)}</button>`;
+              const label = name === "00_ASS_bilingual_zh_en.ass" ? file.name : name;
+              return `<button class="entity-chip qa-link" data-file-path="${escapeHtml(file.path)}" data-file-name="${escapeHtml(file.name)}" type="button">${escapeHtml(label)}</button>`;
             })
             .join("")}
         </div>

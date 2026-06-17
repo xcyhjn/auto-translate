@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,10 @@ VALID_SUBTITLE_MODES = {
     "source_review",
     "target_only",
 }
+
+TOP_ASS_PREFIX = "00_ASS"
+TOP_ASS_GLOB = f"{TOP_ASS_PREFIX}_*.ass"
+LEGACY_ASS_GLOBS = ("08_bilingual_*.ass", "08_subtitle_*.ass", "08_source_*.ass")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,13 +90,16 @@ def build_subtitle_output_plan(
     target_label = "zh" if normalized_target.startswith("zh") else normalized_target
     mode = normalize_subtitle_mode(subtitle_mode)
     if mode == "target_only":
-        ass_name = f"08_subtitle_{target_label}.ass"
+        ass_name = f"{TOP_ASS_PREFIX}_subtitle_{target_label}.ass"
+        legacy_ass_name = f"08_subtitle_{target_label}.ass"
         video_kind = f"{target_label}_only"
     elif mode == "source_review":
-        ass_name = f"08_source_{source_label}.ass"
+        ass_name = f"{TOP_ASS_PREFIX}_source_{source_label}.ass"
+        legacy_ass_name = f"08_source_{source_label}.ass"
         video_kind = f"source_{source_label}"
     else:
-        ass_name = f"08_bilingual_{target_label}_{source_label}.ass"
+        ass_name = f"{TOP_ASS_PREFIX}_bilingual_{target_label}_{source_label}.ass"
+        legacy_ass_name = f"08_bilingual_{target_label}_{source_label}.ass"
         video_kind = f"bilingual_{target_label}_{source_label}"
     output_video_name = (
         f"09_burned_{video_kind}_preview_{preview_seconds}s.mp4"
@@ -105,11 +113,86 @@ def build_subtitle_output_plan(
         source_srt_name=f"04_source_{source_label}.srt",
         translated_srt_name=f"06_translated_{target_label}.srt",
         ass_name=ass_name,
-        legacy_ass_name="08_bilingual_zh_en.ass",
+        legacy_ass_name=legacy_ass_name,
         alignment_debug_name=f"08a_{mode}_alignment_debug.json",
         manifest_name=f"10_manifest_{mode}.json",
         output_video_name=output_video_name,
     )
+
+
+def is_final_ass_filename(name: str) -> bool:
+    lowered = str(name or "").lower()
+    if not lowered.endswith(".ass"):
+        return False
+    if "safe" in lowered or "segmentation_preview" in lowered:
+        return False
+    return lowered.startswith("00_ass_") or lowered.startswith("08_bilingual_") or lowered.startswith("08_subtitle_") or lowered.startswith("08_source_")
+
+
+def top_ass_name_for_final(name: str) -> str | None:
+    original = str(name or "")
+    lowered = original.lower()
+    if not is_final_ass_filename(original):
+        return None
+    if lowered.startswith("00_ass_"):
+        return original
+    prefix_map = {
+        "08_bilingual_": f"{TOP_ASS_PREFIX}_bilingual_",
+        "08_subtitle_": f"{TOP_ASS_PREFIX}_subtitle_",
+        "08_source_": f"{TOP_ASS_PREFIX}_source_",
+    }
+    for old_prefix, new_prefix in prefix_map.items():
+        if lowered.startswith(old_prefix):
+            return f"{new_prefix}{original[len(old_prefix):]}"
+    return None
+
+
+def ass_candidate_paths(project: Path, manifest_ass_name: str | None = None) -> list[Path]:
+    seen: set[str] = set()
+    candidates: list[Path] = []
+
+    def add(path: Path) -> None:
+        key = path.name.lower()
+        if key in seen or not is_final_ass_filename(path.name):
+            return
+        seen.add(key)
+        candidates.append(path)
+
+    for match in sorted(project.glob(TOP_ASS_GLOB)):
+        add(match)
+    manifest_name = str(manifest_ass_name or "").strip()
+    if manifest_name:
+        add(project / manifest_name)
+    for pattern in LEGACY_ASS_GLOBS:
+        for match in sorted(project.glob(pattern)):
+            add(match)
+    return candidates
+
+
+def find_existing_ass_path(project: Path, manifest_ass_name: str | None = None) -> Path | None:
+    for candidate in ass_candidate_paths(project, manifest_ass_name):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def ensure_top_ass_alias(project: Path, manifest_ass_name: str | None = None) -> Path | None:
+    for candidate in ass_candidate_paths(project, manifest_ass_name):
+        if candidate.exists() and candidate.name.lower().startswith("00_ass_"):
+            return candidate
+    for candidate in ass_candidate_paths(project, manifest_ass_name):
+        if not candidate.exists():
+            continue
+        top_name = top_ass_name_for_final(candidate.name)
+        if not top_name:
+            continue
+        top_path = project / top_name
+        if top_path == candidate:
+            return candidate
+        if not top_path.exists() or candidate.stat().st_mtime > top_path.stat().st_mtime + 0.001:
+            shutil.copy2(candidate, top_path)
+        return top_path
+    return None
 
 
 def profile_path(profile_id: str) -> Path:

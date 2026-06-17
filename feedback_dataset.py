@@ -21,6 +21,7 @@ from .style_learning import (
     build_style_features,
     detect_edit_tags,
 )
+from .workflow_profiles import ass_candidate_paths
 
 
 SCHEMA_VERSION = 1
@@ -433,14 +434,9 @@ def find_manual_ass_path(project: Path) -> Path:
         text = path.read_text(encoding="utf-8-sig", errors="replace")
         return "[Events]" in text and "Dialogue:" in text
 
-    preferred = project / "08_bilingual_zh_en.ass"
-    if usable_ass(preferred):
-        return preferred
-    for pattern in ("08_bilingual_*.ass", "08_subtitle_*.ass"):
-        matches = sorted(project.glob(pattern))
-        for match in matches:
-            if usable_ass(match):
-                return match
+    for match in ass_candidate_paths(project):
+        if usable_ass(match):
+            return match
     raise FileNotFoundError(f"Manual ASS file not found in {project}")
 
 

@@ -213,6 +213,45 @@ def test_collect_span_feedback_api_returns_summary(monkeypatch) -> None:
     assert "baseline" in payload["baseline_role"]
 
 
+def test_read_output_tree_prefers_top_ass_artifact(monkeypatch, tmp_path: Path) -> None:
+    output_root = tmp_path / "output"
+    project = output_root / "sample"
+    project.mkdir(parents=True)
+    legacy = project / "08_bilingual_zh_en.ass"
+    top = project / "00_ASS_bilingual_zh_en.ass"
+    legacy.write_text("legacy", encoding="utf-8")
+    top.write_text("top", encoding="utf-8")
+    (project / "10_manifest_bilingual.json").write_text(
+        json.dumps({"subtitle_output": {"ass_name": legacy.name}, "input_video": "D:/videos/sample.mp4"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "OUTPUT_DIR", output_root)
+
+    projects = ui_server.read_output_tree()
+
+    assert projects[0]["ass_path"].endswith("00_ASS_bilingual_zh_en.ass")
+
+
+def test_read_output_tree_creates_top_ass_alias_for_legacy_project(monkeypatch, tmp_path: Path) -> None:
+    output_root = tmp_path / "output"
+    project = output_root / "sample"
+    project.mkdir(parents=True)
+    legacy = project / "08_bilingual_zh_en.ass"
+    legacy.write_text("legacy", encoding="utf-8")
+    (project / "10_manifest_bilingual.json").write_text(
+        json.dumps({"subtitle_output": {"ass_name": legacy.name}, "input_video": "D:/videos/sample.mp4"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ui_server, "OUTPUT_DIR", output_root)
+
+    projects = ui_server.read_output_tree()
+
+    top = project / "00_ASS_bilingual_zh_en.ass"
+    assert top.exists()
+    assert top.read_text(encoding="utf-8") == "legacy"
+    assert projects[0]["ass_path"].endswith(top.name)
+
+
 def test_local_feedback_summary_api_reads_counts_and_eval(monkeypatch, tmp_path: Path) -> None:
     dataset = tmp_path / "local_feedback"
     (dataset / "eval_sets").mkdir(parents=True)

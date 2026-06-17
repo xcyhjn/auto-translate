@@ -10,6 +10,7 @@ from .media import enhance_audio_for_asr, extract_audio, probe_media
 from .qa import qa_check
 from .segment_io import load_segments, save_segments
 from .style_learning import write_style_learning_artifacts
+from .workflow_profiles import find_existing_ass_path
 from .subtitle_io import write_srt
 from .timing import refine_timing
 from .translate import dry_run_openai_translation, translate_segments
@@ -140,7 +141,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--learn-style-project",
         default=None,
-        help="从指定项目目录里的 05_translated_segments.json 和 08_bilingual_zh_en.ass 抽取风格样例。",
+        help="从指定项目目录里的 05_translated_segments.json 和置顶 ASS 产物抽取风格样例。",
     )
     parser.add_argument(
         "--enable-ai-display-rewrite",
@@ -183,9 +184,12 @@ def main() -> None:
 
     if args.learn_style_project:
         project_dir = Path(args.learn_style_project)
+        ass_path = find_existing_ass_path(project_dir)
+        if not ass_path:
+            raise SystemExit(f"未找到 ASS 产物：{project_dir}")
         manifest = write_style_learning_artifacts(
             segments_path=project_dir / "05_translated_segments.json",
-            manual_ass_path=project_dir / "08_bilingual_zh_en.ass",
+            manual_ass_path=ass_path,
             output_dir=project_dir,
         )
         print(json.dumps(manifest, ensure_ascii=False, indent=2))

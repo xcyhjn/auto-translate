@@ -141,6 +141,55 @@ def test_collect_style_defaults_to_review_only_samples(tmp_path: Path) -> None:
     assert summary["style_learning_count"] == 0
 
 
+def test_collect_style_prefers_top_ass_artifact_name(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "dataset"
+    project = tmp_path / "style_project"
+    project.mkdir()
+    segments = {
+        "segments": [
+            {
+                "id": 1,
+                "start": 1.0,
+                "end": 3.0,
+                "source_text": "This line should learn from the top artifact.",
+                "target_text": "旧译文",
+                "reference_text": "",
+                "confidence": None,
+                "source": "asr",
+                "words": [],
+            }
+        ]
+    }
+    (project / "05_translated_segments.json").write_text(json.dumps(segments, ensure_ascii=False), encoding="utf-8")
+    (project / "08_bilingual_zh_en.ass").write_text(
+        "\n".join(
+            [
+                "[Events]",
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+                "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,旧 ASS",
+            ]
+        ),
+        encoding="utf-8-sig",
+    )
+    (project / "00_ASS_bilingual_zh_en.ass").write_text(
+        "\n".join(
+            [
+                "[Events]",
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+                "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,置顶 ASS",
+            ]
+        ),
+        encoding="utf-8-sig",
+    )
+
+    result = collect_style_project(project, dataset_dir)
+
+    assert result["added"] == 1
+    assert Path(result["ass_path"]).name == "00_ASS_bilingual_zh_en.ass"
+    record = read_jsonl(dataset_paths(dataset_dir)["translation_edits"])[0]
+    assert record["manual_target_text"] == "置顶 ASS"
+
+
 def test_collect_style_skips_empty_preferred_ass_and_uses_recovered_file(tmp_path: Path) -> None:
     dataset_dir = tmp_path / "dataset"
     project = tmp_path / "style_project"

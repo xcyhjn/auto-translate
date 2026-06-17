@@ -46,6 +46,8 @@ from .subtitle_io import write_bilingual_ass
 from .workflow_profiles import (
     DEFAULT_WORKFLOW_PROFILE,
     apply_workflow_profile,
+    ensure_top_ass_alias,
+    find_existing_ass_path,
     list_workflow_profiles,
     load_dataset_profile,
     load_prompt_profile,
@@ -1264,9 +1266,18 @@ def read_output_tree() -> list[dict]:
     for folder in sorted(OUTPUT_DIR.iterdir()):
         if not folder.is_dir():
             continue
+        manifest_payload: dict = {}
+        manifest_path = folder / "10_manifest_bilingual.json"
+        if manifest_path.exists():
+            try:
+                manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                manifest_payload = {}
+        subtitle_output = manifest_payload.get("subtitle_output") if isinstance(manifest_payload.get("subtitle_output"), dict) else {}
+        manifest_ass_name = str(subtitle_output.get("ass_name") or "").strip()
+        ensure_top_ass_alias(folder, manifest_ass_name)
         files = []
         file_index: dict[str, dict] = {}
-        manifest_payload: dict = {}
         for item in sorted(folder.iterdir()):
             if item.is_file():
                 stat = item.stat()
@@ -1279,15 +1290,9 @@ def read_output_tree() -> list[dict]:
                 files.append(entry)
                 file_index[item.name] = entry
         manifest_file = file_index.get("10_manifest_bilingual.json")
-        if manifest_file:
-            try:
-                manifest_payload = json.loads(Path(manifest_file["path"]).read_text(encoding="utf-8"))
-            except Exception:
-                manifest_payload = {}
-        subtitle_output = manifest_payload.get("subtitle_output") if isinstance(manifest_payload.get("subtitle_output"), dict) else {}
         manifest_ass_name = str(subtitle_output.get("ass_name") or "").strip()
-        ass_file = file_index.get(manifest_ass_name) if manifest_ass_name else None
-        ass_file = ass_file or file_index.get("08_bilingual_zh_en.ass")
+        ass_path = find_existing_ass_path(folder, manifest_ass_name)
+        ass_file = file_index.get(ass_path.name) if ass_path else None
         burn_plan = manifest_payload.get("burn_plan") if isinstance(manifest_payload.get("burn_plan"), dict) else {}
         burned_path = str(burn_plan.get("output_path") or "").strip()
         burned_file = file_index.get(Path(burned_path).name) if burned_path else None
@@ -2463,12 +2468,12 @@ def rebuild_padded_cover_job(project_path: str) -> dict:
 def learn_style_job(project_path: str) -> dict:
     project_dir = Path(project_path)
     segments_path = project_dir / "05_translated_segments.json"
-    ass_path = project_dir / "08_bilingual_zh_en.ass"
+    ass_path = find_existing_ass_path(project_dir)
     if not project_dir.exists():
         raise FileNotFoundError(f"Project folder not found: {project_dir}")
     if not segments_path.exists():
         raise FileNotFoundError(f"Segments file not found: {segments_path}")
-    if not ass_path.exists():
+    if not ass_path or not ass_path.exists():
         raise FileNotFoundError(f"ASS file not found: {ass_path}")
     result = write_style_learning_artifacts(
         segments_path=segments_path,
@@ -2721,13 +2726,13 @@ def reburn_from_ass_job(project_path: str, task_id: str | None = None) -> dict:
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     subtitle_output = manifest.get("subtitle_output") if isinstance(manifest.get("subtitle_output"), dict) else {}
-    ass_name = str(subtitle_output.get("ass_name") or "08_bilingual_zh_en.ass").strip()
-    ass_path = project_dir / ass_name
+    ass_name = str(subtitle_output.get("ass_name") or "").strip()
+    ass_path = find_existing_ass_path(project_dir, ass_name)
     burn_plan = manifest.get("burn_plan") if isinstance(manifest.get("burn_plan"), dict) else {}
     output_name = Path(str(burn_plan.get("output_path") or "09_burned_bilingual_video.mp4")).name
     output_path = project_dir / output_name
 
-    if not ass_path.exists():
+    if not ass_path or not ass_path.exists():
         raise FileNotFoundError(f"ASS file not found: {ass_path}")
     if not translated_segments_path.exists():
         raise FileNotFoundError(f"Translated segments not found: {translated_segments_path}")

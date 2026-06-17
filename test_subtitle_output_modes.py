@@ -17,7 +17,8 @@ def test_subtitle_output_plan_names_russian_target_only() -> None:
 
     assert plan.source_srt_name == "04_source_ru.srt"
     assert plan.translated_srt_name == "06_translated_zh.srt"
-    assert plan.ass_name == "08_subtitle_zh.ass"
+    assert plan.ass_name == "00_ASS_subtitle_zh.ass"
+    assert plan.legacy_ass_name == "08_subtitle_zh.ass"
     assert plan.output_video_name == "09_burned_zh_only_preview_60s.mp4"
 
 
@@ -29,7 +30,8 @@ def test_subtitle_output_plan_names_bilingual_with_language_labels() -> None:
         preview_seconds=None,
     )
 
-    assert plan.ass_name == "08_bilingual_zh_ru.ass"
+    assert plan.ass_name == "00_ASS_bilingual_zh_ru.ass"
+    assert plan.legacy_ass_name == "08_bilingual_zh_ru.ass"
     assert plan.output_video_name == "09_burned_bilingual_zh_ru_video.mp4"
 
 
