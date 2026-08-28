@@ -8,12 +8,12 @@ Only the Python standard library is used so the artifact remains portable.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlparse
+
+from .artifact_manifest import atomic_write_json
 
 
 EVIDENCE_SIDECAR_SCHEMA_VERSION = 1
@@ -143,32 +143,6 @@ def build_evidence_sidecar(
         "input_fingerprint": fingerprint,
         "records": clean_records,
     }
-
-
-def atomic_write_json(path: str | Path, payload: Any) -> Path:
-    """Publish JSON atomically in the destination directory."""
-
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=target.parent,
-            prefix=f".{target.name}.", suffix=".tmp", delete=False,
-        ) as handle:
-            temp_path = Path(handle.name)
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_path, target)
-    except Exception:
-        if temp_path is not None:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise
-    return target
 
 
 def write_evidence_sidecar(

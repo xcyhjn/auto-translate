@@ -47,14 +47,15 @@ class SubtitleRules:
 class BilingualSubtitleStyle:
     zh_font_name: str = "Maple Mono NF CN"
     zh_font_size: int = 64
-    zh_primary_color: str = "#FFF2A6"
+    zh_primary_color: str = "#FED906"
     zh_primary_opacity: int = 100
     zh_outline_color: str = "#202020"
-    zh_outline_opacity: int = 45
+    zh_outline_opacity: int = 76
     zh_shadow_color: str = "#000000"
-    zh_shadow_opacity: int = 35
+    zh_shadow_opacity: int = 57
     zh_outline_width: float = 1.8
     zh_shadow_depth: float = 0.4
+    zh_spacing: float = -2.0
     zh_margin_l: int = 90
     zh_margin_r: int = 90
     zh_margin_v: int = 94
@@ -66,10 +67,11 @@ class BilingualSubtitleStyle:
     en_margin_l: int = 80
     en_margin_r: int = 100
     en_margin_v: int = 44
+    zh_uplift_when_en_multiline: int = 50
     en_max_single_line_chars: int = 78
     en_max_split_parts: int = 3
     min_split_duration: float = 2.0
-    reference_mode: str = "compact"
+    reference_mode: str = "full_split"
 
 
 @dataclass(slots=True)

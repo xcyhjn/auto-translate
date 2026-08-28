@@ -687,7 +687,7 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,0,0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
+Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,{clamp_float(style.zh_spacing, -20.0, 20.0, 0.0):.1f},0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -738,7 +738,7 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,0,0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
+Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,{clamp_float(style.zh_spacing, -20.0, 20.0, 0.0):.1f},0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
 Style: EnglishSmall,{style.en_font_name},{style.en_font_size},&H00E8E8E8,&H000000FF,&H5A202020,&HA6000000,0,0,0,0,100,100,0,0,1,1.2,0.3,2,{style.en_margin_l},{style.en_margin_r},{style.en_margin_v},1
 
 [Events]

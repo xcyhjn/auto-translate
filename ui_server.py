@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
+from .artifact_manifest import atomic_write_json
 from .downloaders import DownloadConfig, DownloadManager, ManualImportRequired, check_idm
 from .bilibili_search import build_bilibili_duplicate_report, write_bilibili_duplicate_artifacts
 from .feedback_dataset import (
@@ -57,12 +58,9 @@ from .models import BilingualSubtitleStyle
 from .media import normalize_asr_audio_mode, normalize_asr_vad_mode, probe_media
 from .pipeline_core import build_output_slug, build_translation_style_prompt, burn_subtitle, create_safe_ass_copy, run_pipeline, write_json
 from .pipeline_runner import compute_output_dir
-from .qa import qa_final_ass_file
-from .qa_outputs import build_blocker_report
 from .glossary import write_youtube_glossary
 from .segment_io import load_segments
 from .style_learning import write_style_learning_artifacts
-from .subtitle_io import write_bilingual_ass
 from .workflow_profiles import (
     DEFAULT_WORKFLOW_PROFILE,
     INTERNAL_ARTIFACTS_DIR_NAME,
@@ -70,7 +68,6 @@ from .workflow_profiles import (
     ensure_top_ass_alias,
     find_existing_ass_path,
     list_workflow_profiles,
-    load_dataset_profile,
     load_prompt_profile,
     normalize_subtitle_mode,
     project_artifact_path,
@@ -83,11 +80,12 @@ from .span_translate import compact_span_prompt_example, read_span_examples, sum
 BASE_DIR = Path(__file__).resolve().parent
 INPUT_DIR = BASE_DIR / "input"
 OUTPUT_DIR = BASE_DIR / "output"
+RUNTIME_DIR = BASE_DIR / "runtime"
 ATTACHMENTS_DIR = BASE_DIR / "attachments"
 WEB_DIR = BASE_DIR / "web"
 CONFIG_PATH = BASE_DIR / "ui_config.json"
-ERROR_LOG_PATH = BASE_DIR / "ui_server_error_trace.log"
-STATE_SNAPSHOT_PATH = BASE_DIR / "ui_server_state.json"
+ERROR_LOG_PATH = RUNTIME_DIR / "logs" / "ui_server_error_trace.log"
+STATE_SNAPSHOT_PATH = RUNTIME_DIR / "ui_server_state.json"
 LOCAL_FEEDBACK_DATASET_DIR = DEFAULT_DATASET_DIR
 SERVER_VERSION = "20260519-stability1"
 SERVER_PORT = int(os.environ.get("AUTOSUB_UI_PORT", "8777"))
@@ -449,11 +447,7 @@ def persist_state_snapshot(*, force: bool = False) -> None:
         if not force and now_ts - LAST_STATE_SNAPSHOT_AT < 1.0:
             return
         payload = build_state_snapshot_payload()
-        temp_path = STATE_SNAPSHOT_PATH.with_name(
-            f".{STATE_SNAPSHOT_PATH.name}.{uuid.uuid4().hex}.tmp"
-        )
-        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        temp_path.replace(STATE_SNAPSHOT_PATH)
+        atomic_write_json(STATE_SNAPSHOT_PATH, payload)
         LAST_STATE_SNAPSHOT_AT = now_ts
 
 
@@ -871,6 +865,7 @@ def resolve_manifest_input_video(manifest: dict) -> Path:
 
 
 def append_error_log(message: str) -> None:
+    ERROR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with ERROR_LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(message)
         handle.write("\n\n")
@@ -4038,7 +4033,7 @@ def reburn_from_ass_job(project_path: str, task_id: str | None = None) -> dict:
     manifest["input_video"] = str(input_video)
     manifest["output_dir"] = str(project_dir)
     manifest["output_root"] = str(OUTPUT_DIR)
-    translated_segments = load_segments(translated_segments_path)
+    load_segments(translated_segments_path)
 
     write_json(
         project_dir / "07g_final_ass_qa.json",
@@ -4071,7 +4066,11 @@ def reburn_from_ass_job(project_path: str, task_id: str | None = None) -> dict:
         },
     )
     wait_if_paused("burn_start", {"project_path": str(project_dir), "task_id": task_id})
-    safe_ass_path = create_safe_ass_copy(ass_path)
+    current_config = read_config()
+    safe_ass_path = create_safe_ass_copy(
+        ass_path,
+        BilingualSubtitleStyle(**dict(current_config.get("style") or {})),
+    )
     burn_subtitle(
         input_video,
         safe_ass_path,

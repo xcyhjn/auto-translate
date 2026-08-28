@@ -53,6 +53,7 @@ from .source_spans import SOURCE_SPAN_POLICY_VERSION, detect_source_spans
 from .span_repair import repair_difficult_spans
 from .span_translate import read_span_examples, build_span_translation_fingerprint, translate_source_spans
 from .subtitle_io import (
+    apply_multiline_reference_uplift_to_ass_text,
     prepare_bilingual_ass_segments,
     write_bilingual_ass_from_display_cues,
     write_srt,
@@ -392,11 +393,15 @@ def burn_subtitle(
     }
 
 
-def create_safe_ass_copy(subtitle_path: Path) -> Path:
+def create_safe_ass_copy(subtitle_path: Path, style: BilingualSubtitleStyle | None = None) -> Path:
     temp_dir = Path(tempfile.gettempdir()) / "autosub_zh_burn"
     temp_dir.mkdir(parents=True, exist_ok=True)
     safe_path = temp_dir / "00_ASS_safe_for_burn.ass"
-    safe_path.write_text(subtitle_path.read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
+    ass_text = subtitle_path.read_text(encoding="utf-8-sig")
+    safe_path.write_text(
+        apply_multiline_reference_uplift_to_ass_text(ass_text, style),
+        encoding="utf-8-sig",
+    )
     return safe_path
 
 
@@ -413,6 +418,15 @@ def resolve_output_dir(input_path: Path, output_root: Path) -> Path:
     output_dir = output_root / slug
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
+
+
+def promote_audio_artifact(source_path: Path, canonical_path: Path) -> Path:
+    """Move an extracted WAV to its canonical project artifact path."""
+    if source_path == canonical_path:
+        return source_path
+    canonical_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.replace(canonical_path)
+    return canonical_path
 
 
 def build_manifest_file_list(output_dir: Path, plan, *, audio_override_path: Path | None, output_video_name: str | None = None) -> list[str]:
@@ -962,9 +976,7 @@ def run_pipeline(
                 progress_callback=on_extract_progress,
             )
             renamed_audio_path = output_dir / "01_audio_16k.wav"
-            if audio_path != renamed_audio_path:
-                renamed_audio_path.write_bytes(audio_path.read_bytes())
-                audio_path = renamed_audio_path
+            audio_path = promote_audio_artifact(audio_path, renamed_audio_path)
             emit(
                 callback,
                 "extract_audio_complete",
@@ -1725,6 +1737,13 @@ def run_pipeline(
             style=effective_style,
             reference_lang=src_lang,
         )
+    ass_path.write_text(
+        apply_multiline_reference_uplift_to_ass_text(
+            ass_path.read_text(encoding="utf-8-sig"),
+            effective_style,
+        ),
+        encoding="utf-8-sig",
+    )
     if plan.ass_name != plan.legacy_ass_name:
         legacy_ass_path = output_dir / plan.legacy_ass_name
         legacy_ass_path.write_text(ass_path.read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
@@ -1956,7 +1975,7 @@ def run_pipeline(
         emit(callback, "complete", manifest)
         return manifest
 
-    safe_ass_path = create_safe_ass_copy(ass_path)
+    safe_ass_path = create_safe_ass_copy(ass_path, effective_style)
     output_video_name = plan.output_video_name
     output_video_path = output_dir / output_video_name
     burn_duration = (

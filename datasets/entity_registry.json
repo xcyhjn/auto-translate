@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "entities": [
+    {
+      "key": "carlo_zinelli",
+      "entity_type": "person",
+      "canonical_en": "Carlo Zinelli",
+      "canonical_zh": "卡洛·齐内利",
+      "surface_forms": ["Carlo Zinelli", "Carlo"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "齐内利",
+      "confidence": 0.99
+    },
+    {
+      "key": "johann_knopf",
+      "entity_type": "person",
+      "canonical_en": "Johann Knopf",
+      "canonical_zh": "约翰·克诺普夫",
+      "surface_forms": ["Johann Knopf", "Johann Knop", "Johann"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "克诺普夫",
+      "confidence": 0.99
+    },
+    {
+      "key": "henry_cockburn",
+      "entity_type": "person",
+      "canonical_en": "Henry Cockburn",
+      "canonical_zh": "亨利·科伯恩",
+      "surface_forms": ["Henry Cockburn", "Henry"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "科伯恩",
+      "confidence": 0.98
+    },
+    {
+      "key": "victor_tausk",
+      "entity_type": "person",
+      "canonical_en": "Victor Tausk",
+      "canonical_native": "Viktor Tausk",
+      "canonical_zh": "维克托·陶斯克",
+      "surface_forms": ["Victor Torsk", "Torsk", "Victor Tausk", "Viktor Tausk", "Tausk"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "陶斯克",
+      "confidence": 0.99
+    },
+    {
+      "key": "paul_goesch",
+      "entity_type": "person",
+      "canonical_en": "Paul Goesch",
+      "canonical_native": "Paul Gösch",
+      "canonical_zh": "保罗·戈施",
+      "surface_forms": ["Paul Gosh", "Paul Goesch", "Paul Gösch"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "戈施",
+      "confidence": 0.99
+    },
+    {
+      "key": "james_tilly_matthews",
+      "entity_type": "person",
+      "canonical_en": "James Tilly Matthews",
+      "canonical_zh": "詹姆斯·蒂利·马修斯",
+      "surface_forms": ["James Tilly Matthews", "Matthews"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "马修斯",
+      "confidence": 0.99
+    },
+    {
+      "key": "jacob_moore",
+      "entity_type": "person",
+      "canonical_en": "Jacob Moore",
+      "canonical_zh": "雅各布·穆尔",
+      "surface_forms": ["Jacob Moore", "Moore"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "穆尔",
+      "confidence": 0.96
+    },
+    {
+      "key": "bryan_charnley",
+      "entity_type": "person",
+      "canonical_en": "Bryan Charnley",
+      "canonical_zh": "布赖恩·查恩利",
+      "surface_forms": ["Brian Charnley", "Bryan Charnley", "Brian", "Bryan", "Charnley"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "查恩利",
+      "confidence": 0.98
+    },
+    {
+      "key": "august_natterer",
+      "entity_type": "person",
+      "canonical_en": "August Natterer",
+      "canonical_zh": "奥古斯特·纳特尔",
+      "surface_forms": ["August Nattera", "August Natterer"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "纳特尔",
+      "confidence": 0.98
+    },
+    {
+      "key": "unica_zurn",
+      "entity_type": "person",
+      "canonical_en": "Unica Zurn",
+      "canonical_native": "Unica Zürn",
+      "canonical_zh": "乌妮卡·齐恩",
+      "surface_forms": ["Unica Zern", "Unica Zurn", "Unica Zürn"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "齐恩",
+      "confidence": 0.97
+    },
+    {
+      "key": "adolf_wolfli",
+      "entity_type": "person",
+      "canonical_en": "Adolf Wolfli",
+      "canonical_native": "Adolf Wölfli",
+      "canonical_zh": "阿道夫·沃尔夫利",
+      "surface_forms": ["Adolf Wolfley", "Adolf Wolfli", "Adolf Wölfli"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "沃尔夫利",
+      "confidence": 0.99
+    },
+    {
+      "key": "heinrich_kluver",
+      "entity_type": "person",
+      "canonical_en": "Heinrich Kluver",
+      "canonical_native": "Heinrich Klüver",
+      "canonical_zh": "海因里希·克吕弗",
+      "surface_forms": ["Heinrich Kluver", "Heinrich Klüver"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "克吕弗",
+      "confidence": 0.98
+    },
+    {
+      "key": "richard_sharpe_shaver",
+      "entity_type": "person",
+      "canonical_en": "Richard Sharpe Shaver",
+      "canonical_zh": "理查德·夏普·谢弗",
+      "surface_forms": ["Richard Sharp Shaver", "Richard Sharpe Shaver", "Shaver"],
+      "policy": "translate_full_name",
+      "mention_strategy": "full_then_short",
+      "short_zh": "谢弗",
+      "confidence": 0.98
+    }
+  ]
+}

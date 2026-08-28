@@ -1163,7 +1163,7 @@ def translate_segments(
                     english_residue_review_threshold=english_residue_review_threshold,
                 )
                 translations.update(model_translations)
-            except Exception as exc:
+            except Exception:
                 if len(chunk_for_model) <= 1:
                     single_segment = chunk_for_model[0]
                     try:

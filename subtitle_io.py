@@ -26,6 +26,44 @@ EN_SOFT_SPLIT_WORDS = {
     "as",
     "if",
 }
+EN_BAD_SPLIT_EDGE_WORDS = {
+    "a",
+    "an",
+    "as",
+    "at",
+    "by",
+    "for",
+    "from",
+    "in",
+    "of",
+    "on",
+    "the",
+    "to",
+    "with",
+}
+EN_CONTINUATION_START_WORDS = {
+    "and",
+    "as",
+    "because",
+    "but",
+    "except",
+    "for",
+    "from",
+    "if",
+    "in",
+    "of",
+    "or",
+    "since",
+    "that",
+    "then",
+    "though",
+    "to",
+    "unless",
+    "when",
+    "while",
+    "which",
+    "with",
+}
 RU_SOFT_SPLIT_PHRASES = (
     "\u043f\u043e\u0442\u043e\u043c\u0443 \u0447\u0442\u043e",
     "\u0447\u0442\u043e\u0431\u044b",
@@ -113,6 +151,103 @@ def escape_ass_text(text: str) -> str:
     )
 
 
+def ass_text_line_count(text: str) -> int:
+    return max(1, len(str(text or "").split(r"\N")))
+
+
+def zh_event_margin_v_for_reference(text: str, style: BilingualSubtitleStyle) -> int:
+    if ass_text_line_count(text) <= 1:
+        return 0
+    uplift = clamp_int(getattr(style, "zh_uplift_when_en_multiline", 0), 0, 300, 0)
+    if uplift <= 0:
+        return 0
+    return clamp_int(style.zh_margin_v, 0, 1000, 94) + uplift
+
+
+def dialogue_key(parts: list[str]) -> tuple[str, str] | None:
+    if len(parts) != 10:
+        return None
+    return (parts[1], parts[2])
+
+
+def apply_multiline_reference_uplift_to_ass_text(
+    ass_text: str,
+    style: BilingualSubtitleStyle | None = None,
+) -> str:
+    if style is None:
+        style = BilingualSubtitleStyle()
+    uplift_margin_v = clamp_int(style.zh_margin_v, 0, 1000, 94) + clamp_int(
+        getattr(style, "zh_uplift_when_en_multiline", 0),
+        0,
+        300,
+        0,
+    )
+    if uplift_margin_v <= clamp_int(style.zh_margin_v, 0, 1000, 94):
+        return ass_text
+
+    lines = ass_text.splitlines()
+    multiline_reference_keys: set[tuple[str, str]] = set()
+    output_lines: list[str] = []
+    changed = False
+
+    for line in lines:
+        if line.startswith("Style: Default,"):
+            style_parts = line.removeprefix("Style: ").split(",")
+            if len(style_parts) >= 23:
+                zh_spacing = f"{clamp_float(getattr(style, 'zh_spacing', 0.0), -20.0, 20.0, 0.0):.1f}"
+                if style_parts[13] != zh_spacing:
+                    style_parts[13] = zh_spacing
+                    line = "Style: " + ",".join(style_parts)
+                    changed = True
+            output_lines.append(line)
+            continue
+        output_lines.append(line)
+
+        if not line.startswith("Dialogue:"):
+            continue
+        parts = line.split(",", 9)
+        key = dialogue_key(parts)
+        if key and parts[3] == "EnglishSmall" and ass_text_line_count(parts[9]) > 1:
+            multiline_reference_keys.add(key)
+
+    if not multiline_reference_keys:
+        if not changed:
+            return ass_text
+        trailing_newline = "\n" if ass_text.endswith(("\n", "\r\n")) else ""
+        return "\n".join(output_lines) + trailing_newline
+
+    adjusted_lines: list[str] = []
+    for line in output_lines:
+        if not line.startswith("Dialogue:"):
+            adjusted_lines.append(line)
+            continue
+        parts = line.split(",", 9)
+        key = dialogue_key(parts)
+        if key in multiline_reference_keys and len(parts) == 10 and parts[3] == "Default":
+            current_margin_v = clamp_int(parts[7], 0, 1000, 0)
+            if current_margin_v < uplift_margin_v:
+                parts[7] = str(uplift_margin_v)
+                changed = True
+            wrapped_text = escape_ass_text(
+                wrap_chinese_text(
+                    parts[9].replace(r"\N", "\n"),
+                    trigger_chars=style.zh_wrap_trigger_chars,
+                    max_chars=style.zh_max_chars_per_line,
+                    max_lines=style.zh_max_lines,
+                )
+            )
+            if wrapped_text != parts[9]:
+                parts[9] = wrapped_text
+                changed = True
+            line = ",".join(parts)
+        adjusted_lines.append(line)
+
+    if not changed:
+        return ass_text
+    trailing_newline = "\n" if ass_text.endswith(("\n", "\r\n")) else ""
+    return "\n".join(adjusted_lines) + trailing_newline
+
+
 def normalize_hex_color(value: object, fallback: str = "#FFFFFF") -> str:
     raw = str(value or "").strip()
     if raw.startswith("#"):
@@ -152,6 +287,11 @@ def ass_color(hex_color: object, opacity_percent: object = 100, fallback: str = 
 
 def normalize_inline_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def normalize_reference_line_text(text: str, *, lang: str | None = None) -> str:
+    lines = [normalize_reference_text(part, lang=lang) for part in re.split(r"(?:\\N|\n)+", text or "")]
+    return "\n".join(line for line in lines if line)
 
 
 def polish_target_only_text(text: str) -> str:
@@ -204,6 +344,23 @@ def visible_text_cps(text: str, duration: float) -> float:
     return visible_text_length(text) / max(0.001, float(duration))
 
 
+def generated_reference_has_ellipsis(text: str) -> bool:
+    normalized = normalize_inline_text(str(text or "").replace(r"\N", " ").replace("\n", " "))
+    return bool(normalized) and (normalized.endswith("...") or normalized.endswith("\u2026"))
+
+
+def reference_lines_fit(text: str, max_chars: int) -> bool:
+    lines = re.split(r"(?:\\N|\n)+", text or "")
+    return all(english_fits_single_line(line, max_chars) for line in lines if normalize_inline_text(line))
+
+
+def split_reference_into_lines(text: str, *, lang: str, max_chars: int, max_parts: int) -> str:
+    parts = split_reference_text(text, lang=lang, max_chars=max_chars, max_parts=max_parts)
+    if len(parts) <= 1:
+        return normalize_reference_text(text, lang=lang)
+    return "\n".join(normalize_reference_text(part, lang=lang) for part in parts if normalize_reference_text(part, lang=lang))
+
+
 def compact_reference_text(text: str, max_chars: int) -> str:
     normalized = normalize_inline_text(text)
     max_chars = max(8, int(max_chars or 78))
@@ -230,14 +387,14 @@ def compact_reference_text(text: str, max_chars: int) -> str:
 
 
 def reference_mode_value(style: BilingualSubtitleStyle) -> str:
-    return normalize_inline_text(style.reference_mode or "compact").lower()
+    return normalize_inline_text(style.reference_mode or "full_split").lower()
 
 
 def should_full_split_reference(style: BilingualSubtitleStyle) -> bool:
     return reference_mode_value(style) == "full_split"
 
 
-def apply_reference_mode_to_cue(cue: DisplayCue, style: BilingualSubtitleStyle) -> None:
+def apply_reference_mode_to_cue(cue: DisplayCue, style: BilingualSubtitleStyle, *, reference_lang: str = "en") -> None:
     mode = reference_mode_value(style)
     if mode in {"full", "full_split"}:
         return
@@ -256,10 +413,15 @@ def apply_reference_mode_to_cue(cue: DisplayCue, style: BilingualSubtitleStyle) 
         return
 
     if mode == "compact" and en_overflow:
-        compacted = compact_reference_text(cue.en_text, max_chars)
-        if compacted != cue.en_text:
-            cue.en_text = compacted
-            cue.rewrite_action = "reference_compact"
+        repaired = fallback_multiline_reference_text(
+            cue.en_text,
+            lang=reference_lang,
+            max_chars=max_chars,
+            max_parts=int(style.en_max_split_parts or 3),
+        )
+        if repaired != cue.en_text:
+            cue.en_text = repaired
+            cue.rewrite_action = "reference_multiline"
 
 
 def tokenize_mixed_text(text: str) -> list[str]:
@@ -621,6 +783,110 @@ def split_words_by_english_parts(words: list[Word], text_parts: list[str]) -> li
     return split_words_by_reference_parts(words, text_parts)
 
 
+def clean_reference_word(text: str) -> str:
+    return re.sub(r"[^A-Za-z']+", "", text or "").lower()
+
+
+def word_gap(left: Word, right: Word | None) -> float:
+    if right is None:
+        return 0.0
+    return max(0.0, float(right.start) - float(left.end))
+
+
+def score_reference_word_split(words: list[Word], index: int, *, max_chars: int) -> float:
+    left_words = words[:index]
+    right_words = words[index:]
+    if not left_words or not right_words:
+        return 1_000_000
+
+    left_text = words_to_text(left_words)
+    right_text = words_to_text(right_words)
+    left_len = len(left_text)
+    right_len = len(right_text)
+    overflow = max(0, left_len - max_chars) + max(0, right_len - max_chars)
+    balance = abs(left_len - right_len)
+    gap = word_gap(left_words[-1], right_words[0])
+    left_last = clean_reference_word(left_words[-1].word)
+    right_first = clean_reference_word(right_words[0].word)
+    confidence_values = [
+        float(word.confidence)
+        for word in (left_words[-2:] + right_words[:2])
+        if word.confidence is not None
+    ]
+    low_confidence_penalty = 0
+    if confidence_values and min(confidence_values) < 0.55:
+        low_confidence_penalty = 80
+
+    score = overflow * 120 + balance
+    if left_words[-1].word.rstrip().endswith((",", ";", ":", ".", "!", "?")):
+        score -= 35
+    if gap >= 0.55:
+        score -= 45
+    elif gap >= 0.22:
+        score -= 18
+    if right_first in EN_SOFT_SPLIT_WORDS:
+        score -= 22
+    if left_last in EN_BAD_SPLIT_EDGE_WORDS:
+        score += 120
+    if right_first in EN_CONTINUATION_START_WORDS and gap < 0.22:
+        score += 60
+    if len(left_words) <= 2 or len(right_words) <= 2:
+        score += 100
+    score += low_confidence_penalty
+    return score
+
+
+def choose_high_confidence_reference_word_groups(
+    words: list[Word],
+    *,
+    max_chars: int,
+    max_parts: int,
+) -> list[list[Word]]:
+    clean_words = [word for word in words if normalize_inline_text(word.word)]
+    if len(clean_words) <= 1:
+        return []
+
+    max_parts = max(1, int(max_parts or 3))
+    groups = [clean_words]
+    while len(groups) < max_parts:
+        long_indexes = [
+            index
+            for index, group in enumerate(groups)
+            if not english_fits_single_line(words_to_text(group), max_chars) and len(group) > 1
+        ]
+        if not long_indexes:
+            break
+
+        group_index = max(long_indexes, key=lambda index: len(words_to_text(groups[index])))
+        group = groups[group_index]
+        candidate_scores = [
+            (score_reference_word_split(group, index, max_chars=max_chars), index)
+            for index in range(1, len(group))
+        ]
+        score, split_index = min(candidate_scores, key=lambda item: item[0])
+        if score > 95:
+            break
+        left = group[:split_index]
+        right = group[split_index:]
+        if not left or not right:
+            break
+        groups[group_index : group_index + 1] = [left, right]
+
+    if len(groups) <= 1:
+        return []
+    if any(not english_fits_single_line(words_to_text(group), max_chars) for group in groups):
+        return []
+    return groups
+
+
+def fallback_multiline_reference_text(text: str, *, lang: str, max_chars: int, max_parts: int) -> str:
+    return split_reference_into_lines(text, lang=lang, max_chars=max_chars, max_parts=max_parts)
+
+
+def should_fallback_reference_to_multiline(text: str, *, max_chars: int) -> bool:
+    return generated_reference_has_ellipsis(text) or not reference_lines_fit(text, max_chars)
+
+
 def split_chinese_for_parts(text: str, part_count: int) -> list[str]:
     text = normalize_inline_text(text)
     if part_count <= 1 or not text:
@@ -814,8 +1080,9 @@ def split_segment_for_bilingual_ass(
     max_chars = int(style.en_max_single_line_chars or 78)
     max_parts = int(style.en_max_split_parts or 3)
     split_long_source = split_long_source or should_full_split_reference(style)
+    should_repair_overflow = should_fallback_reference_to_multiline(source_text, max_chars=max_chars)
 
-    if not split_long_source or english_fits_single_line(source_text, max_chars):
+    if not split_long_source and not should_repair_overflow:
         cues = [
             DisplayCue(
                 start=segment.start,
@@ -830,10 +1097,43 @@ def split_segment_for_bilingual_ass(
             )
         ]
         for cue in cues:
-            apply_reference_mode_to_cue(cue, style)
+            apply_reference_mode_to_cue(cue, style, reference_lang=reference_lang)
         return cues, build_alignment_debug(segment, [source_text], [target_text or ""], cues, merged=False, style=style)
 
-    text_parts = split_reference_text(source_text, lang=reference_lang, max_chars=max_chars, max_parts=max_parts)
+    word_groups = (
+        choose_high_confidence_reference_word_groups(
+            segment.words,
+            max_chars=max_chars,
+            max_parts=max_parts,
+        )
+        if should_repair_overflow and segment.words
+        else []
+    )
+    if should_repair_overflow and not split_long_source and not word_groups:
+        fallback_text = fallback_multiline_reference_text(
+            source_text,
+            lang=reference_lang,
+            max_chars=max_chars,
+            max_parts=max_parts,
+        )
+        cues = [
+            DisplayCue(
+                start=segment.start,
+                end=segment.end,
+                en_text=fallback_text,
+                zh_text=target_text or None,
+                words=segment.words,
+                source_segment_id=segment.id,
+                group_index=1,
+                group_total=1,
+                rewrite_action="reference_multiline" if "\n" in fallback_text else "reference_full",
+            )
+        ]
+        for cue in cues:
+            apply_reference_mode_to_cue(cue, style, reference_lang=reference_lang)
+        return cues, build_alignment_debug(segment, [fallback_text], [target_text or ""], cues, merged=False, style=style)
+
+    text_parts = [words_to_text(group) for group in word_groups] if word_groups else split_reference_text(source_text, lang=reference_lang, max_chars=max_chars, max_parts=max_parts)
     merged = False
     base_target_groups = max(1, len(split_by_meaning(target_text))) if target_text else 1
     max_allowed_groups = min(max_parts, max(len(text_parts), base_target_groups))
@@ -859,25 +1159,35 @@ def split_segment_for_bilingual_ass(
         break
 
     if not chosen_english_parts or not chosen_zh_parts:
+        fallback_text = fallback_multiline_reference_text(
+            source_text,
+            lang=reference_lang,
+            max_chars=max_chars,
+            max_parts=max_parts,
+        )
         cues = [
             DisplayCue(
                 start=segment.start,
                 end=segment.end,
-                en_text=source_text,
+                en_text=fallback_text,
                 zh_text=target_text or None,
                 words=segment.words,
                 source_segment_id=segment.id,
                 group_index=1,
                 group_total=1,
+                rewrite_action="reference_multiline" if "\n" in fallback_text else "reference_full",
             )
         ]
         for cue in cues:
-            apply_reference_mode_to_cue(cue, style)
-        return cues, build_alignment_debug(segment, [source_text], [target_text or ""], cues, merged=merged, style=style)
+            apply_reference_mode_to_cue(cue, style, reference_lang=reference_lang)
+        return cues, build_alignment_debug(segment, [fallback_text], [target_text or ""], cues, merged=merged, style=style)
 
     text_parts = chosen_english_parts
     zh_parts = chosen_zh_parts
-    word_groups = split_words_by_reference_parts(segment.words, text_parts) if segment.words else []
+    if word_groups and [words_to_text(group) for group in word_groups] != text_parts:
+        word_groups = []
+    if not word_groups:
+        word_groups = split_words_by_reference_parts(segment.words, text_parts) if segment.words else []
 
     split_segments: list[DisplayCue] = []
     for index, english_part in enumerate(text_parts):
@@ -909,7 +1219,7 @@ def split_segment_for_bilingual_ass(
 
     cues = enforce_minimum_split_durations(split_segments, segment, style.min_split_duration)
     for cue in cues:
-        apply_reference_mode_to_cue(cue, style)
+        apply_reference_mode_to_cue(cue, style, reference_lang=reference_lang)
     return cues, build_alignment_debug(segment, text_parts, zh_parts, cues, merged=merged, style=style)
 
 
@@ -920,10 +1230,14 @@ def enforce_minimum_split_durations(
 ) -> list[DisplayCue]:
     if len(segments) <= 1:
         return segments
+    if any(segment.words for segment in segments):
+        return segments
 
     min_duration = max(2.0, float(min_duration or 2.0))
     total_duration = max(0.0, original.end - original.start)
     if total_duration < len(segments) * min_duration:
+        return segments
+    if all((segment.end - segment.start) >= min_duration for segment in segments):
         return segments
 
     fixed: list[DisplayCue] = []
@@ -990,7 +1304,7 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,0,0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
+Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,{clamp_float(style.zh_spacing, -20.0, 20.0, 0.0):.1f},0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
 Style: EnglishSmall,{style.en_font_name},{style.en_font_size},&H00E8E8E8,&H000000FF,&H5A202020,&HA6000000,0,0,0,0,100,100,0,0,1,1.2,0.3,2,{style.en_margin_l},{style.en_margin_r},{style.en_margin_v},1
 
 [Events]
@@ -1001,6 +1315,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for cue in sorted(cues, key=lambda item: (item.start, item.end)):
         start = format_ass_timestamp(cue.start)
         end = format_ass_timestamp(cue.end)
+        en_text = escape_ass_text(normalize_reference_line_text(cue.en_text, lang=reference_lang))
 
         if cue.zh_text and contains_chinese(cue.zh_text):
             zh_text = escape_ass_text(
@@ -1011,9 +1326,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     max_lines=style.zh_max_lines,
                 )
             )
-            lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{zh_text}")
+            zh_margin_v = zh_event_margin_v_for_reference(en_text, style)
+            lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,{zh_margin_v},,{zh_text}")
 
-        en_text = escape_ass_text(normalize_reference_text(cue.en_text, lang=reference_lang))
         if en_text:
             lines.append(f"Dialogue: 1,{start},{end},EnglishSmall,,0,0,0,,{en_text}")
 
@@ -1064,7 +1379,7 @@ def build_alignment_debug(
         "english_group_count": len(english_groups),
         "chinese_group_count": len(chinese_groups),
         "english_merged_for_alignment": merged,
-        "reference_mode": normalize_inline_text(style.reference_mode or "compact").lower(),
+        "reference_mode": normalize_inline_text(style.reference_mode or "full_split").lower(),
         "zh_cps": round(visible_text_cps(zh_joined, duration), 2) if zh_joined else 0.0,
         "zh_line_count": max(line_counts) if line_counts else 0,
         "rewrite_action": rewrite_action,
@@ -1139,7 +1454,7 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,0,0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
+Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,{clamp_float(style.zh_spacing, -20.0, 20.0, 0.0):.1f},0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
 Style: EnglishSmall,{style.en_font_name},{style.en_font_size},&H00E8E8E8,&H000000FF,&H5A202020,&HA6000000,0,0,0,0,100,100,0,0,1,1.2,0.3,2,{style.en_margin_l},{style.en_margin_r},{style.en_margin_v},1
 
 [Events]
@@ -1156,6 +1471,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for cue in cues:
         start = format_ass_timestamp(cue.start)
         end = format_ass_timestamp(cue.end)
+        en_text = escape_ass_text(normalize_reference_line_text(cue.en_text, lang=reference_lang))
 
         if cue.zh_text and contains_chinese(cue.zh_text):
             zh_text = escape_ass_text(
@@ -1166,9 +1482,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     max_lines=style.zh_max_lines,
                 )
             )
-            lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{zh_text}")
+            zh_margin_v = zh_event_margin_v_for_reference(en_text, style)
+            lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,{zh_margin_v},,{zh_text}")
 
-        en_text = escape_ass_text(normalize_reference_text(cue.en_text, lang=reference_lang))
         if en_text:
             lines.append(f"Dialogue: 1,{start},{end},EnglishSmall,,0,0,0,,{en_text}")
 
@@ -1200,7 +1516,7 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,0,0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
+Style: Default,{style.zh_font_name},{style.zh_font_size},{zh_primary},&H000000FF,{zh_outline},{zh_shadow},0,0,0,0,100,100,{clamp_float(style.zh_spacing, -20.0, 20.0, 0.0):.1f},0,1,{zh_outline_width:.1f},{zh_shadow_depth:.1f},2,{style.zh_margin_l},{style.zh_margin_r},{style.zh_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -1278,7 +1594,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for cue in cues:
         start = format_ass_timestamp(cue.start)
         end = format_ass_timestamp(cue.end)
-        source_text = escape_ass_text(normalize_reference_text(cue.en_text, lang=reference_lang))
+        source_text = escape_ass_text(normalize_reference_line_text(cue.en_text, lang=reference_lang))
         if source_text:
             lines.append(f"Dialogue: 0,{start},{end},SourceOnly,,0,0,0,,{source_text}")
 

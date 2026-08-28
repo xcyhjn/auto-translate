@@ -1,8 +1,13 @@
 __pycache__/
 *.py[cod]
+.pytest_cache/
 .venv/
 venv/
 .env
+*.log
+*.out
+*.err
+*.tmp
 *.wav
 *.mp3
 *.mp4
@@ -11,7 +16,20 @@ venv/
 *.mov
 *.srt
 *.ass
-*.json
+
+# Local configuration and runtime state.
+ui_config.json
+ui_server_state.json
+.ui_server_state*.tmp
+.brooks-lint-history.json
+
+# Local editor/search indexes.
+/.codebuddy/
+/.obsidian/
+/.vscode/
+
+# Review backups are intentionally local while feedback edits are uncommitted.
+/datasets/local_feedback/*.backup_*.jsonl
 
 /input
 /output
@@ -20,5 +38,4 @@ venv/
 /求职资料/
 时之钥_策划设计案_重排整理版.md
 时之钥_粗版策划设计案.md
-/docs
 /reports

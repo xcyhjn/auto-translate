@@ -8,16 +8,6 @@ from pathlib import Path
 
 from .cli_commands import dispatch, is_command_invocation, parse_command_args
 
-from .asr import transcribe_audio
-from .media import enhance_audio_for_asr, extract_audio, probe_media
-from .qa import qa_check
-from .segment_io import load_segments, save_segments
-from .style_learning import write_style_learning_artifacts
-from .workflow_profiles import find_existing_ass_path, project_artifact_path
-from .subtitle_io import write_srt
-from .timing import refine_timing
-from .translate import dry_run_openai_translation, translate_segments
-
 
 def build_legacy_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -192,6 +182,15 @@ def save_report(report, output_path: str | Path) -> None:
 
 
 def legacy_main(args: argparse.Namespace) -> int:
+    from .asr import transcribe_audio
+    from .media import enhance_audio_for_asr, extract_audio, probe_media
+    from .qa import qa_check
+    from .segment_io import load_segments, save_segments
+    from .style_learning import write_style_learning_artifacts
+    from .subtitle_io import write_srt
+    from .timing import refine_timing
+    from .translate import dry_run_openai_translation, translate_segments
+    from .workflow_profiles import find_existing_ass_path, project_artifact_path
 
     if args.openai_dry_run:
         # 这个分支只验证 OpenAI 兼容接口，不要求提供视频文件。

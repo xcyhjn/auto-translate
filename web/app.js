@@ -156,12 +156,12 @@ const DEFAULT_UI_CONFIG = {
   style: {
     zh_font_name: "Maple Mono NF CN",
     zh_font_size: 64,
-    zh_primary_color: "#FFF2A6",
+    zh_primary_color: "#FED906",
     zh_primary_opacity: 100,
     zh_outline_color: "#202020",
-    zh_outline_opacity: 45,
+    zh_outline_opacity: 76,
     zh_shadow_color: "#000000",
-    zh_shadow_opacity: 35,
+    zh_shadow_opacity: 57,
     zh_outline_width: 1.8,
     zh_shadow_depth: 0.4,
     zh_margin_l: 90,
@@ -178,7 +178,7 @@ const DEFAULT_UI_CONFIG = {
     en_max_single_line_chars: 78,
     en_max_split_parts: 3,
     min_split_duration: 0.9,
-    reference_mode: "compact",
+    reference_mode: "full_split",
   },
 };
 
@@ -728,12 +728,12 @@ function updateSubtitleStylePreview() {
   const style = {
     fontName: el("zh_font_name")?.value || "Maple Mono NF CN",
     fontSize: clampNumber(el("zh_font_size")?.value, 24, 96, 64),
-    primaryColor: readColorField("zh_primary_color", "#FFF2A6"),
+    primaryColor: readColorField("zh_primary_color", "#FED906"),
     primaryOpacity: readOpacityField("zh_primary_opacity", 100),
     outlineColor: readColorField("zh_outline_color", "#202020"),
-    outlineOpacity: readOpacityField("zh_outline_opacity", 45),
+    outlineOpacity: readOpacityField("zh_outline_opacity", 76),
     shadowColor: readColorField("zh_shadow_color", "#000000"),
-    shadowOpacity: readOpacityField("zh_shadow_opacity", 35),
+    shadowOpacity: readOpacityField("zh_shadow_opacity", 57),
     outlineWidth: clampNumber(el("zh_outline_width")?.value, 0, 12, 1.8),
     shadowDepth: clampNumber(el("zh_shadow_depth")?.value, 0, 12, 0.4),
   };
@@ -797,12 +797,12 @@ function readFormConfig() {
     style: {
       zh_font_name: el("zh_font_name").value,
       zh_font_size: Number(el("zh_font_size").value),
-      zh_primary_color: readColorField("zh_primary_color", "#FFF2A6"),
+      zh_primary_color: readColorField("zh_primary_color", "#FED906"),
       zh_primary_opacity: readOpacityField("zh_primary_opacity", 100),
       zh_outline_color: readColorField("zh_outline_color", "#202020"),
-      zh_outline_opacity: readOpacityField("zh_outline_opacity", 45),
+      zh_outline_opacity: readOpacityField("zh_outline_opacity", 76),
       zh_shadow_color: readColorField("zh_shadow_color", "#000000"),
-      zh_shadow_opacity: readOpacityField("zh_shadow_opacity", 35),
+      zh_shadow_opacity: readOpacityField("zh_shadow_opacity", 57),
       zh_outline_width: Number(el("zh_outline_width").value || 1.8),
       zh_shadow_depth: Number(el("zh_shadow_depth").value || 0.4),
       zh_margin_l: Number(el("zh_margin_l").value),
@@ -819,7 +819,7 @@ function readFormConfig() {
       en_max_single_line_chars: Number(el("en_max_single_line_chars").value || 78),
       en_max_split_parts: Number(el("en_max_split_parts").value || 3),
       min_split_duration: Number(el("min_split_duration").value || 0.9),
-      reference_mode: el("reference_mode").value || "compact",
+      reference_mode: el("reference_mode").value || "full_split",
     },
   };
 }
@@ -876,12 +876,12 @@ function fillForm(config) {
   const style = config.style || {};
   el("zh_font_name").value = style.zh_font_name || "Maple Mono NF CN";
   el("zh_font_size").value = style.zh_font_size ?? 64;
-  setColorField("zh_primary_color", style.zh_primary_color || "#FFF2A6", "#FFF2A6");
+  setColorField("zh_primary_color", style.zh_primary_color || "#FED906", "#FED906");
   setOpacityField("zh_primary_opacity", style.zh_primary_opacity ?? 100, 100);
   setColorField("zh_outline_color", style.zh_outline_color || "#202020", "#202020");
-  setOpacityField("zh_outline_opacity", style.zh_outline_opacity ?? 45, 45);
+  setOpacityField("zh_outline_opacity", style.zh_outline_opacity ?? 76, 76);
   setColorField("zh_shadow_color", style.zh_shadow_color || "#000000", "#000000");
-  setOpacityField("zh_shadow_opacity", style.zh_shadow_opacity ?? 35, 35);
+  setOpacityField("zh_shadow_opacity", style.zh_shadow_opacity ?? 57, 57);
   el("zh_outline_width").value = style.zh_outline_width ?? 1.8;
   el("zh_shadow_depth").value = style.zh_shadow_depth ?? 0.4;
   el("zh_margin_l").value = style.zh_margin_l ?? 90;
@@ -898,7 +898,7 @@ function fillForm(config) {
   el("en_max_single_line_chars").value = style.en_max_single_line_chars ?? Math.max(50, (style.en_max_words_per_line ?? 13) * 6);
   el("en_max_split_parts").value = style.en_max_split_parts ?? 3;
   el("min_split_duration").value = style.min_split_duration ?? 0.9;
-  el("reference_mode").value = style.reference_mode || "compact";
+  el("reference_mode").value = style.reference_mode || "full_split";
 
   updateSubtitleStylePreview();
   setLinkedAudioLabel(config.audio_override_path || "");
@@ -5420,23 +5420,23 @@ function bindActions() {
 }
 
 function bindSubtitleStyleControls() {
-  syncColorInputs("zh_primary_color", "#FFF2A6");
+  syncColorInputs("zh_primary_color", "#FED906");
   syncColorInputs("zh_outline_color", "#202020");
   syncColorInputs("zh_shadow_color", "#000000");
   syncOpacityInput("zh_primary_opacity", 100);
-  syncOpacityInput("zh_outline_opacity", 45);
-  syncOpacityInput("zh_shadow_opacity", 35);
+  syncOpacityInput("zh_outline_opacity", 76);
+  syncOpacityInput("zh_shadow_opacity", 57);
   ["zh_font_name", "zh_font_size", "zh_outline_width", "zh_shadow_depth"].forEach((id) => {
     const node = el(id);
     if (node) node.addEventListener("input", updateSubtitleStylePreview);
   });
   el("resetZhColorBtn").addEventListener("click", () => {
-    setColorField("zh_primary_color", "#FFF2A6", "#FFF2A6");
+    setColorField("zh_primary_color", "#FED906", "#FED906");
     setOpacityField("zh_primary_opacity", 100, 100);
     setColorField("zh_outline_color", "#202020", "#202020");
-    setOpacityField("zh_outline_opacity", 45, 45);
+    setOpacityField("zh_outline_opacity", 76, 76);
     setColorField("zh_shadow_color", "#000000", "#000000");
-    setOpacityField("zh_shadow_opacity", 35, 35);
+    setOpacityField("zh_shadow_opacity", 57, 57);
     el("zh_outline_width").value = 1.8;
     el("zh_shadow_depth").value = 0.4;
     updateSubtitleStylePreview();

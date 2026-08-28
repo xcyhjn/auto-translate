@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from autosub_zh.models import BilingualSubtitleStyle, Segment, Word
+from autosub_zh.models import Segment, Word
 from autosub_zh.semantic_allocation import build_semantic_allocation_report
 from autosub_zh.segmentation_qa import build_segmentation_qa_metrics
 from autosub_zh.source_repair import repair_source_segments

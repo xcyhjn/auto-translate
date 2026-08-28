@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from autosub_zh.english_residue_policy import analyze_english_residue, build_english_residue_report, score_english_residue
+from autosub_zh.english_residue_policy import build_english_residue_report, score_english_residue
 from autosub_zh.models import Segment
 from autosub_zh.span_translate import validate_span_translations
 from autosub_zh.translate import validate_translations

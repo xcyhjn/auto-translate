@@ -1083,5 +1083,15 @@ def qa_final_ass_file(
                 report.errors.append(
                     f"Final ASS dialogue {index} English reference contains lowercase first-person i."
                 )
+            if reference_text_has_generated_ellipsis(normalized_text):
+                report.errors.append(
+                    f"Final ASS dialogue {index} English reference appears ellipsized."
+                )
+            for line_number, line in enumerate(text.splitlines() or [text], start=1):
+                line_length = len(normalize_inline_text(line))
+                if line_length > DEFAULT_EN_MAX_LINE_CHARS:
+                    report.warnings.append(
+                        f"Final ASS dialogue {index} English line {line_number} is too long: {line_length} chars > {DEFAULT_EN_MAX_LINE_CHARS}."
+                    )
 
     return report

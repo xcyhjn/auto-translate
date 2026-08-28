@@ -37,6 +37,16 @@ cd D:\
 
 完整约束见 [复合工程标准](docs/COMPOSITE_ENGINEERING_STANDARD.md)，本轮拆分和验收边界见 [任务总览](docs/COMPOSITE_ENGINEERING_STANDARD_TASK_OVERVIEW.md)。
 
+## 工作区边界
+
+- 源码与测试：项目根目录的 `.py`、`web/`、`tools/` 和 `test_*.py`。
+- 版本化规则数据：`workflow_profiles/`、`translation_prompts/` 和 `datasets/` 中的正式 profile/registry。
+- 用户媒体与项目产物：`input/`、`output/`，不得按普通缓存批量删除。
+- 可再生运行状态：`runtime/`；UI 状态和错误日志统一写入这里。
+- 人工反馈：`datasets/local_feedback/`，只能按审核流程整理，不能当作临时文件清理。
+
+根目录不再保存端口试跑日志、转录日志或 UI 状态快照。若运行异常，检查 `runtime/logs/`。
+
 ## 组合式 CLI
 
 从父目录运行：

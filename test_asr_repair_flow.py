@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from autosub_zh.difficult_spans import detect_difficult_spans
-from autosub_zh.glossary import apply_translate_policy_corrections, generate_asr_terms, load_glossary_payload
+from autosub_zh.glossary import apply_translate_policy_corrections, generate_asr_terms
 from autosub_zh.models import Segment
 from autosub_zh.qa import qa_check, qa_final_ass_file, qa_glossary_consistency
 from autosub_zh.source_repair import repair_source_segments

@@ -12,12 +12,6 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from .pipeline_core import burn_subtitle
-from .pipeline_runner import run_pipeline_from_config
-from .qa import qa_check, qa_final_ass_file, qa_glossary_consistency
-from .segment_io import load_segments, save_segments
-from .translate import translate_segments
-
 COMMANDS = ("pipeline", "translate", "qa", "burn", "init")
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -108,6 +102,8 @@ def _print_plan(args: argparse.Namespace) -> int:
 
 
 def _dispatch_pipeline(args: argparse.Namespace) -> int:
+    from .pipeline_runner import run_pipeline_from_config
+
     config_path = Path(args.config)
     if not config_path.is_file():
         raise ValueError(f"配置文件不存在：{config_path}")
@@ -124,6 +120,9 @@ def _dispatch_pipeline(args: argparse.Namespace) -> int:
 
 
 def _dispatch_translate(args: argparse.Namespace) -> int:
+    from .segment_io import load_segments, save_segments
+    from .translate import translate_segments
+
     segments = load_segments(args.segments)
     translated = translate_segments(
         segments,
@@ -143,6 +142,9 @@ def _dispatch_translate(args: argparse.Namespace) -> int:
 
 
 def _dispatch_qa(args: argparse.Namespace) -> int:
+    from .qa import qa_check, qa_final_ass_file, qa_glossary_consistency
+    from .segment_io import load_segments
+
     input_path = Path(args.input)
     if input_path.suffix.lower() == ".ass":
         if args.glossary:
@@ -165,6 +167,8 @@ def _dispatch_qa(args: argparse.Namespace) -> int:
 
 
 def _dispatch_burn(args: argparse.Namespace) -> int:
+    from .pipeline_core import burn_subtitle
+
     result = burn_subtitle(Path(args.video), Path(args.subtitle), Path(args.output), args.preview_seconds)
     if result is not None:
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

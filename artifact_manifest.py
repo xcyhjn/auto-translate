@@ -143,8 +143,3 @@ def load_artifact_manifest(path: str | Path) -> dict[str, Any] | None:
     if len(fingerprint) != 64 or any(character not in "0123456789abcdef" for character in fingerprint.lower()):
         return None
     return payload
-
-
-write_json_atomic = atomic_write_json
-get_file_snapshot = file_snapshot
-build_fingerprint = compute_fingerprint

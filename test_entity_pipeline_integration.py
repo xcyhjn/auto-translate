@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
 from autosub_zh.models import MediaInfo, Segment
 from autosub_zh.pipeline_core import run_pipeline
 from autosub_zh.segment_io import save_segments_payload

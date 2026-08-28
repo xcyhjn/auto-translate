@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
 import re
 
 from .models import Segment
@@ -142,7 +141,6 @@ def build_segmentation_qa_metrics(
         target_text = normalize_inline_text(segment.target_text or "")
         duration = max(0.001, float(segment.end) - float(segment.start))
         source_words = len(re.findall(r"[A-Za-z0-9']+", source_text))
-        target_words = len(re.findall(r"[A-Za-z0-9']+", target_text))
         has_two_sentences = source_sentence_count(source_text) >= 2 or source_sentence_count(target_text) >= 2
         source_terminal = bool(TERMINAL_RE.search(source_text))
 

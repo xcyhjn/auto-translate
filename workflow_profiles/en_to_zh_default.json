@@ -17,13 +17,13 @@
     "translation_retries": 4
   },
   "style": {
-    "zh_primary_color": "#FFF2A6",
+    "zh_primary_color": "#FED906",
     "zh_outline_color": "#202020",
-    "zh_outline_opacity": 45,
-    "zh_shadow_opacity": 35,
+    "zh_outline_opacity": 76,
+    "zh_shadow_opacity": 57,
     "zh_outline_width": 1.8,
     "zh_shadow_depth": 0.4,
     "en_font_name": "Maple Mono NF CN",
-    "reference_mode": "compact"
+    "reference_mode": "full_split"
   }
 }

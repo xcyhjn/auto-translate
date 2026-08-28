@@ -119,19 +119,3 @@ class StageEvent:
             timestamp=str(payload.get("timestamp") or datetime.now(timezone.utc).isoformat()),
             schema_version=int(payload.get("schema_version", STAGE_CONTRACT_SCHEMA_VERSION)),
         )
-
-
-def make_stage_result(stage: str, status: str = "success", **kwargs: Any) -> StageResult:
-    return StageResult(stage=stage, status=status, **kwargs)
-
-
-def make_stage_event(stage: str, status: str = "running", **kwargs: Any) -> StageEvent:
-    return StageEvent(stage=stage, status=status, **kwargs)
-
-
-def serialize_stage_result(result: StageResult) -> dict[str, Any]:
-    return result.to_dict()
-
-
-def serialize_stage_event(event: StageEvent) -> dict[str, Any]:
-    return event.to_dict()

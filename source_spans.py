@@ -4,7 +4,6 @@ import re
 from collections import Counter
 
 from .difficult_spans import (
-    SOURCE_CONTINUATION_WORDS,
     ends_with_open_source_word,
     ends_with_terminal,
     normalize_inline,

@@ -1,0 +1,296 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "ASS Bilingual",
+  "scopeName": "source.ass",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#sections"
+    },
+    {
+      "include": "#format"
+    },
+    {
+      "include": "#style"
+    },
+    {
+      "include": "#dialogueChinese"
+    },
+    {
+      "include": "#dialogueEnglish"
+    },
+    {
+      "include": "#dialogueFallback"
+    },
+    {
+      "include": "#keyValue"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "match": "^\\s*;.*$",
+          "name": "comment.line.semicolon.ass"
+        }
+      ]
+    },
+    "sections": {
+      "patterns": [
+        {
+          "match": "^\\s*(\\[[^\\]]+\\])\\s*$",
+          "captures": {
+            "1": {
+              "name": "entity.name.section.ass"
+            }
+          }
+        }
+      ]
+    },
+    "format": {
+      "patterns": [
+        {
+          "match": "^(Format:)\\s*(.*)$",
+          "captures": {
+            "1": {
+              "name": "keyword.control.format.ass"
+            },
+            "2": {
+              "name": "variable.parameter.format.ass"
+            }
+          }
+        }
+      ]
+    },
+    "style": {
+      "patterns": [
+        {
+          "match": "^(Style:)\\s*([^,]+)(.*)$",
+          "captures": {
+            "1": {
+              "name": "keyword.control.style.ass"
+            },
+            "2": {
+              "name": "entity.name.type.style.ass"
+            },
+            "3": {
+              "name": "meta.style.fields.ass"
+            }
+          }
+        }
+      ]
+    },
+    "dialogueChinese": {
+      "patterns": [
+        {
+          "name": "meta.dialogue.chinese.ass",
+          "begin": "^(Dialogue:)\\s*([^,]*)(,)(\\d{1,2}:\\d{2}:\\d{2}\\.\\d{2})(,)(\\d{1,2}:\\d{2}:\\d{2}\\.\\d{2})(,)(Default|Chinese|ChineseSmall|ZH|zh|中文)(,)([^,]*)(,)([^,]*)(,)([^,]*)(,)([^,]*)(,)([^,]*)(,)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.dialogue.ass"
+            },
+            "2": {
+              "name": "constant.numeric.layer.ass"
+            },
+            "3": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "4": {
+              "name": "constant.other.time.start.ass"
+            },
+            "5": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "6": {
+              "name": "constant.other.time.end.ass"
+            },
+            "7": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "8": {
+              "name": "entity.name.type.style.chinese.ass"
+            },
+            "9": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "10": {
+              "name": "meta.dialogue.name.ass"
+            },
+            "11": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "12": {
+              "name": "constant.numeric.margin.ass"
+            },
+            "13": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "14": {
+              "name": "constant.numeric.margin.ass"
+            },
+            "15": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "16": {
+              "name": "constant.numeric.margin.ass"
+            },
+            "17": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "18": {
+              "name": "meta.dialogue.effect.ass"
+            },
+            "19": {
+              "name": "punctuation.separator.comma.ass"
+            }
+          },
+          "end": "$",
+          "contentName": "string.unquoted.subtitle.chinese.ass",
+          "patterns": [
+            {
+              "include": "#textControls"
+            }
+          ]
+        }
+      ]
+    },
+    "dialogueEnglish": {
+      "patterns": [
+        {
+          "name": "meta.dialogue.english.ass",
+          "begin": "^(Dialogue:)\\s*([^,]*)(,)(\\d{1,2}:\\d{2}:\\d{2}\\.\\d{2})(,)(\\d{1,2}:\\d{2}:\\d{2}\\.\\d{2})(,)(EnglishSmall|English|EN|en|英文)(,)([^,]*)(,)([^,]*)(,)([^,]*)(,)([^,]*)(,)([^,]*)(,)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.dialogue.ass"
+            },
+            "2": {
+              "name": "constant.numeric.layer.ass"
+            },
+            "3": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "4": {
+              "name": "constant.other.time.start.ass"
+            },
+            "5": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "6": {
+              "name": "constant.other.time.end.ass"
+            },
+            "7": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "8": {
+              "name": "entity.name.type.style.english.ass"
+            },
+            "9": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "10": {
+              "name": "meta.dialogue.name.ass"
+            },
+            "11": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "12": {
+              "name": "constant.numeric.margin.ass"
+            },
+            "13": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "14": {
+              "name": "constant.numeric.margin.ass"
+            },
+            "15": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "16": {
+              "name": "constant.numeric.margin.ass"
+            },
+            "17": {
+              "name": "punctuation.separator.comma.ass"
+            },
+            "18": {
+              "name": "meta.dialogue.effect.ass"
+            },
+            "19": {
+              "name": "punctuation.separator.comma.ass"
+            }
+          },
+          "end": "$",
+          "contentName": "string.unquoted.subtitle.english.ass",
+          "patterns": [
+            {
+              "include": "#textControls"
+            }
+          ]
+        }
+      ]
+    },
+    "dialogueFallback": {
+      "patterns": [
+        {
+          "name": "meta.dialogue.generic.ass",
+          "begin": "^(Dialogue:)\\s*([^,]*)(,)(\\d{1,2}:\\d{2}:\\d{2}\\.\\d{2})(,)(\\d{1,2}:\\d{2}:\\d{2}\\.\\d{2})(,)([^,]*)(,)([^,]*)(,)([^,]*)(,)([^,]*)(,)([^,]*)(,)([^,]*)(,)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.dialogue.ass"
+            },
+            "2": {
+              "name": "constant.numeric.layer.ass"
+            },
+            "4": {
+              "name": "constant.other.time.start.ass"
+            },
+            "6": {
+              "name": "constant.other.time.end.ass"
+            },
+            "8": {
+              "name": "entity.name.type.style.ass"
+            }
+          },
+          "end": "$",
+          "contentName": "string.unquoted.subtitle.ass",
+          "patterns": [
+            {
+              "include": "#textControls"
+            }
+          ]
+        }
+      ]
+    },
+    "textControls": {
+      "patterns": [
+        {
+          "match": "\\\\[NnHh]",
+          "name": "constant.character.linebreak.ass"
+        },
+        {
+          "match": "\\{[^}]*\\}",
+          "name": "markup.other.override.ass"
+        }
+      ]
+    },
+    "keyValue": {
+      "patterns": [
+        {
+          "match": "^\\s*([^:]+)(:)\\s*(.*)$",
+          "captures": {
+            "1": {
+              "name": "support.type.property-name.ass"
+            },
+            "2": {
+              "name": "punctuation.separator.key-value.ass"
+            },
+            "3": {
+              "name": "string.unquoted.value.ass"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

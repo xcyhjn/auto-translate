@@ -7,8 +7,8 @@ Dataset: `D:\autosub_zh\datasets\local_feedback`
 - Bilibili feedback records: 0
 - Bilibili learning records: 0
 - Bilibili eval-marked records: 0
-- Translation edit records: 1101
-- Translation style-learning records: 1009
+- Translation edit records: 1417
+- Translation style-learning records: 1106
 - Translation eval-marked records: 87
 - Span translation example records: 7
 - Span style-learning records: 0

@@ -42,7 +42,7 @@ def ytdlp_auth_options_from_user_config() -> dict:
 
     options = parsed.ydl_opts
     auth_options: dict = {}
-    for key in ("cookiefile", "cookiesfrombrowser", "js_runtimes"):
+    for key in ("cookiefile", "cookiesfrombrowser", "js_runtimes", "remote_components"):
         value = options.get(key)
         if value:
             auth_options[key] = value

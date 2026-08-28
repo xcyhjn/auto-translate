@@ -43,10 +43,6 @@ function Test-PythonInterpreter {
 
 $pythonCandidates = @(
     @{
-        Command  = 'C:\Users\bulbel\AppData\Local\Programs\Python\Python311\python.exe'
-        Arguments = @('-c', 'import yt_dlp')
-    },
-    @{
         Command  = 'py'
         Arguments = @('-3.11', '-c', 'import yt_dlp')
     },

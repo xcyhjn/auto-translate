@@ -11,7 +11,7 @@ from .models import Segment, Word
 from .utils import normalize_text
 
 
-CUDA_BIN_DIR = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin"
+CUDA_BIN_DIR = Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin")
 MAX_AUDIO_CHUNK_SECONDS = 8 * 60
 CHUNK_OVERLAP_SECONDS = 1.0
 GPU_FALLBACK_COMPUTE_TYPE = "int8_float16"
@@ -19,13 +19,59 @@ CPU_FALLBACK_COMPUTE_TYPE = "int8"
 VALID_ASR_DEVICES = {"auto", "cpu", "cuda"}
 VALID_ASR_COMPUTE_TYPES = {"default", "float16", "int8_float16", "int8"}
 AsrProgressCallback = Callable[[dict], None]
+_REGISTERED_DLL_DIRS: set[str] = set()
+_DLL_DIR_HANDLES: list[object] = []
+
+
+def iter_runtime_library_dirs() -> list[str]:
+    candidates: list[Path] = []
+    for env_name in ["CUDA_PATH", *sorted(name for name in os.environ if name.startswith("CUDA_PATH_V"))]:
+        env_value = str(os.environ.get(env_name) or "").strip()
+        if env_value:
+            candidates.append(Path(env_value) / "bin")
+    candidates.append(CUDA_BIN_DIR)
+
+    toolkit_root = CUDA_BIN_DIR.parent.parent
+    if toolkit_root.is_dir():
+        for version_dir in sorted(
+            (path for path in toolkit_root.iterdir() if path.is_dir()),
+            reverse=True,
+        ):
+            candidates.append(version_dir / "bin")
+
+    try:
+        import ctranslate2
+
+        candidates.append(Path(ctranslate2.__file__).resolve().parent)
+    except Exception:
+        pass
+
+    resolved_dirs: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            normalized = str(candidate.resolve())
+        except OSError:
+            normalized = str(candidate)
+        if normalized in seen or not Path(normalized).is_dir():
+            continue
+        seen.add(normalized)
+        resolved_dirs.append(normalized)
+    return resolved_dirs
 
 
 def ensure_cuda_runtime_on_path() -> None:
-    if os.path.isdir(CUDA_BIN_DIR):
-        current_path = os.environ.get("PATH", "")
-        if CUDA_BIN_DIR not in current_path.split(";"):
-            os.environ["PATH"] = CUDA_BIN_DIR + ";" + current_path
+    path_entries = [entry for entry in os.environ.get("PATH", "").split(";") if entry]
+    for runtime_dir in iter_runtime_library_dirs():
+        if runtime_dir not in path_entries:
+            path_entries.insert(0, runtime_dir)
+        if hasattr(os, "add_dll_directory") and runtime_dir not in _REGISTERED_DLL_DIRS:
+            try:
+                _DLL_DIR_HANDLES.append(os.add_dll_directory(runtime_dir))
+                _REGISTERED_DLL_DIRS.add(runtime_dir)
+            except (FileNotFoundError, OSError):
+                pass
+    os.environ["PATH"] = ";".join(path_entries)
 
 
 def is_cuda_out_of_memory(exc: BaseException) -> bool:
@@ -38,6 +84,12 @@ def is_asr_backend_failure(exc: BaseException) -> bool:
     return is_cuda_out_of_memory(exc) or any(
         token in message
         for token in (
+            "mkl_malloc",
+            "failed to allocate memory",
+            "out of memory",
+            "not enough memory",
+            "bad allocation",
+            "std::bad_alloc",
             "cublas",
             "cudnn",
             "cannot be loaded",
@@ -116,12 +168,26 @@ def build_asr_attempts(device: str, compute_type: str, beam_size: int) -> list[d
             {
                 "device": "cpu",
                 "compute_type": CPU_FALLBACK_COMPUTE_TYPE,
-                "beam_size": beam_size,
+                "beam_size": min(beam_size, 1),
                 "reason": "cpu_fallback",
             },
         )
         return attempts
 
+    if beam_size > 1:
+        append_unique_attempt(
+            attempts,
+            {
+                "device": "cuda",
+                "compute_type": (
+                    GPU_FALLBACK_COMPUTE_TYPE
+                    if normalized_compute == "default"
+                    else normalized_compute
+                ),
+                "beam_size": 1,
+                "reason": "gpu_low_beam_fallback",
+            },
+        )
     if normalized_compute not in {GPU_FALLBACK_COMPUTE_TYPE, "int8"}:
         append_unique_attempt(
             attempts,
@@ -132,12 +198,22 @@ def build_asr_attempts(device: str, compute_type: str, beam_size: int) -> list[d
                 "reason": "gpu_fallback",
             },
         )
+    if normalized_compute != "int8":
+        append_unique_attempt(
+            attempts,
+            {
+                "device": "cuda",
+                "compute_type": "int8",
+                "beam_size": min(beam_size, 1),
+                "reason": "gpu_int8_fallback",
+            },
+        )
     append_unique_attempt(
         attempts,
         {
             "device": "cpu",
             "compute_type": CPU_FALLBACK_COMPUTE_TYPE,
-            "beam_size": beam_size,
+            "beam_size": min(beam_size, 1),
             "reason": "cpu_fallback",
         },
     )
@@ -377,6 +453,7 @@ def transcribe_audio(
 
             model = None
             try:
+                release_accelerator_memory()
                 if progress_callback:
                     progress_callback(
                         {
@@ -404,7 +481,7 @@ def transcribe_audio(
                     vad_filter=vad_filter,
                     progress_callback=progress_callback,
                 )
-            except (RuntimeError, ValueError) as exc:
+            except (RuntimeError, ValueError, OSError) as exc:
                 if not is_asr_backend_failure(exc):
                     raise
                 next_attempt = attempts[attempt_index + 1] if attempt_index + 1 < len(attempts) else None

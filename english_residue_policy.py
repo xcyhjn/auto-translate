@@ -195,7 +195,6 @@ def _load_glossary_policy_maps(glossary_path: str | Path | None = None, glossary
         canonical = normalize_candidate(str(item.get("canonical") or ""))
         if not canonical:
             return
-        key = normalize_key(canonical)
         policy = str(item.get("policy") or "preserve").strip().lower()
         priority = str(item.get("priority") or "").strip().lower()
         sources = [str(value).strip().lower() for value in item.get("sources") or [] if str(value).strip()]

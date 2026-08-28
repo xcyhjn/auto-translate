@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import signal
 import time
 import traceback
 from pathlib import Path
 
-from .job_store import JobStore, ACTIVE_STATUSES
+from .job_store import JobStore
 from .pipeline_core import write_json
 from .pipeline_runner import compute_output_dir, run_pipeline_from_config
 

@@ -21,7 +21,7 @@ from .style_learning import (
     build_style_features,
     detect_edit_tags,
 )
-from .workflow_profiles import INTERNAL_ARTIFACTS_DIR_NAME, ass_candidate_paths, project_artifact_path
+from .workflow_profiles import ass_candidate_paths, project_artifact_path
 
 
 SCHEMA_VERSION = 1

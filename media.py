@@ -335,7 +335,7 @@ def probe_media(input_path: str | Path) -> MediaInfo:
 
 
 def suggest_hwaccel_decoder(input_path: str | Path) -> tuple[str | None, str | None]:
-    media = probe_media(input_path)
+    probe_media(input_path)
     completed = run_command(
         [
             "ffprobe",

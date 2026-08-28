@@ -51,6 +51,8 @@ def test_dry_run_does_not_read_input_or_write_output(tmp_path: Path, capsys) -> 
 
 
 def test_pipeline_dispatch_forwards_to_existing_runner(tmp_path: Path, monkeypatch) -> None:
+    from autosub_zh import pipeline_runner
+
     config_path = tmp_path / "config.json"
     config_path.write_text('{"src_lang":"en"}', encoding="utf-8")
     captured = {}
@@ -59,7 +61,7 @@ def test_pipeline_dispatch_forwards_to_existing_runner(tmp_path: Path, monkeypat
         captured.update(kwargs)
         return {"ok": True}
 
-    monkeypatch.setattr(cli_commands, "run_pipeline_from_config", fake_run_pipeline_from_config)
+    monkeypatch.setattr(pipeline_runner, "run_pipeline_from_config", fake_run_pipeline_from_config)
     code = cli.main(["pipeline", "input.mp4", "--config", str(config_path)])
     assert code == 0
     assert captured["video_path"] == Path("input.mp4")
@@ -67,13 +69,15 @@ def test_pipeline_dispatch_forwards_to_existing_runner(tmp_path: Path, monkeypat
 
 
 def test_qa_json_uses_glossary_consistency(tmp_path: Path, monkeypatch) -> None:
+    from autosub_zh import qa, segment_io
+
     segments_path = tmp_path / "segments.json"
     segments_path.write_text("{}", encoding="utf-8")
     segments = [Segment(id=1, start=0.0, end=1.0, source_text="source", target_text="中文")]
-    monkeypatch.setattr(cli_commands, "load_segments", lambda _path: segments)
-    monkeypatch.setattr(cli_commands, "qa_check", lambda *_args, **_kwargs: QaReport())
+    monkeypatch.setattr(segment_io, "load_segments", lambda _path: segments)
+    monkeypatch.setattr(qa, "qa_check", lambda *_args, **_kwargs: QaReport())
     monkeypatch.setattr(
-        cli_commands,
+        qa,
         "qa_glossary_consistency",
         lambda *_args, **_kwargs: QaReport(warnings=["review glossary"]),
     )
