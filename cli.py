@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import tempfile
 from pathlib import Path
+
+from .cli_commands import dispatch, is_command_invocation, parse_command_args
 
 from .asr import transcribe_audio
 from .media import enhance_audio_for_asr, extract_audio, probe_media
@@ -16,7 +19,7 @@ from .timing import refine_timing
 from .translate import dry_run_openai_translation, translate_segments
 
 
-def parse_args() -> argparse.Namespace:
+def build_legacy_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="从视频或音频生成 SRT 字幕，并可选接入 OpenAI 兼容接口翻译。"
     )
@@ -154,7 +157,20 @@ def parse_args() -> argparse.Namespace:
         default=12,
         help="最多调用 AI 风格重写的字幕段数。",
     )
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse either a modern subcommand invocation or the legacy CLI.
+
+    Legacy invocations intentionally retain argparse's original positional
+    behavior: the first token is still treated as an input path unless it is a
+    recognized subcommand.
+    """
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    if is_command_invocation(tokens):
+        return parse_command_args(tokens)
+    return build_legacy_parser().parse_args(tokens)
 
 
 def default_output_path(input_path: str, src_lang: str | None) -> Path:
@@ -170,8 +186,7 @@ def save_report(report, output_path: str | Path) -> None:
     )
 
 
-def main() -> None:
-    args = parse_args()
+def legacy_main(args: argparse.Namespace) -> int:
 
     if args.openai_dry_run:
         # 这个分支只验证 OpenAI 兼容接口，不要求提供视频文件。
@@ -180,7 +195,7 @@ def main() -> None:
             base_url=args.openai_base_url,
         )
         print(f"OpenAI dry run ok: {result}")
-        return
+        return 0
 
     if args.learn_style_project:
         project_dir = Path(args.learn_style_project)
@@ -193,7 +208,7 @@ def main() -> None:
             output_dir=project_dir,
         )
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
-        return
+        return 0
 
     if not args.input:
         raise SystemExit("请提供输入视频或音频路径；只有 --openai-dry-run 可以不传 input。")
@@ -270,10 +285,18 @@ def main() -> None:
 
     write_srt(segments, output_path)
     print(f"Wrote subtitle: {output_path}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    if is_command_invocation(tokens):
+        return dispatch(parse_command_args(tokens))
+    return legacy_main(build_legacy_parser().parse_args(tokens))
 
 
 if __name__ == "__main__":
     try:
-        main()
+        raise SystemExit(main())
     except RuntimeError as exc:
         raise SystemExit(f"错误：{exc}") from exc
