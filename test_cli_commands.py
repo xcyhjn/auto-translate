@@ -27,6 +27,13 @@ def test_unknown_command_and_help_have_standard_exit_codes() -> None:
     assert help_exit.value.code == 0
 
 
+def test_top_level_help_advertises_composable_commands(capsys) -> None:
+    with pytest.raises(SystemExit) as help_exit:
+        cli.parse_args(["--help"])
+    assert help_exit.value.code == 0
+    assert "组合式子命令" in capsys.readouterr().out
+
+
 def test_legacy_invocation_remains_legacy() -> None:
     args = cli.parse_args(["input.mp4", "--src-lang", "en"])
     assert not hasattr(args, "command")

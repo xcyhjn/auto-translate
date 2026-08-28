@@ -21,7 +21,12 @@ from .translate import dry_run_openai_translation, translate_segments
 
 def build_legacy_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="从视频或音频生成 SRT 字幕，并可选接入 OpenAI 兼容接口翻译。"
+        description="从视频或音频生成 SRT 字幕，并可选接入 OpenAI 兼容接口翻译。",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "组合式子命令：pipeline、translate、qa、burn、init\n"
+            "使用 python -m autosub_zh.cli <子命令> --help 查看阶段参数。"
+        ),
     )
     parser.add_argument("input", nargs="?", help="输入视频或音频路径。")
     parser.add_argument(

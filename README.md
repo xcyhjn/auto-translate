@@ -26,6 +26,33 @@ cd D:\
 6. 导出 `.srt`
 7. 可选保存或读取中间字幕片段 JSON
 
+当前工程化能力：
+
+- 阶段契约：统一 `stage/status/outputs/warnings/error/metadata` 信封。
+- Artifact 指纹：按输入文件、关键配置、提示词/术语和 schema 判断缓存有效性。
+- 安全发布：JSON 通过同目录临时文件和原子替换写入。
+- 组合式 CLI：`pipeline`、`translate`、`qa`、`burn`、`init`，同时兼容旧式单命令调用。
+- Evidence sidecar：保存项目隔离的 `confirmed/advisory/unknown` 证据，不覆盖人工 glossary 或 ASS。
+- 人工 Gate：人工编辑 ASS 保持最终编辑事实；Bilibili 重复检索仍为 advisory。
+
+完整约束见 [复合工程标准](docs/COMPOSITE_ENGINEERING_STANDARD.md)，本轮拆分和验收边界见 [任务总览](docs/COMPOSITE_ENGINEERING_STANDARD_TASK_OVERVIEW.md)。
+
+## 组合式 CLI
+
+从父目录运行：
+
+```powershell
+cd D:\
+python -m autosub_zh.cli --help
+python -m autosub_zh.cli pipeline "D:\media\input.mp4" --config "D:\autosub_zh\ui_config.json" --dry-run
+python -m autosub_zh.cli translate "D:\output\segments.json" -o "D:\output\translated.json" --dry-run
+python -m autosub_zh.cli qa "D:\output\segments.json" --dry-run
+python -m autosub_zh.cli burn "D:\media\input.mp4" "D:\output\subtitle.ass" "D:\output\burned.mp4" --dry-run
+python -m autosub_zh.cli init --output "D:\workspace\autosub_zh.config.example.json" --dry-run
+```
+
+`--dry-run` 只输出计划，不读取大媒体、不调用网络，也不写业务产物。去掉它才会执行相应阶段。
+
 ## 安装依赖
 
 ```powershell
