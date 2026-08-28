@@ -8,6 +8,11 @@ from typing import Callable
 
 from .models import BilingualSubtitleStyle
 from .pipeline_core import build_output_slug, run_pipeline
+from .artifact_manifest import (
+    ARTIFACT_MANIFEST_SCHEMA_VERSION,
+    atomic_write_json,
+    build_artifact_manifest,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -178,13 +183,17 @@ def compute_output_dir(input_path: str | Path, output_root: str | Path = OUTPUT_
     return Path(output_root) / build_output_slug(Path(input_path))
 
 
-def write_effective_config(output_dir: str | Path, config: dict) -> Path:
+def write_effective_config(
+    output_dir: str | Path,
+    config: dict,
+    *,
+    input_path: str | Path | None = None,
+) -> Path:
     target = Path(output_dir) / "00_effective_config.json"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-    temp_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(target)
-    return target
+    payload = dict(config)
+    payload["_artifact_manifest"] = build_artifact_manifest(input_path, config=config)
+    payload["_artifact_manifest"]["schema_version"] = ARTIFACT_MANIFEST_SCHEMA_VERSION
+    return atomic_write_json(target, payload)
 
 
 def run_pipeline_from_config(
@@ -197,7 +206,7 @@ def run_pipeline_from_config(
 ) -> dict:
     ensure_openai_runtime_env_loaded()
     output_dir = compute_output_dir(video_path, output_root)
-    write_effective_config(output_dir, config)
+    write_effective_config(output_dir, config, input_path=video_path)
     style = normalize_style_config(config)
     return run_pipeline(
         input_path=Path(video_path),
