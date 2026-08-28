@@ -693,11 +693,8 @@ def normalize_config(config: dict) -> dict:
     normalized["source_reference_label"] = str(
         normalized.get("source_reference_label") or normalized.get("src_lang") or "source"
     ).strip()
-    env_base_url = configured_openai_base_url()
-    if env_base_url:
-        normalized["openai_base_url"] = env_base_url
-    else:
-        normalized["openai_base_url"] = str(normalized.get("openai_base_url") or "").strip()
+    configured_base_url = str(normalized.get("openai_base_url") or "").strip()
+    normalized["openai_base_url"] = configured_base_url or configured_openai_base_url()
     normalized["proxy_url"] = normalize_proxy_url(normalized.get("proxy_url"))
     return normalized
 
@@ -850,13 +847,8 @@ def build_openai_base_url_status(info: dict, injected: bool = False, *, config_b
 
 def build_openai_runtime_status(config: dict | None = None) -> dict:
     runtime = ensure_openai_runtime_env_loaded()
-    base_info = resolve_env_value(OPENAI_BASE_URL_ENV, OPENAI_BASE_URL_ALIASES)
-    if base_info.get("available"):
-        runtime["base_url"] = build_openai_base_url_status(
-            base_info,
-            bool(runtime.get("base_url", {}).get("injected")),
-        )
-    elif config and str(config.get("openai_base_url") or "").strip():
+    if config and str(config.get("openai_base_url") or "").strip():
+        base_info = resolve_env_value(OPENAI_BASE_URL_ENV, OPENAI_BASE_URL_ALIASES)
         runtime["base_url"] = build_openai_base_url_status(
             base_info,
             bool(runtime.get("base_url", {}).get("injected")),
