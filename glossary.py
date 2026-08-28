@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .evidence_sidecar import build_evidence_record, write_evidence_sidecar
 from .models import Segment
 from .youtube_meta import YouTubeMeta
 
@@ -418,7 +419,47 @@ def glossary_from_terms(terms: dict[str, GlossaryTerm], *, strategy: str) -> dic
     }
 
 
-def write_youtube_glossary(output_dir: Path, meta: YouTubeMeta) -> Path:
+def youtube_metadata_evidence(
+    meta: YouTubeMeta,
+    *,
+    project_id: str = "unknown",
+    input_fingerprint: str = "unknown",
+    fetched_at: str = "unknown",
+) -> dict:
+    """Convert already-fetched metadata to advisory review context.
+
+    This record does not participate in glossary resolution.  Callers must
+    explicitly request sidecar publication and keep human-confirmed glossary
+    rules authoritative.
+    """
+
+    return build_evidence_record(
+        source="youtube_metadata",
+        title=meta.title,
+        url=meta.video_url,
+        summary=meta.description,
+        fetched_at=fetched_at,
+        confidence=0.7,
+        project_id=project_id,
+        input_fingerprint=input_fingerprint,
+        evidence_level="advisory",
+        metadata={
+            "video_id": meta.video_id,
+            "author": meta.author,
+            "published_at": meta.published_at,
+        },
+    )
+
+
+def write_youtube_glossary(
+    output_dir: Path,
+    meta: YouTubeMeta,
+    *,
+    evidence_sidecar_path: str | Path | None = None,
+    project_id: str = "unknown",
+    input_fingerprint: str = "unknown",
+    evidence_fetched_at: str = "unknown",
+) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     glossary = generate_youtube_glossary(meta)
     raw_path = output_dir / "00_glossary_auto.json"
@@ -441,6 +482,18 @@ def write_youtube_glossary(output_dir: Path, meta: YouTubeMeta) -> Path:
             )
         )
     review_path.write_text("\n".join(review_lines) + "\n", encoding="utf-8")
+    if evidence_sidecar_path is not None:
+        write_evidence_sidecar(
+            evidence_sidecar_path,
+            [youtube_metadata_evidence(
+                meta,
+                project_id=project_id,
+                input_fingerprint=input_fingerprint,
+                fetched_at=evidence_fetched_at,
+            )],
+            project_id=project_id,
+            input_fingerprint=input_fingerprint,
+        )
     return raw_path
 
 
