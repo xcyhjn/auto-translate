@@ -7,6 +7,7 @@ from typing import Callable
 
 from .models import BilingualSubtitleStyle
 from .pipeline_core import build_output_slug, run_pipeline
+from .project_paths import OUTPUT_DIR
 from .artifact_manifest import (
     ARTIFACT_MANIFEST_SCHEMA_VERSION,
     atomic_write_json,
@@ -14,8 +15,6 @@ from .artifact_manifest import (
 )
 
 
-BASE_DIR = Path(__file__).resolve().parent
-OUTPUT_DIR = BASE_DIR / "output"
 STYLE_DEFAULTS = asdict(BilingualSubtitleStyle())
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 OPENAI_BASE_URL_ENV = "OPENAI_BASE_URL"

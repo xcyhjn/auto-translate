@@ -25,7 +25,7 @@ This happens because:
 
 Relevant file:
 
-- [subtitle_io.py](D:/autosub_zh/subtitle_io.py)
+- [src/autosub_zh/subtitle_io.py](D:/autosub_zh/src/autosub_zh/subtitle_io.py)
 
 Important functions:
 
@@ -65,7 +65,7 @@ This task is **not** about:
 
 Current Russian workflow profile:
 
-- [workflow_profiles/ru_to_zh_default.json](D:/autosub_zh/workflow_profiles/ru_to_zh_default.json)
+- [src/autosub_zh/workflow_profiles/ru_to_zh_default.json](D:/autosub_zh/src/autosub_zh/workflow_profiles/ru_to_zh_default.json)
 
 Current state:
 
@@ -94,7 +94,7 @@ Meaning:
 
 ### 1. Add a new reference mode
 
-In [models.py](D:/autosub_zh/models.py), the style model already holds:
+In [src/autosub_zh/models.py](D:/autosub_zh/src/autosub_zh/models.py), the style model already holds:
 
 - `reference_mode`
 
@@ -107,7 +107,7 @@ No schema change may be needed, but the code paths that interpret the value must
 
 ### 2. Stop truncation for Russian workflows
 
-In [subtitle_io.py](D:/autosub_zh/subtitle_io.py):
+In [src/autosub_zh/subtitle_io.py](D:/autosub_zh/src/autosub_zh/subtitle_io.py):
 
 - `compact_reference_text()` should continue to exist for English workflows
 - but Russian bilingual reference text should not go through this truncation path when `reference_mode = full_split`
@@ -182,7 +182,7 @@ When the Russian reference layer is split into multiple cues:
 - do not explode Chinese into tiny fragments
 - do not repeat the entire Chinese sentence for every Russian split piece
 
-Existing helpers in [subtitle_io.py](D:/autosub_zh/subtitle_io.py) can likely be reused:
+Existing helpers in [src/autosub_zh/subtitle_io.py](D:/autosub_zh/src/autosub_zh/subtitle_io.py) can likely be reused:
 
 - `build_chinese_groups_for_english()`
 - `merge_english_groups_for_alignment()`
@@ -194,8 +194,8 @@ They will likely need renaming or generalization because they are currently Engl
 
 Relevant files:
 
-- [web/index.html](D:/autosub_zh/web/index.html)
-- [web/app.js](D:/autosub_zh/web/app.js)
+- [src/autosub_zh/web/index.html](D:/autosub_zh/src/autosub_zh/web/index.html)
+- [src/autosub_zh/web/app.js](D:/autosub_zh/src/autosub_zh/web/app.js)
 
 Required UI work:
 
@@ -243,7 +243,7 @@ Add checks for:
 
 Relevant files:
 
-- [qa.py](D:/autosub_zh/qa.py)
+- [src/autosub_zh/qa.py](D:/autosub_zh/src/autosub_zh/qa.py)
 - [tests/test_subtitle_output_modes.py](D:/autosub_zh/tests/test_subtitle_output_modes.py)
 
 ## Suggested Test Additions

@@ -18,7 +18,7 @@ The original project shape was strongly optimized for English-to-Chinese subtitl
 
 The main pipeline entry is:
 
-- [pipeline_core.py](D:/autosub_zh/pipeline_core.py)
+- [src/autosub_zh/pipeline_core.py](D:/autosub_zh/src/autosub_zh/pipeline_core.py)
 
 High-level runtime stages:
 
@@ -38,49 +38,49 @@ High-level runtime stages:
 
 Main pipeline and orchestration:
 
-- [pipeline_core.py](D:/autosub_zh/pipeline_core.py)
-- [ui_server.py](D:/autosub_zh/ui_server.py)
-- [cli.py](D:/autosub_zh/cli.py)
+- [src/autosub_zh/pipeline_core.py](D:/autosub_zh/src/autosub_zh/pipeline_core.py)
+- [src/autosub_zh/ui_server.py](D:/autosub_zh/src/autosub_zh/ui_server.py)
+- [src/autosub_zh/cli.py](D:/autosub_zh/src/autosub_zh/cli.py)
 
 ASR and media:
 
-- [asr.py](D:/autosub_zh/asr.py)
-- [media.py](D:/autosub_zh/media.py)
-- [timing.py](D:/autosub_zh/timing.py)
+- [src/autosub_zh/asr.py](D:/autosub_zh/src/autosub_zh/asr.py)
+- [src/autosub_zh/media.py](D:/autosub_zh/src/autosub_zh/media.py)
+- [src/autosub_zh/timing.py](D:/autosub_zh/src/autosub_zh/timing.py)
 
 Translation and text quality:
 
-- [translate.py](D:/autosub_zh/translate.py)
-- [span_translate.py](D:/autosub_zh/span_translate.py)
-- [span_repair.py](D:/autosub_zh/span_repair.py)
-- [display_rewrite.py](D:/autosub_zh/display_rewrite.py)
-- [text_quality.py](D:/autosub_zh/text_quality.py)
-- [difficult_spans.py](D:/autosub_zh/difficult_spans.py)
+- [src/autosub_zh/translate.py](D:/autosub_zh/src/autosub_zh/translate.py)
+- [src/autosub_zh/span_translate.py](D:/autosub_zh/src/autosub_zh/span_translate.py)
+- [src/autosub_zh/span_repair.py](D:/autosub_zh/src/autosub_zh/span_repair.py)
+- [src/autosub_zh/display_rewrite.py](D:/autosub_zh/src/autosub_zh/display_rewrite.py)
+- [src/autosub_zh/text_quality.py](D:/autosub_zh/src/autosub_zh/text_quality.py)
+- [src/autosub_zh/difficult_spans.py](D:/autosub_zh/src/autosub_zh/difficult_spans.py)
 
 Glossary and terminology:
 
-- [glossary.py](D:/autosub_zh/glossary.py)
-- [terminology.py](D:/autosub_zh/terminology.py)
+- [src/autosub_zh/glossary.py](D:/autosub_zh/src/autosub_zh/glossary.py)
+- [src/autosub_zh/terminology.py](D:/autosub_zh/src/autosub_zh/terminology.py)
 
 Subtitle output:
 
-- [subtitle_io.py](D:/autosub_zh/subtitle_io.py)
-- [qa.py](D:/autosub_zh/qa.py)
-- [qa_outputs.py](D:/autosub_zh/qa_outputs.py)
+- [src/autosub_zh/subtitle_io.py](D:/autosub_zh/src/autosub_zh/subtitle_io.py)
+- [src/autosub_zh/qa.py](D:/autosub_zh/src/autosub_zh/qa.py)
+- [src/autosub_zh/qa_outputs.py](D:/autosub_zh/src/autosub_zh/qa_outputs.py)
 
 Web UI:
 
-- [web/index.html](D:/autosub_zh/web/index.html)
-- [web/app.js](D:/autosub_zh/web/app.js)
-- [web/styles.css](D:/autosub_zh/web/styles.css)
+- [src/autosub_zh/web/index.html](D:/autosub_zh/src/autosub_zh/web/index.html)
+- [src/autosub_zh/web/app.js](D:/autosub_zh/src/autosub_zh/web/app.js)
+- [src/autosub_zh/web/styles.css](D:/autosub_zh/src/autosub_zh/web/styles.css)
 
 ## New Multilingual Layer
 
 The multilingual work introduced a workflow-profile layer:
 
-- [workflow_profiles.py](D:/autosub_zh/workflow_profiles.py)
-- [workflow_profiles/en_to_zh_default.json](D:/autosub_zh/workflow_profiles/en_to_zh_default.json)
-- [workflow_profiles/ru_to_zh_default.json](D:/autosub_zh/workflow_profiles/ru_to_zh_default.json)
+- [src/autosub_zh/workflow_profiles.py](D:/autosub_zh/src/autosub_zh/workflow_profiles.py)
+- [src/autosub_zh/workflow_profiles/en_to_zh_default.json](D:/autosub_zh/src/autosub_zh/workflow_profiles/en_to_zh_default.json)
+- [src/autosub_zh/workflow_profiles/ru_to_zh_default.json](D:/autosub_zh/src/autosub_zh/workflow_profiles/ru_to_zh_default.json)
 
 Each workflow profile can define:
 
@@ -102,8 +102,8 @@ Prompt profiles live under:
 
 Current prompts:
 
-- [translation_prompts/en_zh_natural_subtitle.md](D:/autosub_zh/translation_prompts/en_zh_natural_subtitle.md)
-- [translation_prompts/ru_zh_natural_subtitle.md](D:/autosub_zh/translation_prompts/ru_zh_natural_subtitle.md)
+- [src/autosub_zh/translation_prompts/en_zh_natural_subtitle.md](D:/autosub_zh/src/autosub_zh/translation_prompts/en_zh_natural_subtitle.md)
+- [src/autosub_zh/translation_prompts/ru_zh_natural_subtitle.md](D:/autosub_zh/src/autosub_zh/translation_prompts/ru_zh_natural_subtitle.md)
 
 Dataset profiles live under:
 
@@ -111,10 +111,10 @@ Dataset profiles live under:
 
 Current Russian dataset:
 
-- [datasets/ru_zh/general/glossary.json](D:/autosub_zh/datasets/ru_zh/general/glossary.json)
-- [datasets/ru_zh/general/asr_confusions.json](D:/autosub_zh/datasets/ru_zh/general/asr_confusions.json)
-- [datasets/ru_zh/general/style_examples.jsonl](D:/autosub_zh/datasets/ru_zh/general/style_examples.jsonl)
-- [datasets/ru_zh/general/qa_cases.jsonl](D:/autosub_zh/datasets/ru_zh/general/qa_cases.jsonl)
+- [src/autosub_zh/datasets/ru_zh/general/glossary.json](D:/autosub_zh/src/autosub_zh/datasets/ru_zh/general/glossary.json)
+- [src/autosub_zh/datasets/ru_zh/general/asr_confusions.json](D:/autosub_zh/src/autosub_zh/datasets/ru_zh/general/asr_confusions.json)
+- [src/autosub_zh/datasets/ru_zh/general/style_examples.jsonl](D:/autosub_zh/src/autosub_zh/datasets/ru_zh/general/style_examples.jsonl)
+- [src/autosub_zh/datasets/ru_zh/general/qa_cases.jsonl](D:/autosub_zh/src/autosub_zh/datasets/ru_zh/general/qa_cases.jsonl)
 
 Current behavior:
 
@@ -143,9 +143,9 @@ Implemented outputs:
 
 Relevant code:
 
-- [workflow_profiles.py](D:/autosub_zh/workflow_profiles.py)
-- [subtitle_io.py](D:/autosub_zh/subtitle_io.py)
-- [pipeline_core.py](D:/autosub_zh/pipeline_core.py)
+- [src/autosub_zh/workflow_profiles.py](D:/autosub_zh/src/autosub_zh/workflow_profiles.py)
+- [src/autosub_zh/subtitle_io.py](D:/autosub_zh/src/autosub_zh/subtitle_io.py)
+- [src/autosub_zh/pipeline_core.py](D:/autosub_zh/src/autosub_zh/pipeline_core.py)
 
 ## Russian Workflow Status
 
@@ -256,7 +256,7 @@ Before another AI or developer takes over:
 
 1. Read this file.
 2. Read [docs/multilingual_workflow_plan.md](D:/autosub_zh/docs/multilingual_workflow_plan.md).
-3. Check [workflow_profiles.py](D:/autosub_zh/workflow_profiles.py).
+3. Check [src/autosub_zh/workflow_profiles.py](D:/autosub_zh/src/autosub_zh/workflow_profiles.py).
 4. Check current focused tests:
    - [tests/test_workflow_profiles.py](D:/autosub_zh/tests/test_workflow_profiles.py)
    - [tests/test_subtitle_output_modes.py](D:/autosub_zh/tests/test_subtitle_output_modes.py)

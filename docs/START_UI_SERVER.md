@@ -9,14 +9,15 @@ powershell -ExecutionPolicy Bypass -File "D:\autosub_zh\scripts\start_ui_server.
 这个脚本会：
 
 1. 进入正确的项目目录
-2. 自动把 CUDA 12.8 的 `bin` 加入当前进程 PATH
-3. 自动把 `HTTP_PROXY` / `HTTPS_PROXY` 指向 `http://127.0.0.1:7890`
-4. 在当前窗口前台启动 `autosub_zh.ui_server`
+2. 把 `src/` 加入当前进程的 `PYTHONPATH`
+3. 在存在 CUDA 12.8 时补充本地运行库路径
+4. 按需读取 `AUTOSUB_PROXY_URL`，未设置时使用直连
+5. 选择可用本地端口并在前台启动 `autosub_zh.ui_server`
 
-然后在浏览器里打开：
+然后打开终端显示的地址。默认地址是：
 
 ```text
 http://127.0.0.1:8777
 ```
 
-只要这个 PowerShell 窗口还开着，平台服务就会一直在线。
+如果 `8777` 已被占用，脚本会尝试后续端口。只要这个 PowerShell 窗口还开着，平台服务就会一直在线。

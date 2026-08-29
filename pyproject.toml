@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autosub-zh"
+version = "2.0.0"
+description = "Local bilingual subtitle production workflow with human-reviewed ASS output."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "faster-whisper>=1.2.1",
+  "httpx>=0.27",
+  "openai>=2.0.0",
+  "scikit-learn>=1.5",
+  "yt-dlp",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.12"]
+
+[project.scripts]
+autosub-zh = "autosub_zh.cli:main"
+autosub-zh-ui = "autosub_zh.ui_server:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+autosub_zh = [
+  "datasets/**/*.json",
+  "datasets/**/*.jsonl",
+  "translation_prompts/*.md",
+  "web/*.css",
+  "web/*.html",
+  "web/*.js",
+  "workflow_profiles/*.json",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

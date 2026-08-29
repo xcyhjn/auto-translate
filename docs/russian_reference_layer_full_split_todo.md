@@ -100,5 +100,5 @@ Status: complete
 
 Validation:
 
-- `workflow_profiles/ru_to_zh_default.json` is the durable workflow default source.
+- `src/autosub_zh/workflow_profiles/ru_to_zh_default.json` is the durable workflow default source.
 - `ui_config.json` now uses `workflow_profile=ru_to_zh_default` with matching Russian reference-layer style defaults.

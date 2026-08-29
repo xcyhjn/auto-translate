@@ -2,20 +2,20 @@
 在 `D:\autosub_zh` 增加项目级、人工可审计的 evidence sidecar 和轻量关键词检索，并建立复合工程标准文档；没有 evidence 的旧项目行为必须完全不变。
 
 ## Context
-- 现有 `glossary.py` 已从 YouTube 元数据提取术语，`entity_normalization.py` 和 `source_repair.py` 负责后续纠错。
+- 现有 `src/autosub_zh/glossary.py` 已从 YouTube 元数据提取术语，`src/autosub_zh/entity_normalization.py` 和 `src/autosub_zh/source_repair.py` 负责后续纠错。
 - 现有 Bilibili 检索是 advisory，不能变成阻断条件；人工 ASS 仍是最终编辑事实。
 - 目标仓库使用 web evidence/检索作为 glossary 补充。本切片不复制其代码、不引入 Tavily/Chroma。
 
 ## Target State
-- 新建 `evidence_sidecar.py`：定义 schema、记录校验、项目/输入指纹隔离、原子写入/读取、关键词检索。
-- 在 `glossary.py` 中做最小可选接入：已有 metadata 可生成 evidence 记录；没有 sidecar 时原逻辑不变。
+- 新建 `src/autosub_zh/evidence_sidecar.py`：定义 schema、记录校验、项目/输入指纹隔离、原子写入/读取、关键词检索。
+- 在 `src/autosub_zh/glossary.py` 中做最小可选接入：已有 metadata 可生成 evidence 记录；没有 sidecar 时原逻辑不变。
 - 新增测试覆盖 schema round-trip、无效记录过滤、跨项目隔离、关键词检索和无 evidence 兼容。
 - 新建 `docs/COMPOSITE_ENGINEERING_STANDARD.md`，固定阶段契约、artifact/fingerprint、证据等级（confirmed/advisory/unknown）、人工 gate、回滚、测试和数据安全规则。
 
 ## Scope
-- 只修改：`evidence_sidecar.py`、`glossary.py`、新增 `test_evidence_sidecar.py`、新增 `docs/COMPOSITE_ENGINEERING_STANDARD.md`。
-- 可读取：`youtube_meta.py`、`entity_normalization.py`、`source_repair.py`、`datasets/local_feedback/README.md`、`docs/COMPOSITE_ENGINEERING_STANDARD_TASK_OVERVIEW.md`。
-- 不得修改：`ui_server.py`、`pipeline_core.py`、`translate.py`、Bilibili 搜索规则、数据库、`.env`、真实数据、视频、ASS。
+- 只修改：`src/autosub_zh/evidence_sidecar.py`、`src/autosub_zh/glossary.py`、新增 `tests/test_evidence_sidecar.py`、新增 `docs/COMPOSITE_ENGINEERING_STANDARD.md`。
+- 可读取：`src/autosub_zh/youtube_meta.py`、`src/autosub_zh/entity_normalization.py`、`src/autosub_zh/source_repair.py`、`datasets/local_feedback/README.md`、`docs/COMPOSITE_ENGINEERING_STANDARD_TASK_OVERVIEW.md`。
+- 不得修改：`src/autosub_zh/ui_server.py`、`src/autosub_zh/pipeline_core.py`、`src/autosub_zh/translate.py`、Bilibili 搜索规则、数据库、`.env`、真实数据、视频、ASS。
 
 ## Constraints
 - 仅使用 Python 标准库；不得联网、不得新增依赖。

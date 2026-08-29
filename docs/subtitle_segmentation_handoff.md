@@ -24,10 +24,10 @@ The goal is not "one cue must always equal one sentence." The target policy is:
 
 Files reviewed:
 
-- `D:\autosub_zh\timing.py`
-- `D:\autosub_zh\source_spans.py`
-- `D:\autosub_zh\pipeline_core.py`
-- `D:\autosub_zh\models.py`
+- `D:\autosub_zh\src\autosub_zh\timing.py`
+- `D:\autosub_zh\src\autosub_zh\source_spans.py`
+- `D:\autosub_zh\src\autosub_zh\pipeline_core.py`
+- `D:\autosub_zh\src\autosub_zh\models.py`
 - Sample ASS: `D:\autosub_zh\output\Russian-book-about-a-dying-god\08_bilingual_zh_en.ass`
 
 Key causes:
@@ -37,11 +37,11 @@ Key causes:
 - `split_segment_by_max_duration()` was greedy: when a segment exceeded max duration it cut before the current word, regardless of syntax, sentence boundary, or orphan tail.
 - `split_segment_for_display_limits()` split whenever `line_count > 1`, even when the sentence was readable and within duration.
 - The cleanup phase forced `end >= start + min_duration` and then capped to `max_duration`, modifying ASR timing for readability.
-- `source_spans.py` did not explicitly flag short open fragments or internal multi-sentence boundaries strongly enough.
+- `src/autosub_zh/source_spans.py` did not explicitly flag short open fragments or internal multi-sentence boundaries strongly enough.
 
 ## Changes Made
 
-### `models.py`
+### `src/autosub_zh/models.py`
 
 Added tunable segmentation rules:
 
@@ -52,7 +52,7 @@ Added tunable segmentation rules:
 - `display_overflow_tolerance = 1.35`
 - `complete_sentence_duration_tolerance = 0.45`
 
-### `timing.py`
+### `src/autosub_zh/timing.py`
 
 Implemented sentence-first timing refinement:
 
@@ -70,7 +70,7 @@ Implemented sentence-first timing refinement:
   - splitting before continuation words
 - Changed final cleanup to preserve ASR timing instead of forcing every cue to 2 seconds.
 
-### `source_spans.py`
+### `src/autosub_zh/source_spans.py`
 
 Added source span flags:
 
@@ -152,10 +152,10 @@ Notable improvements:
 
 ### Added
 
-- `semantic_allocation.py` builds per-cue semantic allocation reports with `source_span_id`, `allocation_confidence`, `qa_flags`, and `allocation_note`.
-- `segmentation_qa.py` writes the stable segmentation QA metrics used by both JSON artifacts and the frontend.
-- `source_repair.py` now emits `02b_asr_source_repair_candidates.json` for raw/timed ASR source repair candidates without changing word timestamps.
-- `zh_reading_axis.py` and `subtitle_io.py` now support display-only grouping for adjacent short complete sentences.
+- `src/autosub_zh/semantic_allocation.py` builds per-cue semantic allocation reports with `source_span_id`, `allocation_confidence`, `qa_flags`, and `allocation_note`.
+- `src/autosub_zh/segmentation_qa.py` writes the stable segmentation QA metrics used by both JSON artifacts and the frontend.
+- `src/autosub_zh/source_repair.py` now emits `02b_asr_source_repair_candidates.json` for raw/timed ASR source repair candidates without changing word timestamps.
+- `src/autosub_zh/zh_reading_axis.py` and `src/autosub_zh/subtitle_io.py` now support display-only grouping for adjacent short complete sentences.
 - The pipeline now writes:
   - `02b_asr_source_repair_candidates.json`
   - `05a_semantic_allocated_segments.json`
@@ -180,7 +180,7 @@ Generated phase-2 artifacts for `output/Russian-book-about-a-dying-god`.
 
 ### Validation
 
-- `python -m py_compile semantic_allocation.py segmentation_qa.py source_repair.py zh_reading_axis.py subtitle_io.py pipeline_core.py ui_server.py pipeline_runner.py`
+- `python -m py_compile src/autosub_zh/semantic_allocation.py src/autosub_zh/segmentation_qa.py src/autosub_zh/source_repair.py src/autosub_zh/zh_reading_axis.py src/autosub_zh/subtitle_io.py src/autosub_zh/pipeline_core.py src/autosub_zh/ui_server.py src/autosub_zh/pipeline_runner.py`
 - `node --check web\app.js`
 - `pytest -q tests/test_semantic_qa_phase2.py tests/test_zh_reading_axis.py tests/test_asr_repair_flow.py`
 - Browser check at `http://127.0.0.1:8777`
@@ -222,20 +222,20 @@ This happened because terminal orphan cues were protected from the existing orph
 
 ### Files Changed
 
-- `timing.py`
+- `src/autosub_zh/timing.py`
   - Added `is_terminal_orphan_tail()` and `can_absorb_terminal_orphan_tail()`.
   - Merges open-left + terminal tail before normal sentence-boundary protections.
   - Handles suspicious ASR punctuation such as `property.` + `market.`.
   - Adds strong DP penalties against producing terminal 1-2 word tails.
-- `zh_reading_axis.py`
+- `src/autosub_zh/zh_reading_axis.py`
   - Added `merge_orphan_tail_display_cues()`.
   - Added English and Chinese cleanup for display-only merged cues.
-- `pipeline_core.py`
+- `src/autosub_zh/pipeline_core.py`
   - Runs the orphan-tail display pass before writing bilingual ASS.
-- `segmentation_qa.py`
+- `src/autosub_zh/segmentation_qa.py`
   - Added `orphan_terminal_tail_count` and samples.
   - `pass=false` when a residual terminal orphan tail remains.
-- `web/app.js`
+- `src/autosub_zh/web/app.js`
   - Added the frontend QA card `孤立句尾词`.
 - Tests:
   - `tests/test_timing_segmentation.py`
@@ -245,8 +245,8 @@ This happened because terminal orphan cues were protected from the existing orph
 
 Commands:
 
-- `python -m py_compile timing.py zh_reading_axis.py segmentation_qa.py pipeline_core.py`
-- `node --check web/app.js`
+- `python -m py_compile src/autosub_zh/timing.py src/autosub_zh/zh_reading_axis.py src/autosub_zh/segmentation_qa.py src/autosub_zh/pipeline_core.py`
+- `node --check src/autosub_zh/web/app.js`
 - `pytest -q tests/test_timing_segmentation.py tests/test_semantic_qa_phase2.py tests/test_zh_reading_axis.py tests/test_subtitle_output_modes.py tests/test_asr_repair_flow.py`
 
 Result:
@@ -281,7 +281,7 @@ Chinese subtitles still leak Latin text because prompt-level instructions are to
 
 ### Strategy
 
-- Add `english_residue_policy.py` as the shared scorer.
+- Add `src/autosub_zh/english_residue_policy.py` as the shared scorer.
 - Score every Latin residue in Chinese subtitles on a 0-100 scale.
 - Default thresholds:
   - preserve only at `>= 85`
@@ -292,23 +292,23 @@ Chinese subtitles still leak Latin text because prompt-level instructions are to
 
 ### Files Changed
 
-- `english_residue_policy.py`
-- `translate.py`
-- `span_translate.py`
-- `qa.py`
-- `qa_outputs.py`
-- `entity_normalization.py`
-- `pipeline_core.py`
-- `pipeline_runner.py`
-- `ui_server.py`
-- `web/app.js`
+- `src/autosub_zh/english_residue_policy.py`
+- `src/autosub_zh/translate.py`
+- `src/autosub_zh/span_translate.py`
+- `src/autosub_zh/qa.py`
+- `src/autosub_zh/qa_outputs.py`
+- `src/autosub_zh/entity_normalization.py`
+- `src/autosub_zh/pipeline_core.py`
+- `src/autosub_zh/pipeline_runner.py`
+- `src/autosub_zh/ui_server.py`
+- `src/autosub_zh/web/app.js`
 - `tests/test_english_residue_policy.py`
 - `tests/test_entity_pipeline_integration.py`
 - `tests/test_entity_pipeline_contract.py`
 
 ### Validation
 
-- `python -m py_compile english_residue_policy.py translate.py span_translate.py qa.py qa_outputs.py entity_normalization.py pipeline_core.py pipeline_runner.py ui_server.py`
+- `python -m py_compile src/autosub_zh/english_residue_policy.py src/autosub_zh/translate.py src/autosub_zh/span_translate.py src/autosub_zh/qa.py src/autosub_zh/qa_outputs.py src/autosub_zh/entity_normalization.py src/autosub_zh/pipeline_core.py src/autosub_zh/pipeline_runner.py src/autosub_zh/ui_server.py`
 - `node --check web\app.js`
 - `pytest -q tests/test_english_residue_policy.py tests/test_qa_outputs.py tests/test_entity_pipeline_contract.py tests/test_entity_pipeline_integration.py tests/test_workflow_profiles.py tests/test_ui_server_config.py`
   - `23 passed in 0.63s`
@@ -344,7 +344,7 @@ These should not be merged into the previous cue just because they are short and
 
 ### Strategy
 
-- Add a shared terminal-short-cue classifier in `terminal_tail.py`.
+- Add a shared terminal-short-cue classifier in `src/autosub_zh/terminal_tail.py`.
 - Split short terminal English cues into three categories:
   - `content_tail`
   - `standalone_particle`
@@ -356,18 +356,18 @@ These should not be merged into the previous cue just because they are short and
 
 ### Files Changed
 
-- `terminal_tail.py`
+- `src/autosub_zh/terminal_tail.py`
   - New shared classifier and particle lexicons.
-- `timing.py`
+- `src/autosub_zh/timing.py`
   - Uses the classifier in merge and split scoring.
-- `zh_reading_axis.py`
+- `src/autosub_zh/zh_reading_axis.py`
   - Uses the classifier for display-only orphan-tail merging.
-- `segmentation_qa.py`
+- `src/autosub_zh/segmentation_qa.py`
   - Adds:
     - `standalone_discourse_particle_count`
     - `ambiguous_discourse_tail_count`
   - Keeps `orphan_terminal_tail_count` as the blocking metric for content tails.
-- `web/app.js`
+- `src/autosub_zh/web/app.js`
   - Adds frontend QA cards for:
     - `独立语气词`
     - `歧义语气词`
@@ -377,8 +377,8 @@ These should not be merged into the previous cue just because they are short and
 
 ### Validation
 
-- `python -m py_compile terminal_tail.py timing.py zh_reading_axis.py segmentation_qa.py pipeline_core.py`
-- `node --check web/app.js`
+- `python -m py_compile src/autosub_zh/terminal_tail.py src/autosub_zh/timing.py src/autosub_zh/zh_reading_axis.py src/autosub_zh/segmentation_qa.py src/autosub_zh/pipeline_core.py`
+- `node --check src/autosub_zh/web/app.js`
 - `pytest -q tests/test_timing_segmentation.py tests/test_semantic_qa_phase2.py tests/test_zh_reading_axis.py tests/test_subtitle_output_modes.py tests/test_asr_repair_flow.py`
 
 Result:
@@ -407,12 +407,12 @@ The first strict English residue implementation exposed three bypasses during ac
 
 ### Strategy
 
-- `translate.py`
+- `src/autosub_zh/translate.py`
   - `resolve_preserve_only_translation()` now requires exact normalized match.
-- `terminology.py`
+- `src/autosub_zh/terminology.py`
   - `apply_terminology_short_circuit()` now runs preserve terms through `score_english_residue()`.
   - Auto-discovered preserve names no longer lock unless their preserve score passes the threshold.
-- `english_residue_policy.py`
+- `src/autosub_zh/english_residue_policy.py`
   - `extract_latin_residue()` now scans all Chinese-target output containing Latin letters, including pure English lines.
 
 ### Generated Output
@@ -462,28 +462,28 @@ The span pretranslation path was too broad and too early:
 
 ### Changes Made
 
-- `source_spans.py`
+- `src/autosub_zh/source_spans.py`
   - Added `source_spans_v2` policy version.
   - Added hard span-first gates: max 4 segments, max 12s, min risk score 10.
   - Added strong-reason gating so ordinary open fragments become `span_context`.
-- `span_translate.py`
+- `src/autosub_zh/span_translate.py`
   - Added candidate filters for max segment count, max duration, and minimum risk.
   - Added `span_translation_v2` fingerprint generation and selection-policy reporting.
-- `pipeline_core.py`
+- `src/autosub_zh/pipeline_core.py`
   - Added stale source-span policy detection.
   - Added fingerprint-gated span checkpoint reuse.
   - Stopped span checkpoint reuse when `force_retranslate_existing_segments=True`.
-- `pipeline_runner.py` / `ui_server.py`
+- `src/autosub_zh/pipeline_runner.py` / `src/autosub_zh/ui_server.py`
   - Reduced default `span_translation_max_spans` from 16 to 4.
   - Added config passthrough for `span_translation_max_segments`, `span_translation_max_duration`, and `span_translation_min_risk_score`.
-- `web/index.html` / `web/app.js`
+- `src/autosub_zh/web/index.html` / `src/autosub_zh/web/app.js`
   - Synced the frontend form/defaults for the new span pretranslation limits.
 - `tests/test_span_translation_flow.py`
   - Covers long-span downgrade, short high-risk retention, candidate filtering, and checkpoint fingerprint mismatch.
 
 ### Validation
 
-- `python -m py_compile source_spans.py span_translate.py pipeline_core.py pipeline_runner.py ui_server.py`
+- `python -m py_compile src/autosub_zh/source_spans.py src/autosub_zh/span_translate.py src/autosub_zh/pipeline_core.py src/autosub_zh/pipeline_runner.py src/autosub_zh/ui_server.py`
 - `$env:PYTHONPATH='D:\'; python -m pytest tests/test_span_translation_flow.py tests/test_terminology_short_circuit.py tests/test_english_residue_policy.py tests/test_semantic_qa_phase2.py -q`
   - `30 passed`
 - `node --check web\app.js`
@@ -516,7 +516,7 @@ The web proxy test and YouTube info/cover fetch were failing without actionable 
 
 ### Changes Made
 
-- `ui_server.py`
+- `src/autosub_zh/ui_server.py`
   - Added `validate_proxy_url()` to reject non-proxy URLs before they reach `yt-dlp` or `httpx`.
   - Added `proxy_connection_error()` for explicit socket-level proxy failure text.
   - `test_proxy_connection()` now probes:
@@ -533,7 +533,7 @@ The web proxy test and YouTube info/cover fetch were failing without actionable 
     - `exception_type`
     - `traceback`
 
-- `youtube_meta.py`
+- `src/autosub_zh/youtube_meta.py`
   - Wrapped `yt-dlp` metadata fetch and cover download failures in more explicit `RuntimeError`s that mention whether a proxy was used.
   - Cover download fallback now reports both the primary and fallback failure.
 
@@ -544,7 +544,7 @@ The web proxy test and YouTube info/cover fetch were failing without actionable 
 
 - `$env:PYTHONPATH='D:\'; python -m pytest tests/test_proxy_youtube_diagnostics.py -q`
   - `4 passed`
-- `python -m py_compile ui_server.py youtube_meta.py`
+- `python -m py_compile src/autosub_zh/ui_server.py src/autosub_zh/youtube_meta.py`
 - `node --check web\app.js`
 - Live local diagnostic with the current bad config now reports:
   - `proxy_validation_error = Proxy URL looks like a web page, not a proxy endpoint...`
@@ -559,7 +559,7 @@ The web proxy test and YouTube info/cover fetch were failing without actionable 
 
 ### New Module
 
-- `bilibili_search.py`
+- `src/autosub_zh/bilibili_search.py`
   - `build_bilibili_query_plan()` creates rule-based English, Chinese, mixed, and semantic Bilibili search queries.
   - `search_bilibili()` performs lightweight Bilibili search page requests with proxy support, timeout, User-Agent, and low request volume.
   - `parse_bilibili_search_results()` extracts candidates from embedded JSON or HTML anchors.
@@ -591,7 +591,7 @@ The web proxy test and YouTube info/cover fetch were failing without actionable 
 - `pytest tests/test_bilibili_query_plan.py tests/test_bilibili_candidate_scoring.py tests/test_bilibili_search_parsing.py tests/test_ui_server_bilibili_api.py`
   - `9 passed`
   - final rerun: `9 passed in 1.29s`
-- `python -m py_compile bilibili_search.py ui_server.py`
+- `python -m py_compile src/autosub_zh/bilibili_search.py src/autosub_zh/ui_server.py`
 - `node --check web\app.js`
 - Live local API request:
   - `POST /api/bilibili-duplicate-search`

@@ -48,15 +48,15 @@
 - 项目 Python 依赖
 - 可选：NVIDIA CUDA、Internet Download Manager、OpenAI 兼容接口
 
-假设项目位于 `D:\autosub_zh`，安装依赖时先进入父目录：
+假设项目位于 `D:\autosub_zh`，在项目根目录安装：
 
 ```powershell
-cd D:\
-python -m pip install -r .\autosub_zh\requirements.txt
+cd D:\autosub_zh
+python -m pip install -e .
 python -m autosub_zh.doctor
 ```
 
-`autosub_zh` 是包目录。从 `D:\autosub_zh` 内直接运行 `python -m autosub_zh...` 时，Python 可能找不到同名包；进入父目录即可。
+项目使用标准 `src` 布局。`pip install -e .` 只建立可编辑安装，后续修改源码不需要重复安装；安装后可以在任意目录调用 `autosub-zh`、`autosub-zh-ui` 或 `python -m autosub_zh...`。
 
 ### 启动 Web UI
 
@@ -113,44 +113,43 @@ Bilibili 重复视频检查只提供参考。无结果或检查失败不会阻�
 查看帮助：
 
 ```powershell
-cd D:\
-python -m autosub_zh.cli --help
+autosub-zh --help
 ```
 
 ### 只做转写
 
 ```powershell
-python -m autosub_zh.cli .\autosub_zh\input\video.mp4 `
+autosub-zh .\input\video.mp4 `
   --src-lang en `
   --model distil-large-v3 `
   --device cuda `
   --compute-type float16 `
-  --output .\autosub_zh\output\video.en.srt
+  --output .\output\video.en.srt
 ```
 
 ### 转写并翻译
 
 ```powershell
-python -m autosub_zh.cli .\autosub_zh\input\video.mp4 `
+autosub-zh .\input\video.mp4 `
   --src-lang en `
   --dst-lang zh-Hans `
   --translate `
   --translation-model gpt-5.4 `
-  --output .\autosub_zh\output\video.zh.srt
+  --output .\output\video.zh.srt
 ```
 
 ### 复用中间结果
 
 ```powershell
-python -m autosub_zh.cli .\autosub_zh\input\video.mp4 `
+autosub-zh .\input\video.mp4 `
   --src-lang en `
-  --save-segments .\autosub_zh\output\video.segments.json `
-  --output .\autosub_zh\output\video.en.srt
+  --save-segments .\output\video.segments.json `
+  --output .\output\video.en.srt
 
-python -m autosub_zh.cli .\autosub_zh\input\video.mp4 `
-  --load-segments .\autosub_zh\output\video.segments.json `
+autosub-zh .\input\video.mp4 `
+  --load-segments .\output\video.segments.json `
   --translate `
-  --output .\autosub_zh\output\video.zh.srt
+  --output .\output\video.zh.srt
 ```
 
 ### 先检查子命令计划
@@ -158,11 +157,11 @@ python -m autosub_zh.cli .\autosub_zh\input\video.mp4 `
 `--dry-run` 只输出参数计划，不读取大媒体、不联网，也不写业务产物：
 
 ```powershell
-python -m autosub_zh.cli pipeline .\autosub_zh\input\video.mp4 `
-  --config .\autosub_zh\ui_config.json `
+autosub-zh pipeline .\input\video.mp4 `
+  --config .\ui_config.json `
   --dry-run
 
-python -m autosub_zh.cli qa .\autosub_zh\output\video\05_translated_segments.json `
+autosub-zh qa .\output\video\05_translated_segments.json `
   --dry-run
 ```
 
@@ -187,8 +186,7 @@ $env:OPENAI_BASE_URL="https://example.com/v1"
 重新打开终端后检查：
 
 ```powershell
-cd D:\
-python -m autosub_zh.cli --openai-dry-run
+autosub-zh --openai-dry-run
 ```
 
 Base URL 应填写服务实际要求的完整地址。不要把真实 key 写进代码、Markdown、`ui_config.json` 或提交记录。
@@ -263,7 +261,7 @@ output/<project>/
 常用检查：
 
 ```powershell
-cd D:\
+cd D:\autosub_zh
 python -m autosub_zh.feedback_dataset validate
 python -m autosub_zh.feedback_dataset summarize
 python -m autosub_zh.feedback_dataset eval-style
@@ -272,19 +270,22 @@ python -m autosub_zh.feedback_dataset eval-style
 ## 项目结构
 
 ```text
-asr.py / media.py             识别、音频处理与 CUDA 降级
-pipeline_core.py              完整流水线编排
-timing.py / zh_reading_axis.py
+src/autosub_zh/               Python 包源码与只读资源
+  asr.py / media.py           识别、音频处理与 CUDA 降级
+  pipeline_core.py            完整流水线编排
+  timing.py / zh_reading_axis.py
                               源语言时间轴与中文阅读轴
-translate.py / span_*.py      翻译、span 识别和局部修复
-glossary.py / terminology.py  术语、实体和专名策略
-subtitle_io.py / qa.py        SRT/ASS 输出与质量检查
-job_store.py / worker_service.py
+  translate.py / span_*.py    翻译、span 识别和局部修复
+  glossary.py / terminology.py
+                              术语、实体和专名策略
+  subtitle_io.py / qa.py      SRT/ASS 输出与质量检查
+  job_store.py / worker_service.py
                               SQLite 任务状态和后台 worker
-ui_server.py / web/           本地 Web UI
-workflow_profiles/            英中、俄中等工作流配置
-translation_prompts/          翻译提示词
-datasets/                     规则数据、实体表、反馈和评测
+  ui_server.py / web/         本地 Web 服务与静态文件
+  workflow_profiles/          英中、俄中等工作流配置
+  translation_prompts/        翻译提示词
+  datasets/                   正式规则数据与实体表
+datasets/local_feedback/       人工反馈与评测数据
 tools/                        增量工具与 VS Code ASS 高亮器
 tools/fixes/                 一次性修复与迁移脚本
 tests/                        自动化测试
@@ -295,12 +296,12 @@ docs/                         设计、交接、审计和变更记录
 
 ## 测试
 
-安装开发用 `pytest` 后，从包目录的父目录运行：
+安装开发依赖后，从项目根目录运行：
 
 ```powershell
-cd D:\
-$env:PYTHONPATH="D:\"
-python -m pytest -q .\autosub_zh\tests
+cd D:\autosub_zh
+python -m pip install -e ".[dev]"
+python -m pytest -q
 ```
 
 测试会 mock 或隔离网络、LLM、`yt-dlp`、`ffmpeg` 和 Whisper。通过自动化测试不等于真实媒体、CUDA、远程 API 和最终画面已经验证。

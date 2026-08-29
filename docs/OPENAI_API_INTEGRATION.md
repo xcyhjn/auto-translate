@@ -6,10 +6,11 @@
 D:\autosub_zh
 ```
 
-运行模块命令时，先进入父目录：
+首次使用时，在项目根目录安装可编辑包：
 
 ```powershell
-cd D:\
+cd D:\autosub_zh
+python -m pip install -e .
 ```
 
 ## SDK 是什么
@@ -47,16 +48,16 @@ $env:OPENAI_BASE_URL="https://www.gptcodeplan.com"
 
 ## 代码接入位置
 
-- `translate.py`
+- `src/autosub_zh/translate.py`
   - `resolve_openai_base_url()`：读取命令行参数、`OPENAI_BASE_URL` 或 `OPENAI_API_BASE`
   - `translate_chunk_with_openai()`：真正调用 OpenAI 兼容接口翻译字幕
   - `dry_run_openai_translation()`：发送极小测试请求，验证 key、模型和中转站
-- `cli.py`
+- `src/autosub_zh/cli.py`
   - `--translate`：开启翻译
   - `--openai-base-url`：临时指定中转地址
   - `--openai-dry-run`：只验证接口，不处理视频
   - `--translation-model`：指定翻译模型
-- `doctor.py`
+- `src/autosub_zh/doctor.py`
   - 检查 Python、`faster_whisper`、`openai`、环境变量、`ffmpeg` 和 `ffprobe`
 
 ## 推荐验证顺序

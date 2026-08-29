@@ -36,6 +36,7 @@ from .media import (
     suggest_hwaccel_decoder,
 )
 from .models import BilingualSubtitleStyle, Segment, SubtitleRules
+from .project_paths import LOCAL_DATASETS_DIR
 from .qa import build_quality_metrics, qa_ass_entity_audit, qa_check, qa_difficult_spans, qa_display_cues, qa_final_ass_file, qa_glossary_consistency
 from .qa_outputs import (
     build_blocker_report,
@@ -94,8 +95,8 @@ VIDEO_ENCODER_FALLBACK = "libx264"
 VIDEO_PRESET = "p4"
 VIDEO_QUALITY = "25"
 TARGET_MAX_HEIGHT = 1080
-LOCAL_FEEDBACK_STYLE_GUIDELINES_PATH = Path(__file__).resolve().parent / "datasets" / "local_feedback" / "learned_style_guidelines.md"
-LOCAL_FEEDBACK_SPAN_EXAMPLES_PATH = Path(__file__).resolve().parent / "datasets" / "local_feedback" / "span_translation_examples.jsonl"
+LOCAL_FEEDBACK_STYLE_GUIDELINES_PATH = LOCAL_DATASETS_DIR / "local_feedback" / "learned_style_guidelines.md"
+LOCAL_FEEDBACK_SPAN_EXAMPLES_PATH = LOCAL_DATASETS_DIR / "local_feedback" / "span_translation_examples.jsonl"
 
 
 def write_json(path: Path, payload: object) -> None:

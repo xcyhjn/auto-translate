@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
+from autosub_zh.project_paths import WEB_DIR
 
 def test_reference_mode_selector_exposes_full_split() -> None:
-    html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
 
     assert '<option value="full_split">full_split</option>' in html
 
 
 def test_frontend_exposes_entity_review_and_bootstrap_mode() -> None:
-    html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
-    app_js = (PROJECT_ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
 
     assert 'id="bootstrap_entity_decisions"' in html
     assert '<option value="high_confidence_only">high_confidence_only</option>' in html
@@ -28,7 +24,7 @@ def test_frontend_exposes_entity_review_and_bootstrap_mode() -> None:
 
 
 def test_project_outputs_entity_review_labels_are_localized() -> None:
-    app_js = (PROJECT_ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
 
     assert "实体审阅" in app_js
     assert "选中项目" in app_js
@@ -43,8 +39,8 @@ def test_project_outputs_entity_review_labels_are_localized() -> None:
 
 
 def test_frontend_exposes_workflow_pause_and_collapse_controls() -> None:
-    html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
-    app_js = (PROJECT_ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
 
     assert "工作流预设" in html
     assert "有效工作流摘要" in html

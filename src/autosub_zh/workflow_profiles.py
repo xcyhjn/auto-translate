@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .project_paths import DATASETS_DIR, TRANSLATION_PROMPTS_DIR, WORKFLOW_PROFILES_DIR
 
-BASE_DIR = Path(__file__).resolve().parent
-PROFILE_DIR = BASE_DIR / "workflow_profiles"
-PROMPT_DIR = BASE_DIR / "translation_prompts"
-DATASET_DIR = BASE_DIR / "datasets"
+PROFILE_DIR = WORKFLOW_PROFILES_DIR
+PROMPT_DIR = TRANSLATION_PROMPTS_DIR
+DATASET_DIR = DATASETS_DIR
 
 DEFAULT_WORKFLOW_PROFILE = "en_to_zh_default"
 VALID_SUBTITLE_MODES = {

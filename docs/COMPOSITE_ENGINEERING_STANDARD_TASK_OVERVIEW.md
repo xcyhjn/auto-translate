@@ -12,7 +12,7 @@
 
 - Python 项目根：`D:\autosub_zh`。
 - 现有主链：媒体探测、音频抽取、faster-whisper、时间轴优化、翻译、难句/span 修复、实体归一化、双语 ASS、QA、硬压。
-- 现有任务层：`job_store.py` + `worker_service.py`，支持队列、暂停、恢复、取消、心跳、checkpoint 和 artifact。
+- 现有任务层：`src/autosub_zh/job_store.py` + `src/autosub_zh/worker_service.py`，支持队列、暂停、恢复、取消、心跳、checkpoint 和 artifact。
 - 现有人工闭环：ASS 人工修订是最终编辑事实；本地反馈 JSONL、风格学习、A/B eval 和 Bilibili 检索保持人工确认。
 - 工作树已有用户修改；所有 agent 必须只改声明范围，不能清理或回滚既有修改。
 
@@ -20,7 +20,7 @@
 
 ### S1: 阶段契约与产物指纹
 
-Owner: `stage_contract.py`、`artifact_manifest.py`、`pipeline_runner.py`、对应测试。
+Owner: `src/autosub_zh/stage_contract.py`、`src/autosub_zh/artifact_manifest.py`、`src/autosub_zh/pipeline_runner.py`、对应测试。
 
 交付：
 
@@ -39,7 +39,7 @@ Owner: `stage_contract.py`、`artifact_manifest.py`、`pipeline_runner.py`、对
 
 ### S2: 组合式 CLI 入口
 
-Owner: `cli.py`、新建的 CLI dispatch/adapter 文件、对应测试；不得修改 `pipeline_core.py`。
+Owner: `src/autosub_zh/cli.py`、新建的 CLI dispatch/adapter 文件、对应测试；不得修改 `src/autosub_zh/pipeline_core.py`。
 
 交付：
 
@@ -54,11 +54,11 @@ Owner: `cli.py`、新建的 CLI dispatch/adapter 文件、对应测试；不得�
 - 不启动真实媒体、不调用网络、不添加依赖。
 - CLI 变更不影响 UI 通过现有 Python API 调用 pipeline。
 
-禁止：重写 `ui_server.py`、改变现有 API key 读取、修改输出命名。
+禁止：重写 `src/autosub_zh/ui_server.py`、改变现有 API key 读取、修改输出命名。
 
 ### S3: 可追溯证据 sidecar 与标准文档
 
-Owner: 新建 `evidence_sidecar.py`、`glossary.py` 中最小接入点、对应测试和本任务文档；不得修改 UI。
+Owner: 新建 `src/autosub_zh/evidence_sidecar.py`、`src/autosub_zh/glossary.py` 中最小接入点、对应测试和本任务文档；不得修改 UI。
 
 交付：
 

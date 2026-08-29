@@ -2,6 +2,15 @@
 
 ## 未发布 — 2026-08-29
 
+### 工程结构
+
+- Python 包迁移到标准 `src/autosub_zh/` 布局，仓库根目录不再平铺运行模块。
+- 自动化测试统一移入 `tests/`，使用说明移入 `docs/`，启动脚本移入 `scripts/`，一次性工具归入 `tools/`。
+- 新增 `pyproject.toml`，提供 editable install、`autosub-zh` 和 `autosub-zh-ui` 控制台入口。
+- 增加统一项目根路径解析，确保 `web/`、`datasets/`、`input/`、`output/` 和 `runtime/` 不随源码目录迁移。
+- 增加目录契约测试，防止 Python 模块重新散落到仓库根目录。
+- 迁移后从仓库根和父目录运行完整测试均通过，共 `215 passed`。
+
 ### 内部变更日志
 
 提交：`8e5cc34`（`feat: 完善字幕工作流并整理工程结构`）
@@ -53,7 +62,7 @@
 
 #### 已知问题
 
-- `ui_server.py` 与 `pipeline_core.py` 仍是体量较大的高扇出组合模块，后续拆分需要单独设计与回归计划。
+- `src/autosub_zh/ui_server.py` 与 `src/autosub_zh/pipeline_core.py` 仍是体量较大的高扇出组合模块，后续拆分需要单独设计与回归计划。
 - OpenAI runtime 配置逻辑仍在 UI 与 pipeline runner 中各有一份，尚未统一为单一模块。
 - 历史输出目录中仍有 6 组完全相同的 WAV，预计可回收约 226 MB；为避免误删用户产物，本次只修复生成根因，没有自动删除旧文件。
 - 尚未执行真实视频、GPU、下载器、远程翻译接口和最终 ASS 视觉回归；单元测试通过不等同于生产媒体链验证完成。

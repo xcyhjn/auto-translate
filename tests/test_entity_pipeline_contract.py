@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from autosub_zh import pipeline_core
+
 
 def build_expected_entity_outputs(*, include_project_decisions: bool) -> list[str]:
     items = [
@@ -34,7 +36,7 @@ def test_expected_entity_outputs_with_project_decisions() -> None:
 
 
 def test_pipeline_core_manifest_contract_includes_entity_outputs() -> None:
-    pipeline_core_text = Path("D:/autosub_zh/pipeline_core.py").read_text(encoding="utf-8")
+    pipeline_core_text = Path(pipeline_core.__file__).read_text(encoding="utf-8")
 
     for expected_name in (
         "06e_entity_decisions.json",

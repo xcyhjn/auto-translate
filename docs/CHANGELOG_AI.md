@@ -6,33 +6,33 @@ This file is the dedicated update log for project changes that should remain leg
 
 ### Multilingual workflow foundation
 
-- Added workflow profile system in [workflow_profiles.py](D:/autosub_zh/workflow_profiles.py)
+- Added workflow profile system in [src/autosub_zh/workflow_profiles.py](D:/autosub_zh/src/autosub_zh/workflow_profiles.py)
 - Added built-in profiles:
-  - [workflow_profiles/en_to_zh_default.json](D:/autosub_zh/workflow_profiles/en_to_zh_default.json)
-  - [workflow_profiles/ru_to_zh_default.json](D:/autosub_zh/workflow_profiles/ru_to_zh_default.json)
+  - [src/autosub_zh/workflow_profiles/en_to_zh_default.json](D:/autosub_zh/src/autosub_zh/workflow_profiles/en_to_zh_default.json)
+  - [src/autosub_zh/workflow_profiles/ru_to_zh_default.json](D:/autosub_zh/src/autosub_zh/workflow_profiles/ru_to_zh_default.json)
 - Added prompt profiles:
-  - [translation_prompts/en_zh_natural_subtitle.md](D:/autosub_zh/translation_prompts/en_zh_natural_subtitle.md)
-  - [translation_prompts/ru_zh_natural_subtitle.md](D:/autosub_zh/translation_prompts/ru_zh_natural_subtitle.md)
-- Added Russian dataset seed assets under [datasets/ru_zh/general](D:/autosub_zh/datasets/ru_zh/general)
+  - [src/autosub_zh/translation_prompts/en_zh_natural_subtitle.md](D:/autosub_zh/src/autosub_zh/translation_prompts/en_zh_natural_subtitle.md)
+  - [src/autosub_zh/translation_prompts/ru_zh_natural_subtitle.md](D:/autosub_zh/src/autosub_zh/translation_prompts/ru_zh_natural_subtitle.md)
+- Added Russian dataset seed assets under [src/autosub_zh/datasets/ru_zh/general](D:/autosub_zh/src/autosub_zh/datasets/ru_zh/general)
 
 ### Subtitle output modes
 
-- Added language-aware output naming in [workflow_profiles.py](D:/autosub_zh/workflow_profiles.py)
-- Added subtitle-mode routing in [pipeline_core.py](D:/autosub_zh/pipeline_core.py)
-- Added source-only review ASS writer in [subtitle_io.py](D:/autosub_zh/subtitle_io.py)
+- Added language-aware output naming in [src/autosub_zh/workflow_profiles.py](D:/autosub_zh/src/autosub_zh/workflow_profiles.py)
+- Added subtitle-mode routing in [src/autosub_zh/pipeline_core.py](D:/autosub_zh/src/autosub_zh/pipeline_core.py)
+- Added source-only review ASS writer in [src/autosub_zh/subtitle_io.py](D:/autosub_zh/src/autosub_zh/subtitle_io.py)
 
 ### Glossary and dataset integration
 
 - Added dataset asset copying into output projects
-- Added profile glossary bundle generation in [pipeline_core.py](D:/autosub_zh/pipeline_core.py)
-- Added profile glossary merge support in [glossary.py](D:/autosub_zh/glossary.py)
-- Added translation glossary text override support in [translate.py](D:/autosub_zh/translate.py)
+- Added profile glossary bundle generation in [src/autosub_zh/pipeline_core.py](D:/autosub_zh/src/autosub_zh/pipeline_core.py)
+- Added profile glossary merge support in [src/autosub_zh/glossary.py](D:/autosub_zh/src/autosub_zh/glossary.py)
+- Added translation glossary text override support in [src/autosub_zh/translate.py](D:/autosub_zh/src/autosub_zh/translate.py)
 
 ### Web UI groundwork
 
-- Added Workflow tab structure in [web/index.html](D:/autosub_zh/web/index.html)
-- Added workflow-related state and partial wiring in [web/app.js](D:/autosub_zh/web/app.js)
-- Added workflow profile bootstrap data in [ui_server.py](D:/autosub_zh/ui_server.py)
+- Added Workflow tab structure in [src/autosub_zh/web/index.html](D:/autosub_zh/src/autosub_zh/web/index.html)
+- Added workflow-related state and partial wiring in [src/autosub_zh/web/app.js](D:/autosub_zh/src/autosub_zh/web/app.js)
+- Added workflow profile bootstrap data in [src/autosub_zh/ui_server.py](D:/autosub_zh/src/autosub_zh/ui_server.py)
 
 ### Tests
 

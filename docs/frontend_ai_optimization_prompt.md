@@ -21,11 +21,11 @@ After that, read these files in this order:
 - [frontend_handoff_and_project_status.md](D:/autosub_zh/docs/frontend_handoff_and_project_status.md)
 - [entity_normalization_handoff.md](D:/autosub_zh/docs/entity_normalization_handoff.md)
 - [russian_reference_layer_full_split_task.md](D:/autosub_zh/docs/russian_reference_layer_full_split_task.md)
-- [web/index.html](D:/autosub_zh/web/index.html)
-- [web/app.js](D:/autosub_zh/web/app.js)
-- [web/styles.css](D:/autosub_zh/web/styles.css)
-- [ui_server.py](D:/autosub_zh/ui_server.py)
-- [pipeline_core.py](D:/autosub_zh/pipeline_core.py)
+- [src/autosub_zh/web/index.html](D:/autosub_zh/src/autosub_zh/web/index.html)
+- [src/autosub_zh/web/app.js](D:/autosub_zh/src/autosub_zh/web/app.js)
+- [src/autosub_zh/web/styles.css](D:/autosub_zh/src/autosub_zh/web/styles.css)
+- [src/autosub_zh/ui_server.py](D:/autosub_zh/src/autosub_zh/ui_server.py)
+- [src/autosub_zh/pipeline_core.py](D:/autosub_zh/src/autosub_zh/pipeline_core.py)
 
 If you cannot read `D:\autosub_zh\docs\frontend_handoff_and_project_status.md`, stop and report that explicitly before proceeding.
 

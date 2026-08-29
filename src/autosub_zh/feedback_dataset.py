@@ -22,11 +22,11 @@ from .style_learning import (
     detect_edit_tags,
 )
 from .workflow_profiles import ass_candidate_paths, project_artifact_path
+from .project_paths import LOCAL_DATASETS_DIR
 
 
 SCHEMA_VERSION = 1
-BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_DATASET_DIR = BASE_DIR / "datasets" / "local_feedback"
+DEFAULT_DATASET_DIR = LOCAL_DATASETS_DIR / "local_feedback"
 BILIBILI_LABELS = {"duplicate", "not_duplicate", "same_topic", "manual_review"}
 STYLE_FEEDBACK_TYPES = {
     "bad_example",

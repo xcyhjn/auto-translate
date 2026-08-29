@@ -11,12 +11,12 @@ Files inspected:
 - `docs/frontend_ai_optimization_prompt.md`
 - `docs/russian_reference_layer_full_split_task.md`
 - `docs/entity_normalization_handoff.md`
-- `web/index.html`
-- `web/app.js`
-- `web/styles.css`
-- `ui_server.py`
-- `workflow_profiles.py`
-- `workflow_profiles/ru_to_zh_default.json`
+- `src/autosub_zh/web/index.html`
+- `src/autosub_zh/web/app.js`
+- `src/autosub_zh/web/styles.css`
+- `src/autosub_zh/ui_server.py`
+- `src/autosub_zh/workflow_profiles.py`
+- `src/autosub_zh/workflow_profiles/ru_to_zh_default.json`
 - `ui_config.json`
 
 Checks run:
@@ -39,7 +39,7 @@ Browser verification status:
 
 ### 1. Russian workflow defaults are correct on disk and in current saved config
 
-`workflow_profiles/ru_to_zh_default.json` currently has:
+`src/autosub_zh/workflow_profiles/ru_to_zh_default.json` currently has:
 
 - `src_lang = ru`
 - `dst_lang = zh-Hans`
@@ -105,7 +105,7 @@ The server process on port `8777` started at `2026-06-04 01:51:15`:
 python -m autosub_zh.ui_server
 ```
 
-The current disk version of `ui_server.py` includes `workflow_profiles`, `active_prompt_profile`, and `active_dataset_profile` in `/api/bootstrap`.
+The current disk version of `src/autosub_zh/ui_server.py` includes `workflow_profiles`, `active_prompt_profile`, and `active_dataset_profile` in `/api/bootstrap`.
 
 The running `/api/bootstrap` response only returned:
 
@@ -121,7 +121,7 @@ Missing from the running response:
 
 Risk:
 
-- New `web/app.js` expects `workflow_profiles` to populate the workflow selector.
+- New `src/autosub_zh/web/app.js` expects `workflow_profiles` to populate the workflow selector.
 - If the selector remains empty, `readFormConfig()` can fall back to `workflow_profile = en_to_zh_default`.
 - That is a credible path for "UI save/refresh accidentally returns to English compact defaults."
 
@@ -325,7 +325,7 @@ Recommended behavior:
 
 Do not implement these until the owner confirms.
 
-### `ui_server.py`
+### `src/autosub_zh/ui_server.py`
 
 Suggested backend-safe fix:
 
@@ -347,7 +347,7 @@ def test_normalize_config_preserves_russian_profile_style_with_partial_style() -
     assert config["style"]["reference_mode"] == "full_split"
 ```
 
-### `web/app.js`
+### `src/autosub_zh/web/app.js`
 
 Suggested frontend guards:
 
@@ -360,7 +360,7 @@ Suggested frontend guards:
 - Add structured renderers for `07d_editor_review.tsv`, `08b_ass_entity_audit.json`, and normalized segment JSON.
 - Add filters and row limits for entity review/QA tables.
 
-### `web/index.html`
+### `src/autosub_zh/web/index.html`
 
 Suggested UI structure changes:
 
@@ -373,7 +373,7 @@ Suggested UI structure changes:
 - Add a status/warning area for missing workflow profile metadata.
 - Add a dedicated tab or sub-navigation for entity review if the output panel becomes too dense.
 
-### `web/styles.css`
+### `src/autosub_zh/web/styles.css`
 
 Suggested style changes:
 
@@ -383,7 +383,7 @@ Suggested style changes:
 - Keep tables horizontally scrollable on narrow screens, but preserve readable column priority.
 - Add visual warning states for config/profile mismatches.
 
-### `workflow_profiles/ru_to_zh_default.json`
+### `src/autosub_zh/workflow_profiles/ru_to_zh_default.json`
 
 No change recommended for the current Russian style defaults.
 
@@ -406,7 +406,7 @@ One product decision remains:
 Suggested docs cleanup:
 
 - Mark the older `reference_mode = hide_when_overflow` paragraph as historical.
-- Add a short "Current state" note pointing to `workflow_profiles/ru_to_zh_default.json`.
+- Add a short "Current state" note pointing to `src/autosub_zh/workflow_profiles/ru_to_zh_default.json`.
 
 ## Verification Steps
 
@@ -479,19 +479,19 @@ Current state:
 
 These appear related to real backend/frontend feature work and should not be deleted casually:
 
-- `entity_normalization.py`
-- `models.py`
-- `pipeline_core.py`
-- `qa.py`
-- `qa_outputs.py`
-- `segment_io.py`
-- `subtitle_io.py`
-- `workflow_profiles.py`
-- `workflow_profiles/ru_to_zh_default.json`
-- `ui_server.py`
-- `web/app.js`
-- `web/index.html`
-- `web/styles.css`
+- `src/autosub_zh/entity_normalization.py`
+- `src/autosub_zh/models.py`
+- `src/autosub_zh/pipeline_core.py`
+- `src/autosub_zh/qa.py`
+- `src/autosub_zh/qa_outputs.py`
+- `src/autosub_zh/segment_io.py`
+- `src/autosub_zh/subtitle_io.py`
+- `src/autosub_zh/workflow_profiles.py`
+- `src/autosub_zh/workflow_profiles/ru_to_zh_default.json`
+- `src/autosub_zh/ui_server.py`
+- `src/autosub_zh/web/app.js`
+- `src/autosub_zh/web/index.html`
+- `src/autosub_zh/web/styles.css`
 - `tests/test_entity_normalization.py`
 - `tests/test_entity_pipeline_contract.py`
 - `tests/test_entity_pipeline_integration.py`
@@ -512,8 +512,8 @@ These appear related to real backend/frontend feature work and should not be del
 
 These look useful but should likely be reviewed as a separate commit/topic:
 
-- `downloaders.py`
-- `yt_dlp_config.py`
+- `src/autosub_zh/downloaders.py`
+- `src/autosub_zh/yt_dlp_config.py`
 
 Reason:
 
@@ -568,7 +568,7 @@ Current `.gitignore` contains broad rules:
 Risk:
 
 - New source/config JSON files can be silently hidden from `git status`.
-- The project already intentionally tracks JSON files such as `workflow_profiles/*.json`.
+- The project already intentionally tracks JSON files such as `src/autosub_zh/workflow_profiles/*.json`.
 
 Suggested cleanup after confirmation:
 

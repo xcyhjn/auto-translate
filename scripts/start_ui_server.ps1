@@ -2,7 +2,10 @@ $ErrorActionPreference = 'Stop'
 
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDirectory
-Set-Location (Split-Path -Parent $projectRoot)
+$srcPath = Join-Path $projectRoot 'src'
+Set-Location $projectRoot
+$env:AUTOSUB_PROJECT_ROOT = $projectRoot
+$env:PYTHONPATH = if ($env:PYTHONPATH) { $srcPath + ';' + $env:PYTHONPATH } else { $srcPath }
 
 $cudaBin = 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin'
 if (Test-Path $cudaBin) {

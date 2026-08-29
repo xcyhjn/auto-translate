@@ -12,6 +12,7 @@ from .english_residue_policy import analyze_english_residue
 from .models import Segment
 from .style_rules import build_style_guidance
 from .text_quality import find_text_pollution
+from .project_paths import LOCAL_DATASETS_DIR
 from .translate import (
     TranslationValidationError,
     classify_retry,
@@ -32,7 +33,7 @@ DEFAULT_MAX_SEGMENTS_PER_SPAN = 4
 DEFAULT_MAX_SPAN_DURATION = 12.0
 DEFAULT_MIN_RISK_SCORE = 10
 SPAN_TRANSLATION_POLICY_VERSION = "span_translation_v2"
-DEFAULT_SPAN_EXAMPLES_PATH = Path(__file__).resolve().parent / "datasets" / "local_feedback" / "span_translation_examples.jsonl"
+DEFAULT_SPAN_EXAMPLES_PATH = LOCAL_DATASETS_DIR / "local_feedback" / "span_translation_examples.jsonl"
 DEFAULT_SPAN_EXAMPLE_TOP_K = 3
 
 

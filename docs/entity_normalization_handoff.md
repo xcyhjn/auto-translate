@@ -12,9 +12,9 @@ The goal is to stop treating human-name and title fixes as ad hoc ASS edits. We 
 ## Current status
 
 - Pipeline insertion points reviewed.
-- Existing low-risk replacement hook reviewed: [bilingual_postprocess.py](D:/autosub_zh/bilingual_postprocess.py:1)
-- ASS generation hook reviewed: [subtitle_io.py](D:/autosub_zh/subtitle_io.py:891)
-- Main pipeline write/QA sequence reviewed: [pipeline_core.py](D:/autosub_zh/pipeline_core.py:1113)
+- Existing low-risk replacement hook reviewed: [src/autosub_zh/bilingual_postprocess.py](D:/autosub_zh/src/autosub_zh/bilingual_postprocess.py:1)
+- ASS generation hook reviewed: [src/autosub_zh/subtitle_io.py](D:/autosub_zh/src/autosub_zh/subtitle_io.py:891)
+- Main pipeline write/QA sequence reviewed: [src/autosub_zh/pipeline_core.py](D:/autosub_zh/src/autosub_zh/pipeline_core.py:1113)
 - Existing tests reviewed:
   - [tests/test_asr_repair_flow.py](D:/autosub_zh/tests/test_asr_repair_flow.py:1)
   - [tests/test_subtitle_output_modes.py](D:/autosub_zh/tests/test_subtitle_output_modes.py:1)
@@ -112,7 +112,7 @@ Responsibilities:
 
 ### Global registry
 
-Add `datasets/entity_registry.json`.
+Add `src/autosub_zh/datasets/entity_registry.json`.
 
 Each entry should look like:
 
@@ -202,11 +202,11 @@ Add a conservative normalization pass with no web research dependency.
 
 Deliverables:
 
-- new `entity_normalization.py`
+- new `src/autosub_zh/entity_normalization.py`
 - registry loader
 - project decision loader
 - per-segment normalization pass
-- integration into `pipeline_core.py`
+- integration into `src/autosub_zh/pipeline_core.py`
 - focused tests
 
 ### Phase 2
@@ -231,15 +231,15 @@ Deliverables:
 
 ## Concrete insertion points
 
-- `pipeline_core.py`
+- `src/autosub_zh/pipeline_core.py`
   - after `display_rewrite_complete`
   - before `assert_no_target_text_pollution`
   - before `write_bilingual_ass`
-- `subtitle_io.py`
+- `src/autosub_zh/subtitle_io.py`
   - prefer normalized reference text for `EnglishSmall`
-- `qa.py`
+- `src/autosub_zh/qa.py`
   - add entity-residue checks
-- `bilingual_postprocess.py`
+- `src/autosub_zh/bilingual_postprocess.py`
   - keep for deterministic low-risk replacements only
 
 ## Risks
@@ -260,9 +260,9 @@ Mitigation:
 - [x] Review current pipeline insertion points
 - [x] Review existing bilingual postprocess hook
 - [x] Write this handoff and execution document
-- [x] Add `entity_normalization.py`
+- [x] Add `src/autosub_zh/entity_normalization.py`
 - [x] Add a minimal entity registry file
-- [x] Integrate entity normalization into `pipeline_core.py`
+- [x] Integrate entity normalization into `src/autosub_zh/pipeline_core.py`
 - [x] Preserve normalized English reference text for ASS output without overloading `source_text`
 - [x] Emit `06e_entity_decisions.json`
 - [x] Emit `06f_entity_review.tsv`
@@ -275,11 +275,11 @@ Mitigation:
 
 - Reviewed current pipeline and confirmed there is no formal entity-normalization stage.
 - Identified the best first insertion point: after display rewrite, before ASS generation and final QA.
-- Confirmed an existing low-risk hook already exists in `bilingual_postprocess.py`, which we can extend rather than replace outright.
+- Confirmed an existing low-risk hook already exists in `src/autosub_zh/bilingual_postprocess.py`, which we can extend rather than replace outright.
 - Started Phase 1 by documenting the design and implementation plan here before touching the pipeline.
-- Added a first-pass registry at [datasets/entity_registry.json](D:/autosub_zh/datasets/entity_registry.json:1) with confirmed entities from the recent Schizophrenic Art cleanup.
-- Added [entity_normalization.py](D:/autosub_zh/entity_normalization.py:1) with a conservative registry-driven normalization pass.
-- Integrated entity normalization into [pipeline_core.py](D:/autosub_zh/pipeline_core.py:1008) after display rewrite and before difficult-span / QA stages.
+- Added a first-pass registry at [src/autosub_zh/datasets/entity_registry.json](D:/autosub_zh/src/autosub_zh/datasets/entity_registry.json:1) with confirmed entities from the recent Schizophrenic Art cleanup.
+- Added [src/autosub_zh/entity_normalization.py](D:/autosub_zh/src/autosub_zh/entity_normalization.py:1) with a conservative registry-driven normalization pass.
+- Integrated entity normalization into [src/autosub_zh/pipeline_core.py](D:/autosub_zh/src/autosub_zh/pipeline_core.py:1008) after display rewrite and before difficult-span / QA stages.
 - Added new artifacts:
   - `06e_entity_decisions.json`
   - `06f_entity_review.tsv`
@@ -300,7 +300,7 @@ Mitigation:
 - Added/updated focused tests for the new `reference_text` flow and subtitle output behavior.
 - Re-ran focused validation after the `reference_text` migration:
   - result: `12 passed`
-- Moved ASS entity audit message mapping into a dedicated QA helper instead of keeping the logic inline in `pipeline_core.py`.
+- Moved ASS entity audit message mapping into a dedicated QA helper instead of keeping the logic inline in `src/autosub_zh/pipeline_core.py`.
 - Re-ran focused validation after the QA helper cleanup:
   - result: `13 passed`
 - Added project-level `00_entity_decisions.json` support so a project can override or extend the global entity registry.

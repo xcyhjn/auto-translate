@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import sys
 
+from .project_paths import PROJECT_ROOT
+
 
 def command_version(command: str) -> str:
     path = shutil.which(command)
@@ -47,8 +49,8 @@ def main() -> None:
     print(f"OPENAI_BASE_URL: {base_url or 'not set'}")
     print(f"ffmpeg: {command_version('ffmpeg')}")
     print(f"ffprobe: {command_version('ffprobe')}")
-    print("提示：当前项目位于 D:\\桌面\\autosub_zh。")
-    print("提示：运行模块命令时请先 cd D:\\桌面，然后执行 python -m autosub_zh.doctor。")
+    print(f"Project root: {PROJECT_ROOT}")
+    print("提示：首次使用请在项目根目录执行 python -m pip install -e .。")
     print("提示：验证中转站可运行 python -m autosub_zh.cli --openai-dry-run。")
 
 

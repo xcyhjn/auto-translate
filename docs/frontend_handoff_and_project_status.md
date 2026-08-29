@@ -33,21 +33,21 @@ The project is part backend pipeline, part local web UI.
 
 Core backend modules:
 
-- [pipeline_core.py](D:/autosub_zh/pipeline_core.py)
-- [translate.py](D:/autosub_zh/translate.py)
-- [subtitle_io.py](D:/autosub_zh/subtitle_io.py)
-- [qa.py](D:/autosub_zh/qa.py)
-- [qa_outputs.py](D:/autosub_zh/qa_outputs.py)
-- [workflow_profiles.py](D:/autosub_zh/workflow_profiles.py)
-- [ui_server.py](D:/autosub_zh/ui_server.py)
+- [src/autosub_zh/pipeline_core.py](D:/autosub_zh/src/autosub_zh/pipeline_core.py)
+- [src/autosub_zh/translate.py](D:/autosub_zh/src/autosub_zh/translate.py)
+- [src/autosub_zh/subtitle_io.py](D:/autosub_zh/src/autosub_zh/subtitle_io.py)
+- [src/autosub_zh/qa.py](D:/autosub_zh/src/autosub_zh/qa.py)
+- [src/autosub_zh/qa_outputs.py](D:/autosub_zh/src/autosub_zh/qa_outputs.py)
+- [src/autosub_zh/workflow_profiles.py](D:/autosub_zh/src/autosub_zh/workflow_profiles.py)
+- [src/autosub_zh/ui_server.py](D:/autosub_zh/src/autosub_zh/ui_server.py)
 
 ### Frontend
 
 Current frontend files:
 
-- [web/index.html](D:/autosub_zh/web/index.html)
-- [web/app.js](D:/autosub_zh/web/app.js)
-- [web/styles.css](D:/autosub_zh/web/styles.css)
+- [src/autosub_zh/web/index.html](D:/autosub_zh/src/autosub_zh/web/index.html)
+- [src/autosub_zh/web/app.js](D:/autosub_zh/src/autosub_zh/web/app.js)
+- [src/autosub_zh/web/styles.css](D:/autosub_zh/src/autosub_zh/web/styles.css)
 
 The frontend is a local control panel for:
 
@@ -65,7 +65,7 @@ It is not yet fully aligned with the new backend entity-normalization outputs.
 Implemented:
 
 - global entity registry:
-  - [datasets/entity_registry.json](D:/autosub_zh/datasets/entity_registry.json)
+  - [src/autosub_zh/datasets/entity_registry.json](D:/autosub_zh/src/autosub_zh/datasets/entity_registry.json)
 - project-level entity decisions:
   - `00_entity_decisions.json`
 - `reference_text` separated from raw `source_text`
@@ -271,7 +271,7 @@ These are the frontend tasks that matter most now:
 
 ## Recommended order for the next AI
 
-1. Audit the current frontend code in [web/index.html](D:/autosub_zh/web/index.html), [web/app.js](D:/autosub_zh/web/app.js), and [web/styles.css](D:/autosub_zh/web/styles.css).
+1. Audit the current frontend code in [src/autosub_zh/web/index.html](D:/autosub_zh/src/autosub_zh/web/index.html), [src/autosub_zh/web/app.js](D:/autosub_zh/src/autosub_zh/web/app.js), and [src/autosub_zh/web/styles.css](D:/autosub_zh/src/autosub_zh/web/styles.css).
 2. Map the current API payloads and output artifacts already available from the backend.
 3. Apply `experience-and-design-system` while designing the frontend information architecture for entity-aware review.
 4. Implement the entity panel and review tables first.

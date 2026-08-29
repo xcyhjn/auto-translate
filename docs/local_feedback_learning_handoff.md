@@ -13,11 +13,11 @@
 
 The project already has useful feedback raw material:
 
-- `bilibili_search.py` creates query plans, runs API-first Bilibili search with HTML fallback, scores candidates, and writes `00b_*` artifacts.
-- `style_learning.py` aligns `05_translated_segments.json` with a manually edited ASS file and can extract edit tags, style features, and prompt examples.
-- `display_rewrite.py` already consumes `00_style_examples.jsonl` as few-shot/RAG-like prompt context.
-- `workflow_profiles.py` provides local dataset/profile assets, mainly glossary and prompt resources.
-- `pipeline_core.py` writes QA reports, glossary actions, entity audit files, editor review TSVs, and final ASS QA.
+- `src/autosub_zh/bilibili_search.py` creates query plans, runs API-first Bilibili search with HTML fallback, scores candidates, and writes `00b_*` artifacts.
+- `src/autosub_zh/style_learning.py` aligns `05_translated_segments.json` with a manually edited ASS file and can extract edit tags, style features, and prompt examples.
+- `src/autosub_zh/display_rewrite.py` already consumes `00_style_examples.jsonl` as few-shot/RAG-like prompt context.
+- `src/autosub_zh/workflow_profiles.py` provides local dataset/profile assets, mainly glossary and prompt resources.
+- `src/autosub_zh/pipeline_core.py` writes QA reports, glossary actions, entity audit files, editor review TSVs, and final ASS QA.
 
 What is not yet true learning:
 
@@ -51,7 +51,7 @@ Minimum viable loop:
 
 ## Added Files
 
-- `feedback_dataset.py`: CLI and Python module for collection, validation, dedupe, gold-set build, subtitle feedback eval, summary, and Bilibili replay eval.
+- `src/autosub_zh/feedback_dataset.py`: CLI and Python module for collection, validation, dedupe, gold-set build, subtitle feedback eval, summary, and Bilibili replay eval.
 - `tests/test_feedback_dataset.py`: regression tests for collection, label preservation, subtitle eval, replay eval, and train/eval separation.
 - `datasets/local_feedback/`: local feedback dataset root.
 - `POST /api/bilibili-duplicate-feedback`: saves UI labels into local JSONL.

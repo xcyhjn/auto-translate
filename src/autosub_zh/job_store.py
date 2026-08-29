@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .project_paths import RUNTIME_DIR
 
-BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_DB_PATH = BASE_DIR / "runtime" / "autosub_jobs.sqlite"
+DEFAULT_DB_PATH = RUNTIME_DIR / "autosub_jobs.sqlite"
 ACTIVE_STATUSES = {"queued", "running", "paused", "cancel_requested"}
 TERMINAL_STATUSES = {"succeeded", "succeeded_with_qa_issues", "failed", "cancelled"}
 

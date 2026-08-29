@@ -17,7 +17,7 @@
 
 先做 source span 级翻译，再按 refined cues 分配中文。
 
-- 仍复用现有 `04a_source_spans.json` 和 `span_translate.py`
+- 仍复用现有 `04a_source_spans.json` 和 `src/autosub_zh/span_translate.py`
 - 不再把旧中文按时间重叠机械搬过去
 - 对低置信度 cue 打 `semantic_allocation_review`
 - 对重复、空中文、双句混载、邻接重复进行 QA 标记
@@ -51,17 +51,17 @@
 
 ## 计划改动
 
-- `source_repair.py`
-- `zh_reading_axis.py`
-- `subtitle_io.py`
-- `pipeline_core.py`
-- `pipeline_runner.py`
-- `ui_server.py`
-- `web/index.html`
-- `web/app.js`
-- `web/styles.css`
-- 新增 `semantic_allocation.py`
-- 新增 `segmentation_qa.py`
+- `src/autosub_zh/source_repair.py`
+- `src/autosub_zh/zh_reading_axis.py`
+- `src/autosub_zh/subtitle_io.py`
+- `src/autosub_zh/pipeline_core.py`
+- `src/autosub_zh/pipeline_runner.py`
+- `src/autosub_zh/ui_server.py`
+- `src/autosub_zh/web/index.html`
+- `src/autosub_zh/web/app.js`
+- `src/autosub_zh/web/styles.css`
+- 新增 `src/autosub_zh/semantic_allocation.py`
+- 新增 `src/autosub_zh/segmentation_qa.py`
 - 新增测试文件
 
 ## 产物
@@ -91,23 +91,23 @@
 
 ### Backend
 
-- 新增 `semantic_allocation.py`：为每个 refined cue 写入 `source_span_id`、`allocation_confidence`、`qa_flags`、`allocation_note`，输出 `05a_semantic_allocated_segments.json` 和 `05a_semantic_allocation_report.json`。
-- 新增 `segmentation_qa.py`：稳定生成 `07j_segmentation_qa_metrics.json`，覆盖短残片、混句、function-word 边界、过短/过长、source repair、semantic allocation、display grouping。
-- 更新 `source_repair.py`：在 raw ASR / timed source repair 链路中输出 `02b_asr_source_repair_candidates.json`，检测 `pinching his skin...`、`it. Uri...`、小写续接、异常句中断裂等候选；不改 word timestamp。
-- 更新 `zh_reading_axis.py` / `subtitle_io.py`：加入 display-only short complete sentence grouping，底层 segment 时间不变，ASS 可使用 grouped display cues。
-- 更新 `pipeline_core.py` / `pipeline_runner.py` / `ui_server.py`：接入新配置、新产物、manifest 和 `07a_quality_metrics.json` 汇总。
+- 新增 `src/autosub_zh/semantic_allocation.py`：为每个 refined cue 写入 `source_span_id`、`allocation_confidence`、`qa_flags`、`allocation_note`，输出 `05a_semantic_allocated_segments.json` 和 `05a_semantic_allocation_report.json`。
+- 新增 `src/autosub_zh/segmentation_qa.py`：稳定生成 `07j_segmentation_qa_metrics.json`，覆盖短残片、混句、function-word 边界、过短/过长、source repair、semantic allocation、display grouping。
+- 更新 `src/autosub_zh/source_repair.py`：在 raw ASR / timed source repair 链路中输出 `02b_asr_source_repair_candidates.json`，检测 `pinching his skin...`、`it. Uri...`、小写续接、异常句中断裂等候选；不改 word timestamp。
+- 更新 `src/autosub_zh/zh_reading_axis.py` / `src/autosub_zh/subtitle_io.py`：加入 display-only short complete sentence grouping，底层 segment 时间不变，ASS 可使用 grouped display cues。
+- 更新 `src/autosub_zh/pipeline_core.py` / `src/autosub_zh/pipeline_runner.py` / `src/autosub_zh/ui_server.py`：接入新配置、新产物、manifest 和 `07a_quality_metrics.json` 汇总。
 
 ### Frontend
 
-- `web/index.html` 增加二期配置入口：`semantic_zh_allocation_enabled`、`semantic_zh_allocation_max_spans`、`short_complete_sentence_display_grouping`。
-- `web/app.js` 在“项目产物”中增加“字幕 QA”面板，读取 `07j_segmentation_qa_metrics.json`、`05a_semantic_allocation_report.json`、`03b_source_repair_report.json`，展示指标卡、问题样例和 ASS/JSON 入口。
-- `web/styles.css` 增加 QA 产物链接样式；同时修复 `escapeHtml(0)` 导致 0 指标不显示的问题。
+- `src/autosub_zh/web/index.html` 增加二期配置入口：`semantic_zh_allocation_enabled`、`semantic_zh_allocation_max_spans`、`short_complete_sentence_display_grouping`。
+- `src/autosub_zh/web/app.js` 在“项目产物”中增加“字幕 QA”面板，读取 `07j_segmentation_qa_metrics.json`、`05a_semantic_allocation_report.json`、`03b_source_repair_report.json`，展示指标卡、问题样例和 ASS/JSON 入口。
+- `src/autosub_zh/web/styles.css` 增加 QA 产物链接样式；同时修复 `escapeHtml(0)` 导致 0 指标不显示的问题。
 
 ## 验证结果
 
 相关测试：
 
-- `python -m py_compile semantic_allocation.py segmentation_qa.py source_repair.py zh_reading_axis.py subtitle_io.py pipeline_core.py ui_server.py pipeline_runner.py`
+- `python -m py_compile src/autosub_zh/semantic_allocation.py src/autosub_zh/segmentation_qa.py src/autosub_zh/source_repair.py src/autosub_zh/zh_reading_axis.py src/autosub_zh/subtitle_io.py src/autosub_zh/pipeline_core.py src/autosub_zh/ui_server.py src/autosub_zh/pipeline_runner.py`
 - `node --check web\app.js`
 - `pytest -q tests/test_semantic_qa_phase2.py tests/test_zh_reading_axis.py tests/test_asr_repair_flow.py`
 - 结果：`17 passed in 0.28s`

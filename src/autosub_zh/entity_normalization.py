@@ -8,10 +8,11 @@ from pathlib import Path
 
 from .glossary import load_glossary_payload
 from .models import Segment
+from .project_paths import DATASETS_DIR
 from .style_learning import parse_ass_dialogues
 
 
-REGISTRY_PATH = Path(__file__).resolve().parent / "datasets" / "entity_registry.json"
+REGISTRY_PATH = DATASETS_DIR / "entity_registry.json"
 PROJECT_DECISIONS_FILENAME = "00_entity_decisions.json"
 BOOTSTRAP_MODE_OFF = "off"
 BOOTSTRAP_MODE_ALWAYS = "always"

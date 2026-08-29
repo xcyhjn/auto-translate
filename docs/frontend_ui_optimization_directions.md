@@ -16,7 +16,7 @@ The frontend is a local control panel for a subtitle pipeline. It already has:
 - Recognition, translation, subtitle style, and output panels.
 - A config save path through `ui_config.json`.
 - Project artifact listing and preview.
-- Some entity review UI code in `web/app.js`, `web/index.html`, and `web/styles.css`.
+- Some entity review UI code in `src/autosub_zh/web/app.js`, `src/autosub_zh/web/index.html`, and `src/autosub_zh/web/styles.css`.
 - A bootstrap entity mode selector in the translation settings.
 - A `full_split` reference mode option in the subtitle style settings.
 
@@ -43,7 +43,7 @@ Russian video translation should now default to:
 
 The durable source for these language defaults is:
 
-- `workflow_profiles/ru_to_zh_default.json`
+- `src/autosub_zh/workflow_profiles/ru_to_zh_default.json`
 
 The local UI current config is:
 

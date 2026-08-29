@@ -5,7 +5,7 @@
 What:
 
 - Audited `08_bilingual_zh_en.ass`, `03_timed_source_segments.json`, and `04a_source_spans.json`.
-- Reviewed `timing.py`, `source_spans.py`, `models.py`, and `pipeline_core.py`.
+- Reviewed `src/autosub_zh/timing.py`, `src/autosub_zh/source_spans.py`, `src/autosub_zh/models.py`, and `src/autosub_zh/pipeline_core.py`.
 
 Why:
 
@@ -166,7 +166,7 @@ Next:
 
 What:
 
-- Ran `python -m py_compile` for `models.py`, `timing.py`, `source_spans.py`, and `tests/test_timing_segmentation.py`.
+- Ran `python -m py_compile` for `src/autosub_zh/models.py`, `src/autosub_zh/timing.py`, `src/autosub_zh/source_spans.py`, and `tests/test_timing_segmentation.py`.
 - Ran `pytest -q tests/test_timing_segmentation.py`.
 - Removed preview Chinese example fields from `segmentation_preview_metrics.json` so the metrics file only carries English segmentation evidence.
 
@@ -216,10 +216,10 @@ Next:
 
 What:
 
-- Added `semantic_allocation.py` and `segmentation_qa.py`.
-- Updated `source_repair.py`, `zh_reading_axis.py`, `subtitle_io.py`, `pipeline_core.py`, `pipeline_runner.py`, and `ui_server.py`.
+- Added `src/autosub_zh/semantic_allocation.py` and `src/autosub_zh/segmentation_qa.py`.
+- Updated `src/autosub_zh/source_repair.py`, `src/autosub_zh/zh_reading_axis.py`, `src/autosub_zh/subtitle_io.py`, `src/autosub_zh/pipeline_core.py`, `src/autosub_zh/pipeline_runner.py`, and `src/autosub_zh/ui_server.py`.
 - Added `tests/test_semantic_qa_phase2.py`.
-- Wired the frontend QA panel in `web/index.html`, `web/app.js`, and `web/styles.css`.
+- Wired the frontend QA panel in `src/autosub_zh/web/index.html`, `src/autosub_zh/web/app.js`, and `src/autosub_zh/web/styles.css`.
 - Regenerated Russian sample QA artifacts:
   - `02b_asr_source_repair_candidates.json`
   - `05a_semantic_allocated_segments.json`
@@ -333,7 +333,7 @@ Hypothesis:
 
 What:
 
-- Added terminal orphan-tail detection in `timing.py`.
+- Added terminal orphan-tail detection in `src/autosub_zh/timing.py`.
 - Made `should_merge_adjacent()` merge open-left + terminal orphan tail before the normal sentence-terminal guard.
 - Added strong display split penalties so DP avoids creating a 1-2 word sentence tail.
 - Added display-only `merge_orphan_tail_display_cues()` before ASS writing.
@@ -385,7 +385,7 @@ What:
   - `property. market.` -> `property market.`
 - Added Chinese cleanup:
   - removes duplicate short tail sentence only when the tail text already appears earlier in the merged Chinese cue
-- Expanded `segmentation_qa.py` so suspicious closed-left lowercase tails also count as blockers if they remain.
+- Expanded `src/autosub_zh/segmentation_qa.py` so suspicious closed-left lowercase tails also count as blockers if they remain.
 - Added regression tests for:
   - `property.` + `market.`
   - display cleanup for duplicate Chinese tail
@@ -419,16 +419,16 @@ Hypothesis:
 
 What:
 
-- Added `terminal_tail.py` as a shared classifier for short terminal cues.
+- Added `src/autosub_zh/terminal_tail.py` as a shared classifier for short terminal cues.
 - Split terminal short cues into:
   - `content_tail`
   - `standalone_particle`
   - `ambiguous_particle`
 - Wired the classifier into:
-  - `timing.py`
-  - `zh_reading_axis.py`
-  - `segmentation_qa.py`
-  - `web/app.js`
+  - `src/autosub_zh/timing.py`
+  - `src/autosub_zh/zh_reading_axis.py`
+  - `src/autosub_zh/segmentation_qa.py`
+  - `src/autosub_zh/web/app.js`
 - Added tests for:
   - `I don't know. / Yeah.`
   - `Are you coming? / No.`
@@ -465,7 +465,7 @@ Hypothesis:
 
 What:
 
-- Added `english_residue_policy.py`.
+- Added `src/autosub_zh/english_residue_policy.py`.
 - Added scoring categories for:
   - explicit hard preserve
   - code/path/software identifiers
@@ -474,13 +474,13 @@ What:
   - common translatable places/languages/history terms
   - function/discourse words
 - Wired the scorer into:
-  - `translate.py`
-  - `span_translate.py`
-  - `qa.py`
-  - `pipeline_core.py`
-  - `entity_normalization.py`
-  - `qa_outputs.py`
-  - `web/app.js`
+  - `src/autosub_zh/translate.py`
+  - `src/autosub_zh/span_translate.py`
+  - `src/autosub_zh/qa.py`
+  - `src/autosub_zh/pipeline_core.py`
+  - `src/autosub_zh/entity_normalization.py`
+  - `src/autosub_zh/qa_outputs.py`
+  - `src/autosub_zh/web/app.js`
 - Added `07k_english_residue_report.json` and `07k_english_residue_review.tsv`.
 - Added frontend cards and review table entries for English residue metrics.
 
@@ -496,7 +496,7 @@ Self-correction:
 
 Validation:
 
-- `python -m py_compile english_residue_policy.py translate.py span_translate.py qa.py qa_outputs.py entity_normalization.py pipeline_core.py pipeline_runner.py ui_server.py`
+- `python -m py_compile src/autosub_zh/english_residue_policy.py src/autosub_zh/translate.py src/autosub_zh/span_translate.py src/autosub_zh/qa.py src/autosub_zh/qa_outputs.py src/autosub_zh/entity_normalization.py src/autosub_zh/pipeline_core.py src/autosub_zh/pipeline_runner.py src/autosub_zh/ui_server.py`
 - `node --check web\app.js`
 - `pytest -q tests/test_english_residue_policy.py tests/test_qa_outputs.py tests/test_entity_pipeline_contract.py tests/test_entity_pipeline_integration.py tests/test_workflow_profiles.py tests/test_ui_server_config.py`
   - `23 passed in 0.63s`
@@ -525,13 +525,13 @@ Hypothesis:
 What:
 
 - Installed local `pytest` with `python -m pip install --user pytest`.
-- Fixed preserve-only glossary matching in `translate.py`:
+- Fixed preserve-only glossary matching in `src/autosub_zh/translate.py`:
   - before: `translation.` could match auto glossary phrase `The Translation Follows`
   - after: preserve-only shortcut requires exact normalized match
-- Fixed terminology short-circuit in `terminology.py`:
+- Fixed terminology short-circuit in `src/autosub_zh/terminology.py`:
   - pure term cues no longer lock auto-discovered `policy=preserve` names unless the residue scorer says `decision=preserve`
   - `Juan Kokom.` now goes through translation instead of becoming `Juan Kokom`
-- Fixed `english_residue_policy.py` extraction:
+- Fixed `src/autosub_zh/english_residue_policy.py` extraction:
   - pure English target cues are now scored, not only mixed Chinese+Latin lines
 - Added tests:
   - `test_preserve_only_translation_requires_exact_normalized_match`
@@ -584,13 +584,13 @@ Hypothesis:
 
 What:
 
-- Tightened `source_spans.py` so `span_first` now requires:
+- Tightened `src/autosub_zh/source_spans.py` so `span_first` now requires:
   - segment count <= 4
   - duration <= 12s
   - risk score >= 10
   - a strong reason such as repeated short phrase, ASR suspicion, or function-word boundary plus continuation.
 - Changed long or ordinary open-fragment spans to `span_context` instead of `span_first`.
-- Added span translation selection caps in `span_translate.py`:
+- Added span translation selection caps in `src/autosub_zh/span_translate.py`:
   - `max_segments_per_span = 4`
   - `max_duration = 12.0`
   - `min_risk_score = 10`
@@ -608,7 +608,7 @@ Self-correction:
 
 Validation:
 
-- `python -m py_compile source_spans.py span_translate.py pipeline_core.py pipeline_runner.py ui_server.py`
+- `python -m py_compile src/autosub_zh/source_spans.py src/autosub_zh/span_translate.py src/autosub_zh/pipeline_core.py src/autosub_zh/pipeline_runner.py src/autosub_zh/ui_server.py`
 - `$env:PYTHONPATH='D:\'; python -m pytest tests/test_span_translation_flow.py tests/test_terminology_short_circuit.py tests/test_english_residue_policy.py tests/test_semantic_qa_phase2.py -q`
   - `30 passed in 0.34s`
 - `node --check web\app.js`
@@ -639,7 +639,7 @@ Hypothesis:
 
 What:
 
-- Inspected `ui_server.py`, `youtube_meta.py`, and the frontend YouTube/proxy status render path.
+- Inspected `src/autosub_zh/ui_server.py`, `src/autosub_zh/youtube_meta.py`, and the frontend YouTube/proxy status render path.
 - Found the active `ui_config.json` had `proxy_url` set to a YouTube video URL: `https://www.youtube.com/watch?v=VWPkTdC488o`.
 - Added proxy URL validation so web-page URLs, missing ports, query strings, and unsupported schemes are rejected before they are passed to `yt-dlp` or `httpx`.
 - Enhanced proxy diagnostics:
@@ -647,7 +647,7 @@ What:
   - probes both `https://www.youtube.com` and `https://i.ytimg.com/...`
   - includes `exception_type`, `raw_error`, `active_proxy_url`, and `proxy_validation_error`
 - Enhanced YouTube info/cover API errors with operation, proxy mode, proxy URL, exception type, raw detail, and traceback.
-- Enhanced `youtube_meta.py` errors so `yt-dlp` and cover download failures include whether a proxy was used.
+- Enhanced `src/autosub_zh/youtube_meta.py` errors so `yt-dlp` and cover download failures include whether a proxy was used.
 - Cover fallback now reports both the primary thumbnail failure and fallback URL failure.
 - Added `tests/test_proxy_youtube_diagnostics.py`.
 
@@ -655,7 +655,7 @@ Validation:
 
 - `$env:PYTHONPATH='D:\'; python -m pytest tests/test_proxy_youtube_diagnostics.py -q`
   - `4 passed`
-- `python -m py_compile ui_server.py youtube_meta.py`
+- `python -m py_compile src/autosub_zh/ui_server.py src/autosub_zh/youtube_meta.py`
 - `node --check web\app.js`
 - Live local proxy diagnostic with the current bad config now reports:
   - `proxy_validation_error = Proxy URL looks like a web page, not a proxy endpoint...`
@@ -681,17 +681,17 @@ What:
 
 - Audited the current YouTube metadata path:
   - `/api/youtube-meta` and `/api/youtube-cover` call `youtube_info_job()` / `youtube_assets_job()`.
-  - `youtube_meta.py` reads metadata through `yt-dlp`, writes `00_youtube_meta.json` and `00_youtube_info.txt`.
-  - `ui_server.py` writes `10_youtube_manifest.json`; the frontend stores the response in `state.youtubeMeta` and renders `youtubeMetaCard`.
+  - `src/autosub_zh/youtube_meta.py` reads metadata through `yt-dlp`, writes `00_youtube_meta.json` and `00_youtube_info.txt`.
+  - `src/autosub_zh/ui_server.py` writes `10_youtube_manifest.json`; the frontend stores the response in `state.youtubeMeta` and renders `youtubeMetaCard`.
 - Audited proxy flow:
-  - `proxy_url` is normalized and validated in `ui_server.py`.
+  - `proxy_url` is normalized and validated in `src/autosub_zh/ui_server.py`.
   - valid proxies flow into `yt-dlp` as `options["proxy"]`.
   - `httpx.Client` receives `proxy=proxy_url` and disables `trust_env` when a proxy is explicitly set.
 - Audited output tree flow:
   - `read_output_tree()` scans `output/*`, reads `10_manifest_bilingual.json` when present, and sends projects to the frontend bootstrap/state payloads.
   - YouTube metadata assets use a separate `10_youtube_manifest.json` in the same output tree.
 - Checked for existing Bilibili search/download code:
-  - no existing Bilibili search module was found; the new boundary is isolated in `bilibili_search.py`.
+  - no existing Bilibili search module was found; the new boundary is isolated in `src/autosub_zh/bilibili_search.py`.
 - Added rule-based Bilibili duplicate search:
   - query plan generation
   - lightweight search page requests
@@ -714,7 +714,7 @@ Validation:
   - first pass: 2 failures, then corrected query ordering and duration boundary
   - final pass: `9 passed`
 - final rerun: `9 passed in 1.29s`
-- `python -m py_compile bilibili_search.py ui_server.py`
+- `python -m py_compile src/autosub_zh/bilibili_search.py src/autosub_zh/ui_server.py`
 - `node --check web\app.js`
 - Live API request through `POST /api/bilibili-duplicate-search` with fixed YouTube metadata:
   - `ok = true`
@@ -729,7 +729,7 @@ Validation:
 
 Rollback:
 
-- Remove `bilibili_search.py`, the `/api/bilibili-duplicate-search` branch, frontend Bilibili card/button code, and the `00b_*` artifacts.
+- Remove `src/autosub_zh/bilibili_search.py`, the `/api/bilibili-duplicate-search` branch, frontend Bilibili card/button code, and the `00b_*` artifacts.
 
 Next:
 
@@ -765,7 +765,7 @@ Validation:
 
 - `pytest tests/test_bilibili_query_plan.py tests/test_bilibili_candidate_scoring.py tests/test_bilibili_search_parsing.py tests/test_ui_server_bilibili_api.py`
   - `10 passed in 1.29s`
-- `python -m py_compile bilibili_search.py ui_server.py`
+- `python -m py_compile src/autosub_zh/bilibili_search.py src/autosub_zh/ui_server.py`
 - `node --check web\app.js`
 - Live API request after restarting UI server on port 8790:
   - `decision = no_candidates_search_completed`
@@ -799,7 +799,7 @@ What:
 
 Validation:
 
-- `python -m py_compile bilibili_search.py ui_server.py`
+- `python -m py_compile src/autosub_zh/bilibili_search.py src/autosub_zh/ui_server.py`
 - `node --check web\app.js`
 - `pytest tests/test_bilibili_query_plan.py tests/test_bilibili_candidate_scoring.py tests/test_bilibili_search_parsing.py tests/test_ui_server_bilibili_api.py`
   - `16 passed in 1.31s`
@@ -822,7 +822,7 @@ User direction:
 
 What:
 
-- Added `feedback_dataset.py` with commands:
+- Added `src/autosub_zh/feedback_dataset.py` with commands:
   - `init`
   - `collect-bilibili`
   - `collect-style`
@@ -861,12 +861,12 @@ Validation:
 - `python -m autosub_zh.feedback_dataset summarize`
 - `pytest tests/test_feedback_dataset.py tests/test_ui_server_bilibili_api.py`
   - `8 passed`
-- `python -m py_compile feedback_dataset.py ui_server.py`
+- `python -m py_compile src/autosub_zh/feedback_dataset.py src/autosub_zh/ui_server.py`
 - `node --check web\app.js`
 
 Known unrelated dirty files left untouched:
 
-- `asr.py`
+- `src/autosub_zh/asr.py`
 - `ui_server_error_trace.log`
 - `ui_server_live_stderr.log`
 - `ui_server_live_stdout.log`
@@ -956,7 +956,7 @@ What:
 Verification:
 
 - `node --check web\app.js`
-- `python -m py_compile ui_server.py`
+- `python -m py_compile src/autosub_zh/ui_server.py`
 - `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py`
 - In-app browser smoke test on `http://127.0.0.1:8789/`:
   - page title `Autosub Studio`;
@@ -1002,7 +1002,7 @@ Dataset state after rebuild:
 
 Verification:
 
-- `python -m py_compile feedback_dataset.py ui_server.py`
+- `python -m py_compile src/autosub_zh/feedback_dataset.py src/autosub_zh/ui_server.py`
 - `node --check web\app.js`
 - `pytest tests/test_feedback_dataset.py`
 - `py -m autosub_zh.feedback_dataset dedupe`
@@ -1046,7 +1046,7 @@ Current dataset state:
 
 Verification:
 
-- `python -m py_compile feedback_dataset.py span_translate.py pipeline_core.py ui_server.py`
+- `python -m py_compile src/autosub_zh/feedback_dataset.py src/autosub_zh/span_translate.py src/autosub_zh/pipeline_core.py src/autosub_zh/ui_server.py`
 - `node --check web\app.js`
 - `pytest tests/test_feedback_dataset.py tests/test_span_translation_flow.py tests/test_ui_server_bilibili_api.py`
 - `py -m autosub_zh.feedback_dataset validate`
@@ -1087,7 +1087,7 @@ Dataset state after rebuild:
 
 Verification:
 
-- `python -m py_compile feedback_dataset.py ui_server.py`
+- `python -m py_compile src/autosub_zh/feedback_dataset.py src/autosub_zh/ui_server.py`
 - `node --check web\app.js`
 - `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py`
 - `py -m autosub_zh.feedback_dataset dedupe`
@@ -1121,7 +1121,7 @@ What:
 Verification:
 
 - `node --check web\app.js`
-- `python -m py_compile ui_server.py feedback_dataset.py span_translate.py pipeline_core.py`
+- `python -m py_compile src/autosub_zh/ui_server.py src/autosub_zh/feedback_dataset.py src/autosub_zh/span_translate.py src/autosub_zh/pipeline_core.py`
 - `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
 
 Notes:
@@ -1146,7 +1146,7 @@ What:
 Verification:
 
 - `node --check web\app.js`
-- `python -m py_compile ui_server.py feedback_dataset.py`
+- `python -m py_compile src/autosub_zh/ui_server.py src/autosub_zh/feedback_dataset.py`
 - `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
 
 Correction:
@@ -1188,7 +1188,7 @@ What:
   - `00_ASS_subtitle_<dst>.ass`
   - `00_ASS_source_<src>.ass`
 - Kept legacy `08_*` ASS copies for compatibility when the pipeline writes new outputs.
-- Added shared ASS filename helpers in `workflow_profiles.py`:
+- Added shared ASS filename helpers in `src/autosub_zh/workflow_profiles.py`:
   - `is_final_ass_filename`
   - `ass_candidate_paths`
   - `find_existing_ass_path`
@@ -1198,7 +1198,7 @@ What:
 
 Verification:
 
-- `python -m py_compile workflow_profiles.py pipeline_core.py ui_server.py feedback_dataset.py cli.py style_learning_cli.py tools/fixes/fix_ru_xiu_xiu_title.py`
+- `python -m py_compile src/autosub_zh/workflow_profiles.py src/autosub_zh/pipeline_core.py src/autosub_zh/ui_server.py src/autosub_zh/feedback_dataset.py src/autosub_zh/cli.py src/autosub_zh/style_learning_cli.py tools/fixes/fix_ru_xiu_xiu_title.py`
 - `node --check web\app.js`
 - `pytest tests/test_subtitle_output_modes.py tests/test_feedback_dataset.py tests/test_ui_server_bilibili_api.py tests/test_span_translation_flow.py`
 
@@ -1218,7 +1218,7 @@ What:
 
 Verification:
 
-- `python -m py_compile pipeline_core.py workflow_profiles.py ui_server.py feedback_dataset.py`
+- `python -m py_compile src/autosub_zh/pipeline_core.py src/autosub_zh/workflow_profiles.py src/autosub_zh/ui_server.py src/autosub_zh/feedback_dataset.py`
 - `pytest tests/test_subtitle_output_modes.py tests/test_feedback_dataset.py tests/test_ui_server_bilibili_api.py tests/test_span_translation_flow.py`
 
 ## 2026-06-17 23:55 +08:00 - Bilibili Check Decoupling and Release Artifact Health
@@ -1252,7 +1252,7 @@ What:
 
 Verification:
 
-- `python -m py_compile ui_server.py feedback_dataset.py pipeline_core.py span_translate.py`
+- `python -m py_compile src/autosub_zh/ui_server.py src/autosub_zh/feedback_dataset.py src/autosub_zh/pipeline_core.py src/autosub_zh/span_translate.py`
 - `node --check web\app.js`
 - `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
 - `pytest tests/test_subtitle_output_modes.py`
@@ -1292,9 +1292,9 @@ What:
 
 Verification:
 
-- `python -m py_compile ui_server.py feedback_dataset.py pipeline_core.py workflow_profiles.py`
+- `python -m py_compile src/autosub_zh/ui_server.py src/autosub_zh/feedback_dataset.py src/autosub_zh/pipeline_core.py src/autosub_zh/workflow_profiles.py`
 - `node --check web\app.js`
-- `git diff --check -- ui_server.py pipeline_core.py web\app.js web\index.html web\styles.css tests/test_ui_server_bilibili_api.py`
+- `git diff --check -- src/autosub_zh/ui_server.py src/autosub_zh/pipeline_core.py web\app.js web\index.html web\styles.css tests/test_ui_server_bilibili_api.py`
 - `pytest tests/test_ui_server_bilibili_api.py`
 - `pytest tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
 - `pytest tests/test_subtitle_output_modes.py`
@@ -1353,9 +1353,9 @@ Current real-data diagnosis:
 
 Verification:
 
-- `python -m py_compile ui_server.py feedback_dataset.py`
+- `python -m py_compile src/autosub_zh/ui_server.py src/autosub_zh/feedback_dataset.py`
 - `node --check web\app.js`
-- `git diff --check -- ui_server.py web\app.js web\styles.css tests/test_ui_server_bilibili_api.py`
+- `git diff --check -- src/autosub_zh/ui_server.py web\app.js web\styles.css tests/test_ui_server_bilibili_api.py`
 - `pytest tests/test_ui_server_bilibili_api.py`
 - `pytest tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
 - `pytest tests/test_subtitle_output_modes.py`
@@ -1369,7 +1369,7 @@ User direction:
 
 What:
 
-- Added deterministic A/B sample outcome classification in `feedback_ab_eval.py`.
+- Added deterministic A/B sample outcome classification in `src/autosub_zh/feedback_ab_eval.py`.
 - A/B reports now expose `action_summary` for:
   - helpful feedback samples
   - prompt-harmful candidates
@@ -1396,7 +1396,7 @@ Safety:
 
 Verification:
 
-- `python -m py_compile ui_server.py feedback_ab_eval.py feedback_dataset.py pipeline_core.py span_translate.py`
+- `python -m py_compile src/autosub_zh/ui_server.py src/autosub_zh/feedback_ab_eval.py src/autosub_zh/feedback_dataset.py src/autosub_zh/pipeline_core.py src/autosub_zh/span_translate.py`
 - `node --check web\app.js`
 - `pytest tests/test_feedback_dataset.py tests/test_ui_server_bilibili_api.py -q`
 - `pytest tests/test_feedback_dataset.py tests/test_ui_server_bilibili_api.py tests/test_span_translation_flow.py tests/test_subtitle_output_modes.py -q`

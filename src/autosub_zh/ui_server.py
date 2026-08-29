@@ -56,6 +56,7 @@ from .feedback_ab_eval import (
 from .job_store import JobStore, ACTIVE_STATUSES
 from .models import BilingualSubtitleStyle
 from .media import normalize_asr_audio_mode, normalize_asr_vad_mode, probe_media
+from .project_paths import ATTACHMENTS_DIR, INPUT_DIR, OUTPUT_DIR, PROJECT_ROOT, RUNTIME_DIR, WEB_DIR
 from .pipeline_core import build_output_slug, build_translation_style_prompt, burn_subtitle, create_safe_ass_copy, run_pipeline, write_json
 from .pipeline_runner import compute_output_dir
 from .glossary import write_youtube_glossary
@@ -77,13 +78,8 @@ from .youtube_meta import ensure_cover, ensure_padded_cover, fetch_youtube_info,
 from .span_translate import compact_span_prompt_example, read_span_examples, summarize_span_examples_for_hash, _stable_hash as stable_span_hash, DEFAULT_SPAN_EXAMPLE_TOP_K
 
 
-BASE_DIR = Path(__file__).resolve().parent
-INPUT_DIR = BASE_DIR / "input"
-OUTPUT_DIR = BASE_DIR / "output"
-RUNTIME_DIR = BASE_DIR / "runtime"
-ATTACHMENTS_DIR = BASE_DIR / "attachments"
-WEB_DIR = BASE_DIR / "web"
-CONFIG_PATH = BASE_DIR / "ui_config.json"
+BASE_DIR = PROJECT_ROOT
+CONFIG_PATH = PROJECT_ROOT / "ui_config.json"
 ERROR_LOG_PATH = RUNTIME_DIR / "logs" / "ui_server_error_trace.log"
 STATE_SNAPSHOT_PATH = RUNTIME_DIR / "ui_server_state.json"
 LOCAL_FEEDBACK_DATASET_DIR = DEFAULT_DATASET_DIR
@@ -1693,13 +1689,13 @@ def start_worker_process() -> None:
         existing = []
     if existing:
         return
-    log_dir = BASE_DIR / "runtime"
+    log_dir = RUNTIME_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
     stdout = open(log_dir / "worker_stdout.log", "a", encoding="utf-8")
     stderr = open(log_dir / "worker_stderr.log", "a", encoding="utf-8")
     subprocess.Popen(
         [sys.executable, "-m", "autosub_zh.worker_service"],
-        cwd=str(BASE_DIR.parent),
+        cwd=str(PROJECT_ROOT),
         stdout=stdout,
         stderr=stderr,
         stdin=subprocess.DEVNULL,

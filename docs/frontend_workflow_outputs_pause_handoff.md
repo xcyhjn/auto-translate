@@ -23,10 +23,10 @@ The owner asked for these changes:
 
 Main files:
 
-- `web/index.html`
-- `web/app.js`
-- `web/styles.css`
-- `ui_server.py`
+- `src/autosub_zh/web/index.html`
+- `src/autosub_zh/web/app.js`
+- `src/autosub_zh/web/styles.css`
+- `src/autosub_zh/ui_server.py`
 
 Important current DOM IDs:
 
@@ -69,7 +69,7 @@ Important current DOM IDs:
   - `currentStageDescription`
   - `overallProgressFill`
 
-Important current functions in `web/app.js`:
+Important current functions in `src/autosub_zh/web/app.js`:
 
 - `renderWorkflowProfiles()`
 - `renderWorkflowSummary()`
@@ -84,7 +84,7 @@ Important current functions in `web/app.js`:
 - `taskIsBusy(runtime)`
 - `setTaskButtonsDisabled(disabled)`
 
-Important current backend functions in `ui_server.py`:
+Important current backend functions in `src/autosub_zh/ui_server.py`:
 
 - `try_begin_task(...)`
 - `execute_pipeline_job(...)`
@@ -279,7 +279,7 @@ Implementation direction:
 <section class="workspace-card" id="workspaceDetails">
 ```
 
-- Add helper in `web/app.js`:
+- Add helper in `src/autosub_zh/web/app.js`:
 
 ```js
 function scrollToWorkspaceDetails() {
@@ -487,7 +487,7 @@ If a true hard pause is required for native ASR/FFmpeg/GPU operations, this beco
 
 ## Suggested File Changes
 
-### `web/index.html`
+### `src/autosub_zh/web/index.html`
 
 Add:
 
@@ -499,7 +499,7 @@ Add:
 - `workspaceDetails` anchor/id.
 - Optional output project expand/collapse icon markup.
 
-### `web/app.js`
+### `src/autosub_zh/web/app.js`
 
 Add state:
 
@@ -534,7 +534,7 @@ Add:
 - `resumeFlow()`
 - `renderFlowControlButtons()`
 
-### `web/styles.css`
+### `src/autosub_zh/web/styles.css`
 
 Add styles for:
 
@@ -545,7 +545,7 @@ Add styles for:
 - collapsed input list state
 - pause/resume button states
 
-### `ui_server.py`
+### `src/autosub_zh/ui_server.py`
 
 Add:
 
@@ -558,10 +558,10 @@ Add:
 
 May also require changes in:
 
-- `pipeline_core.py`
-- `translate.py`
-- `span_repair.py`
-- `media.py`
+- `src/autosub_zh/pipeline_core.py`
+- `src/autosub_zh/translate.py`
+- `src/autosub_zh/span_repair.py`
+- `src/autosub_zh/media.py`
 
 Only touch these if needed to add cooperative checkpoints.
 
