@@ -182,7 +182,7 @@ Generated phase-2 artifacts for `output/Russian-book-about-a-dying-god`.
 
 - `python -m py_compile semantic_allocation.py segmentation_qa.py source_repair.py zh_reading_axis.py subtitle_io.py pipeline_core.py ui_server.py pipeline_runner.py`
 - `node --check web\app.js`
-- `pytest -q test_semantic_qa_phase2.py test_zh_reading_axis.py test_asr_repair_flow.py`
+- `pytest -q tests/test_semantic_qa_phase2.py tests/test_zh_reading_axis.py tests/test_asr_repair_flow.py`
 - Browser check at `http://127.0.0.1:8777`
   - Russian sample QA metrics and artifact links render in "项目产物 -> 字幕 QA".
   - 375px / 768px / 1280px / 1920px have no horizontal overflow.
@@ -238,8 +238,8 @@ This happened because terminal orphan cues were protected from the existing orph
 - `web/app.js`
   - Added the frontend QA card `孤立句尾词`.
 - Tests:
-  - `test_timing_segmentation.py`
-  - `test_semantic_qa_phase2.py`
+  - `tests/test_timing_segmentation.py`
+  - `tests/test_semantic_qa_phase2.py`
 
 ### Validation
 
@@ -247,7 +247,7 @@ Commands:
 
 - `python -m py_compile timing.py zh_reading_axis.py segmentation_qa.py pipeline_core.py`
 - `node --check web/app.js`
-- `pytest -q test_timing_segmentation.py test_semantic_qa_phase2.py test_zh_reading_axis.py test_subtitle_output_modes.py test_asr_repair_flow.py`
+- `pytest -q tests/test_timing_segmentation.py tests/test_semantic_qa_phase2.py tests/test_zh_reading_axis.py tests/test_subtitle_output_modes.py tests/test_asr_repair_flow.py`
 
 Result:
 
@@ -302,15 +302,15 @@ Chinese subtitles still leak Latin text because prompt-level instructions are to
 - `pipeline_runner.py`
 - `ui_server.py`
 - `web/app.js`
-- `test_english_residue_policy.py`
-- `test_entity_pipeline_integration.py`
-- `test_entity_pipeline_contract.py`
+- `tests/test_english_residue_policy.py`
+- `tests/test_entity_pipeline_integration.py`
+- `tests/test_entity_pipeline_contract.py`
 
 ### Validation
 
 - `python -m py_compile english_residue_policy.py translate.py span_translate.py qa.py qa_outputs.py entity_normalization.py pipeline_core.py pipeline_runner.py ui_server.py`
 - `node --check web\app.js`
-- `pytest -q test_english_residue_policy.py test_qa_outputs.py test_entity_pipeline_contract.py test_entity_pipeline_integration.py test_workflow_profiles.py test_ui_server_config.py`
+- `pytest -q tests/test_english_residue_policy.py tests/test_qa_outputs.py tests/test_entity_pipeline_contract.py tests/test_entity_pipeline_integration.py tests/test_workflow_profiles.py tests/test_ui_server_config.py`
   - `23 passed in 0.63s`
 - Offline sample scoring on `output/Russian-book-about-a-dying-god/05_translated_segments.json`:
   - `english_residue_total_count = 224`
@@ -372,14 +372,14 @@ These should not be merged into the previous cue just because they are short and
     - `独立语气词`
     - `歧义语气词`
 - Tests:
-  - `test_timing_segmentation.py`
-  - `test_semantic_qa_phase2.py`
+  - `tests/test_timing_segmentation.py`
+  - `tests/test_semantic_qa_phase2.py`
 
 ### Validation
 
 - `python -m py_compile terminal_tail.py timing.py zh_reading_axis.py segmentation_qa.py pipeline_core.py`
 - `node --check web/app.js`
-- `pytest -q test_timing_segmentation.py test_semantic_qa_phase2.py test_zh_reading_axis.py test_subtitle_output_modes.py test_asr_repair_flow.py`
+- `pytest -q tests/test_timing_segmentation.py tests/test_semantic_qa_phase2.py tests/test_zh_reading_axis.py tests/test_subtitle_output_modes.py tests/test_asr_repair_flow.py`
 
 Result:
 
@@ -427,7 +427,7 @@ The first strict English residue implementation exposed three bypasses during ac
 ### Validation
 
 - Tests:
-  - `python -m pytest test_english_residue_policy.py test_terminology_short_circuit.py -q`
+  - `python -m pytest tests/test_english_residue_policy.py tests/test_terminology_short_circuit.py -q`
   - Result: `12 passed`
 - ASS inspection:
   - Chinese layer Latin residue count: `1`
@@ -478,16 +478,16 @@ The span pretranslation path was too broad and too early:
   - Added config passthrough for `span_translation_max_segments`, `span_translation_max_duration`, and `span_translation_min_risk_score`.
 - `web/index.html` / `web/app.js`
   - Synced the frontend form/defaults for the new span pretranslation limits.
-- `test_span_translation_flow.py`
+- `tests/test_span_translation_flow.py`
   - Covers long-span downgrade, short high-risk retention, candidate filtering, and checkpoint fingerprint mismatch.
 
 ### Validation
 
 - `python -m py_compile source_spans.py span_translate.py pipeline_core.py pipeline_runner.py ui_server.py`
-- `$env:PYTHONPATH='D:\'; python -m pytest test_span_translation_flow.py test_terminology_short_circuit.py test_english_residue_policy.py test_semantic_qa_phase2.py -q`
+- `$env:PYTHONPATH='D:\'; python -m pytest tests/test_span_translation_flow.py tests/test_terminology_short_circuit.py tests/test_english_residue_policy.py tests/test_semantic_qa_phase2.py -q`
   - `30 passed`
 - `node --check web\app.js`
-- `$env:PYTHONPATH='D:\'; python -m pytest test_span_translation_flow.py test_ui_server_config.py -q`
+- `$env:PYTHONPATH='D:\'; python -m pytest tests/test_span_translation_flow.py tests/test_ui_server_config.py -q`
   - `10 passed`
 - Offline Russian sample recalculation from current `03_timed_source_segments.json`:
   - before: `span_first_count = 144`
@@ -537,12 +537,12 @@ The web proxy test and YouTube info/cover fetch were failing without actionable 
   - Wrapped `yt-dlp` metadata fetch and cover download failures in more explicit `RuntimeError`s that mention whether a proxy was used.
   - Cover download fallback now reports both the primary and fallback failure.
 
-- `test_proxy_youtube_diagnostics.py`
+- `tests/test_proxy_youtube_diagnostics.py`
   - Added coverage for invalid proxy URLs, unreachable proxies, and primary/fallback cover download failures.
 
 ### Validation Results
 
-- `$env:PYTHONPATH='D:\'; python -m pytest test_proxy_youtube_diagnostics.py -q`
+- `$env:PYTHONPATH='D:\'; python -m pytest tests/test_proxy_youtube_diagnostics.py -q`
   - `4 passed`
 - `python -m py_compile ui_server.py youtube_meta.py`
 - `node --check web\app.js`
@@ -588,7 +588,7 @@ The web proxy test and YouTube info/cover fetch were failing without actionable 
 
 ### Validation Results
 
-- `pytest test_bilibili_query_plan.py test_bilibili_candidate_scoring.py test_bilibili_search_parsing.py test_ui_server_bilibili_api.py`
+- `pytest tests/test_bilibili_query_plan.py tests/test_bilibili_candidate_scoring.py tests/test_bilibili_search_parsing.py tests/test_ui_server_bilibili_api.py`
   - `9 passed`
   - final rerun: `9 passed in 1.29s`
 - `python -m py_compile bilibili_search.py ui_server.py`

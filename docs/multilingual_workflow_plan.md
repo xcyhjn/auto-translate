@@ -192,8 +192,8 @@ These still need follow-up:
 
 Current focused tests added or used:
 
-- `test_workflow_profiles.py`
-- `test_subtitle_output_modes.py`
+- `tests/test_workflow_profiles.py`
+- `tests/test_subtitle_output_modes.py`
 
 These currently verify:
 

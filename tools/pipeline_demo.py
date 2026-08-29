@@ -5,8 +5,8 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from .models import BilingualSubtitleStyle
-from .pipeline_core import resolve_output_dir, run_pipeline
+from autosub_zh.models import BilingualSubtitleStyle
+from autosub_zh.pipeline_core import resolve_output_dir, run_pipeline
 
 
 def parse_args() -> argparse.Namespace:

@@ -64,7 +64,7 @@ python -m autosub_zh.doctor
 
 ```powershell
 cd D:\autosub_zh
-powershell -ExecutionPolicy Bypass -File .\start_ui_server.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\start_ui_server.ps1
 ```
 
 脚本会寻找可用的 Python，检查端口并在前台启动服务。默认地址是：
@@ -286,6 +286,8 @@ workflow_profiles/            英中、俄中等工作流配置
 translation_prompts/          翻译提示词
 datasets/                     规则数据、实体表、反馈和评测
 tools/                        增量工具与 VS Code ASS 高亮器
+tools/fixes/                 一次性修复与迁移脚本
+tests/                        自动化测试
 input/ / output/              用户媒体与项目产物
 runtime/                      数据库、状态和运行日志
 docs/                         设计、交接、审计和变更记录
@@ -298,7 +300,7 @@ docs/                         设计、交接、审计和变更记录
 ```powershell
 cd D:\
 $env:PYTHONPATH="D:\"
-python -m pytest -q .\autosub_zh
+python -m pytest -q .\autosub_zh\tests
 ```
 
 测试会 mock 或隔离网络、LLM、`yt-dlp`、`ffmpeg` 和 Whisper。通过自动化测试不等于真实媒体、CUDA、远程 API 和最终画面已经验证。
@@ -313,8 +315,8 @@ python -m pytest -q .\autosub_zh
 
 ## 文档
 
-- [输出文件约定](OUTPUT_STRUCTURE.md)
-- [OpenAI 兼容接口说明](OPENAI_API_INTEGRATION.md)
+- [输出文件约定](docs/OUTPUT_STRUCTURE.md)
+- [OpenAI 兼容接口说明](docs/OPENAI_API_INTEGRATION.md)
 - [本地反馈数据说明](datasets/local_feedback/README.md)
 - [复合工程标准](docs/COMPOSITE_ENGINEERING_STANDARD.md)
 - [复合工程验收记录](docs/COMPOSITE_ENGINEERING_VALIDATION.md)

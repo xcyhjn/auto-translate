@@ -10,7 +10,7 @@ Status: complete
 
 Validation:
 
-- `pytest -q test_subtitle_output_modes.py test_workflow_profiles.py` passed before edits.
+- `pytest -q tests/test_subtitle_output_modes.py tests/test_workflow_profiles.py` passed before edits.
 
 ## v0.2 core split
 
@@ -49,7 +49,7 @@ Status: complete
 
 Validation:
 
-- `pytest -q test_subtitle_output_modes.py test_workflow_profiles.py test_reference_layer_qa.py test_reference_mode_ui.py` passed.
+- `pytest -q tests/test_subtitle_output_modes.py tests/test_workflow_profiles.py tests/test_reference_layer_qa.py tests/test_reference_mode_ui.py` passed.
 - `pytest -q` passed.
 
 ## v0.5 60s verification
@@ -88,7 +88,7 @@ Validation:
 - 17 source segments produced 16 `EnglishSmall` reference lines; 0 source segments split into multiple groups.
 - Hidden reference rows: 0.
 - Ellipsis rows: 1, and it came from the original source segment text rather than formatting truncation.
-- `pytest -q test_workflow_profiles.py test_subtitle_output_modes.py test_reference_layer_qa.py test_reference_mode_ui.py` passed.
+- `pytest -q tests/test_workflow_profiles.py tests/test_subtitle_output_modes.py tests/test_reference_layer_qa.py tests/test_reference_mode_ui.py` passed.
 
 ## v0.7 permanent defaults
 

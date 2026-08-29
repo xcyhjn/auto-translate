@@ -109,7 +109,7 @@
 
 - `python -m py_compile semantic_allocation.py segmentation_qa.py source_repair.py zh_reading_axis.py subtitle_io.py pipeline_core.py ui_server.py pipeline_runner.py`
 - `node --check web\app.js`
-- `pytest -q test_semantic_qa_phase2.py test_zh_reading_axis.py test_asr_repair_flow.py`
+- `pytest -q tests/test_semantic_qa_phase2.py tests/test_zh_reading_axis.py tests/test_asr_repair_flow.py`
 - 结果：`17 passed in 0.28s`
 
 Russian sample 重新生成关键二期产物：

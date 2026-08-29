@@ -214,7 +214,7 @@ Acceptance criteria:
 Run these checks after any frontend implementation:
 
 ```powershell
-pytest -q test_workflow_profiles.py test_ui_server_config.py test_reference_mode_ui.py
+pytest -q tests/test_workflow_profiles.py tests/test_ui_server_config.py tests/test_reference_mode_ui.py
 ```
 
 Then verify in the browser:

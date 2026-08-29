@@ -22,7 +22,7 @@ Files inspected:
 Checks run:
 
 ```powershell
-pytest -q test_workflow_profiles.py test_ui_server_config.py test_reference_mode_ui.py
+pytest -q tests/test_workflow_profiles.py tests/test_ui_server_config.py tests/test_reference_mode_ui.py
 ```
 
 Result:
@@ -413,13 +413,13 @@ Suggested docs cleanup:
 Run focused tests:
 
 ```powershell
-pytest -q test_workflow_profiles.py test_ui_server_config.py test_reference_mode_ui.py
+pytest -q tests/test_workflow_profiles.py tests/test_ui_server_config.py tests/test_reference_mode_ui.py
 ```
 
 Add and run a new partial-style regression test:
 
 ```powershell
-pytest -q test_ui_server_config.py
+pytest -q tests/test_ui_server_config.py
 ```
 
 Restart the UI server before browser verification:
@@ -492,15 +492,15 @@ These appear related to real backend/frontend feature work and should not be del
 - `web/app.js`
 - `web/index.html`
 - `web/styles.css`
-- `test_entity_normalization.py`
-- `test_entity_pipeline_contract.py`
-- `test_entity_pipeline_integration.py`
-- `test_qa_outputs.py`
-- `test_reference_layer_qa.py`
-- `test_reference_mode_ui.py`
-- `test_ui_server_config.py`
-- `test_subtitle_output_modes.py`
-- `test_workflow_profiles.py`
+- `tests/test_entity_normalization.py`
+- `tests/test_entity_pipeline_contract.py`
+- `tests/test_entity_pipeline_integration.py`
+- `tests/test_qa_outputs.py`
+- `tests/test_reference_layer_qa.py`
+- `tests/test_reference_mode_ui.py`
+- `tests/test_ui_server_config.py`
+- `tests/test_subtitle_output_modes.py`
+- `tests/test_workflow_profiles.py`
 - `docs/entity_normalization_handoff.md`
 - `docs/frontend_ai_optimization_prompt.md`
 - `docs/frontend_handoff_and_project_status.md`
@@ -548,7 +548,7 @@ Note:
 
 Review before keeping:
 
-- `fix_ru_xiu_xiu_title.py`
+- `tools/fixes/fix_ru_xiu_xiu_title.py`
 
 Reason:
 

@@ -258,9 +258,8 @@ Before another AI or developer takes over:
 2. Read [docs/multilingual_workflow_plan.md](D:/autosub_zh/docs/multilingual_workflow_plan.md).
 3. Check [workflow_profiles.py](D:/autosub_zh/workflow_profiles.py).
 4. Check current focused tests:
-   - [test_workflow_profiles.py](D:/autosub_zh/test_workflow_profiles.py)
-   - [test_subtitle_output_modes.py](D:/autosub_zh/test_subtitle_output_modes.py)
+   - [tests/test_workflow_profiles.py](D:/autosub_zh/tests/test_workflow_profiles.py)
+   - [tests/test_subtitle_output_modes.py](D:/autosub_zh/tests/test_subtitle_output_modes.py)
 5. Verify which Python interpreter is actually running the pipeline.
 6. Confirm model cache availability for the target workflow profile.
 7. Run a 60-second preview before touching the full video workflow.
-

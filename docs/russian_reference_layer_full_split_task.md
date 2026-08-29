@@ -244,7 +244,7 @@ Add checks for:
 Relevant files:
 
 - [qa.py](D:/autosub_zh/qa.py)
-- [test_subtitle_output_modes.py](D:/autosub_zh/test_subtitle_output_modes.py)
+- [tests/test_subtitle_output_modes.py](D:/autosub_zh/tests/test_subtitle_output_modes.py)
 
 ## Suggested Test Additions
 

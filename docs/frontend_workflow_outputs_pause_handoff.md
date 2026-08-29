@@ -570,7 +570,7 @@ Only touch these if needed to add cooperative checkpoints.
 Run existing tests:
 
 ```powershell
-pytest -q test_workflow_profiles.py test_ui_server_config.py test_reference_mode_ui.py
+pytest -q tests/test_workflow_profiles.py tests/test_ui_server_config.py tests/test_reference_mode_ui.py
 ```
 
 Add backend tests:

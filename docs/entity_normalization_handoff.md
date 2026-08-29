@@ -16,8 +16,8 @@ The goal is to stop treating human-name and title fixes as ad hoc ASS edits. We 
 - ASS generation hook reviewed: [subtitle_io.py](D:/autosub_zh/subtitle_io.py:891)
 - Main pipeline write/QA sequence reviewed: [pipeline_core.py](D:/autosub_zh/pipeline_core.py:1113)
 - Existing tests reviewed:
-  - [test_asr_repair_flow.py](D:/autosub_zh/test_asr_repair_flow.py:1)
-  - [test_subtitle_output_modes.py](D:/autosub_zh/test_subtitle_output_modes.py:1)
+  - [tests/test_asr_repair_flow.py](D:/autosub_zh/tests/test_asr_repair_flow.py:1)
+  - [tests/test_subtitle_output_modes.py](D:/autosub_zh/tests/test_subtitle_output_modes.py:1)
 
 ## Problem summary
 
@@ -286,8 +286,8 @@ Mitigation:
   - `06g_entity_normalized_segments.json`
 - Added ASS-level entity audit output:
   - `08b_ass_entity_audit.json`
-- Added focused tests in [test_entity_normalization.py](D:/autosub_zh/test_entity_normalization.py:1).
-- Verified the first-pass module with `pytest -q test_entity_normalization.py`:
+- Added focused tests in [tests/test_entity_normalization.py](D:/autosub_zh/tests/test_entity_normalization.py:1).
+- Verified the first-pass module with `pytest -q tests/test_entity_normalization.py`:
   - result: `3 passed`
 - Extended Phase 2 with:
   - review-row generation for unresolved English residue in Chinese target text,

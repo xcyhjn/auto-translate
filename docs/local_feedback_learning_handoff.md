@@ -52,7 +52,7 @@ Minimum viable loop:
 ## Added Files
 
 - `feedback_dataset.py`: CLI and Python module for collection, validation, dedupe, gold-set build, subtitle feedback eval, summary, and Bilibili replay eval.
-- `test_feedback_dataset.py`: regression tests for collection, label preservation, subtitle eval, replay eval, and train/eval separation.
+- `tests/test_feedback_dataset.py`: regression tests for collection, label preservation, subtitle eval, replay eval, and train/eval separation.
 - `datasets/local_feedback/`: local feedback dataset root.
 - `POST /api/bilibili-duplicate-feedback`: saves UI labels into local JSONL.
 - `POST /api/collect-style-feedback`: collects ASS edit feedback into local JSONL.

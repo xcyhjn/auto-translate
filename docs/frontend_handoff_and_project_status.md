@@ -114,7 +114,7 @@ Implemented:
 Recent regression result:
 
 ```bash
-pytest -q test_entity_pipeline_integration.py test_entity_pipeline_contract.py test_entity_normalization.py test_subtitle_output_modes.py test_qa_outputs.py test_asr_repair_flow.py test_workflow_profiles.py
+pytest -q tests/test_entity_pipeline_integration.py tests/test_entity_pipeline_contract.py tests/test_entity_normalization.py tests/test_subtitle_output_modes.py tests/test_qa_outputs.py tests/test_asr_repair_flow.py tests/test_workflow_profiles.py
 ```
 
 Current result:

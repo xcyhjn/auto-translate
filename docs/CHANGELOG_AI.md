@@ -36,8 +36,8 @@ This file is the dedicated update log for project changes that should remain leg
 
 ### Tests
 
-- Added [test_workflow_profiles.py](D:/autosub_zh/test_workflow_profiles.py)
-- Added [test_subtitle_output_modes.py](D:/autosub_zh/test_subtitle_output_modes.py)
+- Added [tests/test_workflow_profiles.py](D:/autosub_zh/tests/test_workflow_profiles.py)
+- Added [tests/test_subtitle_output_modes.py](D:/autosub_zh/tests/test_subtitle_output_modes.py)
 - Focused test result during this update:
   - `8 passed`
 

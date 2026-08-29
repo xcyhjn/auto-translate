@@ -166,8 +166,8 @@ Next:
 
 What:
 
-- Ran `python -m py_compile` for `models.py`, `timing.py`, `source_spans.py`, and `test_timing_segmentation.py`.
-- Ran `pytest -q test_timing_segmentation.py`.
+- Ran `python -m py_compile` for `models.py`, `timing.py`, `source_spans.py`, and `tests/test_timing_segmentation.py`.
+- Ran `pytest -q tests/test_timing_segmentation.py`.
 - Removed preview Chinese example fields from `segmentation_preview_metrics.json` so the metrics file only carries English segmentation evidence.
 
 Why:
@@ -218,7 +218,7 @@ What:
 
 - Added `semantic_allocation.py` and `segmentation_qa.py`.
 - Updated `source_repair.py`, `zh_reading_axis.py`, `subtitle_io.py`, `pipeline_core.py`, `pipeline_runner.py`, and `ui_server.py`.
-- Added `test_semantic_qa_phase2.py`.
+- Added `tests/test_semantic_qa_phase2.py`.
 - Wired the frontend QA panel in `web/index.html`, `web/app.js`, and `web/styles.css`.
 - Regenerated Russian sample QA artifacts:
   - `02b_asr_source_repair_candidates.json`
@@ -393,7 +393,7 @@ What:
 
 Result:
 
-- `pytest -q test_timing_segmentation.py test_semantic_qa_phase2.py test_zh_reading_axis.py test_subtitle_output_modes.py test_asr_repair_flow.py`
+- `pytest -q tests/test_timing_segmentation.py tests/test_semantic_qa_phase2.py tests/test_zh_reading_axis.py tests/test_subtitle_output_modes.py tests/test_asr_repair_flow.py`
   - `38 passed in 0.37s`
 - Russian sample regenerated from existing `05_translated_segments.json`:
   - `orphan_tail_group_count = 20`
@@ -498,7 +498,7 @@ Validation:
 
 - `python -m py_compile english_residue_policy.py translate.py span_translate.py qa.py qa_outputs.py entity_normalization.py pipeline_core.py pipeline_runner.py ui_server.py`
 - `node --check web\app.js`
-- `pytest -q test_english_residue_policy.py test_qa_outputs.py test_entity_pipeline_contract.py test_entity_pipeline_integration.py test_workflow_profiles.py test_ui_server_config.py`
+- `pytest -q tests/test_english_residue_policy.py tests/test_qa_outputs.py tests/test_entity_pipeline_contract.py tests/test_entity_pipeline_integration.py tests/test_workflow_profiles.py tests/test_ui_server_config.py`
   - `23 passed in 0.63s`
 - Offline Russian sample scoring from existing `05_translated_segments.json`:
   - `english_residue_total_count = 224`
@@ -536,7 +536,7 @@ What:
 - Added tests:
   - `test_preserve_only_translation_requires_exact_normalized_match`
   - `test_translate_validation_blocks_pure_low_score_person_name`
-  - `test_terminology_short_circuit.py`
+  - `tests/test_terminology_short_circuit.py`
 
 Self-correction:
 
@@ -547,7 +547,7 @@ Self-correction:
 
 Validation:
 
-- `python -m pytest test_english_residue_policy.py test_terminology_short_circuit.py -q`
+- `python -m pytest tests/test_english_residue_policy.py tests/test_terminology_short_circuit.py -q`
   - `12 passed`
 - Generated:
   - `output/Russian-book-about-a-dying-god/08_bilingual_zh_en.english_residue_strict.ass`
@@ -599,7 +599,7 @@ What:
 - Added `source_spans_v2` policy version; stale `04a_source_spans.json` is recomputed before span translation/allocation.
 - Added `span_translation_v2` fingerprint to `05a_span_translated_segments.json`; checkpoint reuse now depends on source text/timing, source spans, glossary, style prompt, model, residue policy, and span selection config.
 - Fixed `force_retranslate_existing_segments=True` so it no longer reuses the span checkpoint.
-- Added `test_span_translation_flow.py`.
+- Added `tests/test_span_translation_flow.py`.
 
 Self-correction:
 
@@ -609,10 +609,10 @@ Self-correction:
 Validation:
 
 - `python -m py_compile source_spans.py span_translate.py pipeline_core.py pipeline_runner.py ui_server.py`
-- `$env:PYTHONPATH='D:\'; python -m pytest test_span_translation_flow.py test_terminology_short_circuit.py test_english_residue_policy.py test_semantic_qa_phase2.py -q`
+- `$env:PYTHONPATH='D:\'; python -m pytest tests/test_span_translation_flow.py tests/test_terminology_short_circuit.py tests/test_english_residue_policy.py tests/test_semantic_qa_phase2.py -q`
   - `30 passed in 0.34s`
 - `node --check web\app.js`
-- `$env:PYTHONPATH='D:\'; python -m pytest test_span_translation_flow.py test_ui_server_config.py -q`
+- `$env:PYTHONPATH='D:\'; python -m pytest tests/test_span_translation_flow.py tests/test_ui_server_config.py -q`
   - `10 passed in 0.31s`
 - Offline Russian sample source-span recalculation from current `03_timed_source_segments.json`:
   - before: `span_first_count = 144`
@@ -649,11 +649,11 @@ What:
 - Enhanced YouTube info/cover API errors with operation, proxy mode, proxy URL, exception type, raw detail, and traceback.
 - Enhanced `youtube_meta.py` errors so `yt-dlp` and cover download failures include whether a proxy was used.
 - Cover fallback now reports both the primary thumbnail failure and fallback URL failure.
-- Added `test_proxy_youtube_diagnostics.py`.
+- Added `tests/test_proxy_youtube_diagnostics.py`.
 
 Validation:
 
-- `$env:PYTHONPATH='D:\'; python -m pytest test_proxy_youtube_diagnostics.py -q`
+- `$env:PYTHONPATH='D:\'; python -m pytest tests/test_proxy_youtube_diagnostics.py -q`
   - `4 passed`
 - `python -m py_compile ui_server.py youtube_meta.py`
 - `node --check web\app.js`
@@ -710,7 +710,7 @@ Self-correction:
 
 Validation:
 
-- `pytest test_bilibili_query_plan.py test_bilibili_candidate_scoring.py test_bilibili_search_parsing.py test_ui_server_bilibili_api.py`
+- `pytest tests/test_bilibili_query_plan.py tests/test_bilibili_candidate_scoring.py tests/test_bilibili_search_parsing.py tests/test_ui_server_bilibili_api.py`
   - first pass: 2 failures, then corrected query ordering and duration boundary
   - final pass: `9 passed`
 - final rerun: `9 passed in 1.29s`
@@ -763,7 +763,7 @@ What:
 
 Validation:
 
-- `pytest test_bilibili_query_plan.py test_bilibili_candidate_scoring.py test_bilibili_search_parsing.py test_ui_server_bilibili_api.py`
+- `pytest tests/test_bilibili_query_plan.py tests/test_bilibili_candidate_scoring.py tests/test_bilibili_search_parsing.py tests/test_ui_server_bilibili_api.py`
   - `10 passed in 1.29s`
 - `python -m py_compile bilibili_search.py ui_server.py`
 - `node --check web\app.js`
@@ -801,7 +801,7 @@ Validation:
 
 - `python -m py_compile bilibili_search.py ui_server.py`
 - `node --check web\app.js`
-- `pytest test_bilibili_query_plan.py test_bilibili_candidate_scoring.py test_bilibili_search_parsing.py test_ui_server_bilibili_api.py`
+- `pytest tests/test_bilibili_query_plan.py tests/test_bilibili_candidate_scoring.py tests/test_bilibili_search_parsing.py tests/test_ui_server_bilibili_api.py`
   - `16 passed in 1.31s`
 - Live regression with YouTube `r6pWz2FnFOk`:
   - `search_state = matched_candidates`
@@ -859,7 +859,7 @@ Validation:
   - `sample_insufficient = true`
   - framework runnable with empty gold set
 - `python -m autosub_zh.feedback_dataset summarize`
-- `pytest test_feedback_dataset.py test_ui_server_bilibili_api.py`
+- `pytest tests/test_feedback_dataset.py tests/test_ui_server_bilibili_api.py`
   - `8 passed`
 - `python -m py_compile feedback_dataset.py ui_server.py`
 - `node --check web\app.js`
@@ -870,7 +870,7 @@ Known unrelated dirty files left untouched:
 - `ui_server_error_trace.log`
 - `ui_server_live_stderr.log`
 - `ui_server_live_stdout.log`
-- `test_asr_gpu_fallback.py`
+- `tests/test_asr_gpu_fallback.py`
 
 ## 2026-06-17 17:45 +08:00 - Subtitle Translation Feedback Refocus
 
@@ -923,7 +923,7 @@ What:
   - difficult span repair
   - AI display rewrite style context
 - Added a UI checkbox labelled `本地翻译反馈`.
-- Added CLI flag `--enable-local-translation-feedback` to `pipeline_demo.py`.
+- Added CLI flag `--enable-local-translation-feedback` to `tools/pipeline_demo.py`.
 - Added `build_translation_style_prompt` as a small testable prompt assembly helper.
 
 Guardrails:
@@ -957,7 +957,7 @@ Verification:
 
 - `node --check web\app.js`
 - `python -m py_compile ui_server.py`
-- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py`
+- `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py`
 - In-app browser smoke test on `http://127.0.0.1:8789/`:
   - page title `Autosub Studio`;
   - no console error/warn logs;
@@ -1004,7 +1004,7 @@ Verification:
 
 - `python -m py_compile feedback_dataset.py ui_server.py`
 - `node --check web\app.js`
-- `pytest test_feedback_dataset.py`
+- `pytest tests/test_feedback_dataset.py`
 - `py -m autosub_zh.feedback_dataset dedupe`
 - `py -m autosub_zh.feedback_dataset validate`
 - `py -m autosub_zh.feedback_dataset build-gold`
@@ -1048,7 +1048,7 @@ Verification:
 
 - `python -m py_compile feedback_dataset.py span_translate.py pipeline_core.py ui_server.py`
 - `node --check web\app.js`
-- `pytest test_feedback_dataset.py test_span_translation_flow.py test_ui_server_bilibili_api.py`
+- `pytest tests/test_feedback_dataset.py tests/test_span_translation_flow.py tests/test_ui_server_bilibili_api.py`
 - `py -m autosub_zh.feedback_dataset validate`
 - `py -m autosub_zh.feedback_dataset collect-span-style --project "D:\autosub_zh\output\已发归档\An-Ignorant-Guide-to-Shoegaze"`
 - `py -m autosub_zh.feedback_dataset build-gold`
@@ -1089,7 +1089,7 @@ Verification:
 
 - `python -m py_compile feedback_dataset.py ui_server.py`
 - `node --check web\app.js`
-- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py`
+- `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py`
 - `py -m autosub_zh.feedback_dataset dedupe`
 - `py -m autosub_zh.feedback_dataset validate`
 - `py -m autosub_zh.feedback_dataset build-gold`
@@ -1122,7 +1122,7 @@ Verification:
 
 - `node --check web\app.js`
 - `python -m py_compile ui_server.py feedback_dataset.py span_translate.py pipeline_core.py`
-- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`
+- `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
 
 Notes:
 
@@ -1147,7 +1147,7 @@ Verification:
 
 - `node --check web\app.js`
 - `python -m py_compile ui_server.py feedback_dataset.py`
-- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`
+- `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
 
 Correction:
 
@@ -1172,7 +1172,7 @@ What:
 Verification:
 
 - `node --check web\app.js`
-- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`
+- `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
 
 ## 2026-06-17 23:15 +08:00 - Top-Pinned ASS Artifact Naming
 
@@ -1198,9 +1198,9 @@ What:
 
 Verification:
 
-- `python -m py_compile workflow_profiles.py pipeline_core.py ui_server.py feedback_dataset.py cli.py style_learning_cli.py fix_ru_xiu_xiu_title.py`
+- `python -m py_compile workflow_profiles.py pipeline_core.py ui_server.py feedback_dataset.py cli.py style_learning_cli.py tools/fixes/fix_ru_xiu_xiu_title.py`
 - `node --check web\app.js`
-- `pytest test_subtitle_output_modes.py test_feedback_dataset.py test_ui_server_bilibili_api.py test_span_translation_flow.py`
+- `pytest tests/test_subtitle_output_modes.py tests/test_feedback_dataset.py tests/test_ui_server_bilibili_api.py tests/test_span_translation_flow.py`
 
 ## 2026-06-17 23:25 +08:00 - Pipeline ASS Manifest Cleanup
 
@@ -1219,7 +1219,7 @@ What:
 Verification:
 
 - `python -m py_compile pipeline_core.py workflow_profiles.py ui_server.py feedback_dataset.py`
-- `pytest test_subtitle_output_modes.py test_feedback_dataset.py test_ui_server_bilibili_api.py test_span_translation_flow.py`
+- `pytest tests/test_subtitle_output_modes.py tests/test_feedback_dataset.py tests/test_ui_server_bilibili_api.py tests/test_span_translation_flow.py`
 
 ## 2026-06-17 23:55 +08:00 - Bilibili Check Decoupling and Release Artifact Health
 
@@ -1254,8 +1254,8 @@ Verification:
 
 - `python -m py_compile ui_server.py feedback_dataset.py pipeline_core.py span_translate.py`
 - `node --check web\app.js`
-- `pytest test_ui_server_bilibili_api.py test_feedback_dataset.py test_span_translation_flow.py`
-- `pytest test_subtitle_output_modes.py`
+- `pytest tests/test_ui_server_bilibili_api.py tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
+- `pytest tests/test_subtitle_output_modes.py`
 
 ## 2026-06-17 23:01 +08:00 - Feedback Review UI and Learning Quality Panel
 
@@ -1294,10 +1294,10 @@ Verification:
 
 - `python -m py_compile ui_server.py feedback_dataset.py pipeline_core.py workflow_profiles.py`
 - `node --check web\app.js`
-- `git diff --check -- ui_server.py pipeline_core.py web\app.js web\index.html web\styles.css test_ui_server_bilibili_api.py`
-- `pytest test_ui_server_bilibili_api.py`
-- `pytest test_feedback_dataset.py test_span_translation_flow.py`
-- `pytest test_subtitle_output_modes.py`
+- `git diff --check -- ui_server.py pipeline_core.py web\app.js web\index.html web\styles.css tests/test_ui_server_bilibili_api.py`
+- `pytest tests/test_ui_server_bilibili_api.py`
+- `pytest tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
+- `pytest tests/test_subtitle_output_modes.py`
 - Direct data check showed current local dataset has 5 pending ASS records, 7 pending Span records, 1101 ASS edit records, and 7 Span examples.
 
 ## 2026-06-17 23:18 +08:00 - Learning Quality Diagnostics and Actions
@@ -1355,10 +1355,10 @@ Verification:
 
 - `python -m py_compile ui_server.py feedback_dataset.py`
 - `node --check web\app.js`
-- `git diff --check -- ui_server.py web\app.js web\styles.css test_ui_server_bilibili_api.py`
-- `pytest test_ui_server_bilibili_api.py`
-- `pytest test_feedback_dataset.py test_span_translation_flow.py`
-- `pytest test_subtitle_output_modes.py`
+- `git diff --check -- ui_server.py web\app.js web\styles.css tests/test_ui_server_bilibili_api.py`
+- `pytest tests/test_ui_server_bilibili_api.py`
+- `pytest tests/test_feedback_dataset.py tests/test_span_translation_flow.py`
+- `pytest tests/test_subtitle_output_modes.py`
 
 ## 2026-06-18 00:00 +08:00 - A/B Eval Action Loop v1
 
@@ -1398,5 +1398,5 @@ Verification:
 
 - `python -m py_compile ui_server.py feedback_ab_eval.py feedback_dataset.py pipeline_core.py span_translate.py`
 - `node --check web\app.js`
-- `pytest test_feedback_dataset.py test_ui_server_bilibili_api.py -q`
-- `pytest test_feedback_dataset.py test_ui_server_bilibili_api.py test_span_translation_flow.py test_subtitle_output_modes.py -q`
+- `pytest tests/test_feedback_dataset.py tests/test_ui_server_bilibili_api.py -q`
+- `pytest tests/test_feedback_dataset.py tests/test_ui_server_bilibili_api.py tests/test_span_translation_flow.py tests/test_subtitle_output_modes.py -q`
